@@ -37,7 +37,7 @@ If you are using Gradle, you can add this to your build file:
 implementation 'org.lattejava:http:1.0.0'
 ```
 
-If you are using Savant, you can add this to your build file:
+If you are using Latte, you can add this to your build file:
 
 ```groovy
 dependency(id: "org.lattejava:http:1.0.0")
