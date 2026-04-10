@@ -22,6 +22,7 @@ jobs:
       - name: Install Savant Build
         run: |
           curl -sL savantbuild.org/install | bash
+          mkdir -p ~/.config/savant/plugins
           cat <<EOF > ~/.config/savant/plugins/org.savantbuild.plugin.java.properties
           21=${JAVA_HOME_21_X64}
           EOF
