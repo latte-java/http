@@ -19,6 +19,8 @@ jobs:
           distribution: 'temurin'
           java-version: |
             21
+      - name: Add hosts entry
+        run: echo "127.0.0.1 local.lattejava.org" | sudo tee -a /etc/hosts
       - name: Install Savant Build
         run: |
           curl -sL savantbuild.org/install | bash
