@@ -2,7 +2,7 @@
 
 ### Latest versions
 
-* Latest stable version: `1.0.0`
+* Latest stable version: `0.1.0`
    * Now with 100% more virtual threads!
 * Prior stable version `0.3.7` 
 
@@ -12,36 +12,27 @@ The goal of this project is to build a full-featured HTTP server and client in p
 For more information about Project Loom and virtual threads, please review the following link.
 * https://blogs.oracle.com/javamagazine/post/java-virtual-threads
 
+
+## FusionAuth's HTTP server
+
+This library is a fork of FusionAuth's java-http library. Brian Pontarelli and Daniel DeGroff wrote that library while working on FusionAuth. When Brian and Daniel started the Latte Project, they decided it was simplest to simply copy the code from the FusionAuth library and continue on with it.
+
 ## Project Goals
 
 - Very fast
 - Easy to make a simple web server like you can in Node.js
 - No dependencies
-- To not boil the ocean. This is a purpose built HTTP server that probably won't do everything.
+- To not boil the ocean. This is a purpose-built HTTP server that probably won't do everything
 
 ## Installation
-
-To add this library to your project, you can include this dependency in your Maven POM:
-
-```xml
-<dependency>
-  <groupId>org.lattejava</groupId>
-  <artifactId>http</artifactId>
-  <version>1.0.0</version>
-</dependency>
-```
-
-If you are using Gradle, you can add this to your build file:
-
-```groovy
-implementation 'org.lattejava:http:1.0.0'
-```
 
 If you are using Latte, you can add this to your build file:
 
 ```groovy
-dependency(id: "org.lattejava:http:1.0.0")
+dependency(id: "org.lattejava:http:0.1.0")
 ```
+
+**NOTE:** We might support Maven in the future, but the plan for now is to support the Latte CLI tool.
 
 ## Examples Usages:
 
@@ -173,29 +164,29 @@ Then you can open `https://example.org` in a browser or call it using an HTTP cl
 
 ## Performance
 
-A key purpose for this project is to obtain screaming performance. Here are benchmark results comparing `java-http` against other Java HTTP servers.
+A key purpose for this project is to obtain screaming performance. Here are benchmark results comparing Latte's `http` against other Java HTTP servers.
 
-These benchmarks ensure `java-http` stays near the top in raw throughput, and we'll be working on claiming the top position -- even if only for bragging rights, since in practice your database and application code will be the bottleneck long before the HTTP server.
+These benchmarks ensure `http` stays near the top in raw throughput, and we'll be working on claiming the top position -- even if only for bragging rights, since in practice your database and application code will be the bottleneck long before the HTTP server.
 
 All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over HTTP (no TLS) to isolate server performance.
 
-| Server | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs java-http |
-|--------|-------------:|-------------:|------------------:|------------------:|-------------:|
-| java-http      |      114,483 |            0 |              0.86 |              1.68 |       100.0% |
-| JDK HttpServer |       89,870 |            0 |              1.08 |              2.44 |        78.5% |
-| Jetty          |      111,500 |            0 |              1.17 |             11.89 |        97.3% |
-| Netty          |      117,119 |            0 |              0.85 |              1.75 |       102.3% |
-| Apache Tomcat  |      102,030 |            0 |              0.94 |              2.41 |        89.1% |
+| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
+| Latte http     |      114,483 |            0 |             0.86 |             1.68 |        100.0% |
+| JDK HttpServer |       89,870 |            0 |             1.08 |             2.44 |         78.5% |
+| Jetty          |      111,500 |            0 |             1.17 |            11.89 |         97.3% |
+| Netty          |      117,119 |            0 |             0.85 |             1.75 |        102.3% |
+| Apache Tomcat  |      102,030 |            0 |             0.94 |             2.41 |         89.1% |
 
 #### Under stress (1,000 concurrent connections)
 
-| Server | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs java-http |
-|--------|-------------:|-------------:|------------------:|------------------:|-------------:|
-| java-http      |      114,120 |            0 |              8.68 |             11.88 |       100.0% |
-| JDK HttpServer |       50,870 |      17655.7 |              6.19 |             22.61 |        44.5% |
-| Jetty          |      108,434 |            0 |              9.20 |             14.83 |        95.0% |
-| Netty          |      115,105 |            0 |              8.61 |             10.09 |       100.8% |
-| Apache Tomcat  |       99,163 |            0 |              9.88 |             18.77 |        86.8% |
+| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
+| Latte http     |      114,120 |            0 |             8.68 |            11.88 |        100.0% |
+| JDK HttpServer |       50,870 |      17655.7 |             6.19 |            22.61 |         44.5% |
+| Jetty          |      108,434 |            0 |             9.20 |            14.83 |         95.0% |
+| Netty          |      115,105 |            0 |             8.61 |            10.09 |        100.8% |
+| Apache Tomcat  |       99,163 |            0 |             9.88 |            18.77 |         86.8% |
 
 _JDK HttpServer (`com.sun.net.httpserver`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._
 
@@ -246,14 +237,16 @@ See [load-tests/README.md](load-tests/README.md) for full usage and options.
 
 ### Why virtual threads and not NIO?
 
-Let's face it, NIO is insanely complex to write and maintain. The first 3 versions of `java-http` used NIO with non-blocking selectors, and we encountered numerous bugs, performance issues, etc. If you compare the `0.3-maintenance` branch with `main` of this project, you'll quickly see that switching to virtual threads and standard blocking I/O made our code **MUCH** simpler.
+Let's face it, NIO is insanely complex to write and maintain. The first three versions of FusionAuth's `java-http` (the library this project is based on) used NIO with non-blocking selectors. We encountered a ton bugs, performance issues, etc. If you compare the `0.3-maintenance` branch with `main` of that project, you'll quickly see that switching to virtual threads and standard blocking I/O made our code **MUCH** simpler. 
+
+Therefore, when we moved the HTTP server out of FusionAuth and into The Latte Project, we just continued along the path with virtual threads.
 
 ## Helping out
 
-We are looking for Java developers that are interested in helping us build the client and server. If you know a ton about networks and protocols and love writing clean, high-performance Java, contact us at `dev@lattejava.org`.
+We are looking for Java developers that are interested in helping us build the client and server. If you know a ton about networks and protocols and love writing clean, high-performance Java, contact us via GitHub.
 
-## Building with Savant
+## Building with Latte
 
-**Note:** This project uses the Savant build tool. The Savant Build website has detailed instructions on installing and using Savant:
+**Note:** This project uses the Latte CLI tool. The Latte Project website has detailed instructions on installing and using Latte:
 
-https://savantbuild.org
+https://lattejava.org

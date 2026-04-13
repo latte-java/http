@@ -7,7 +7,7 @@ restifyVersion = "4.2.1"
 slf4jVersion = "2.0.17"
 testngVersion = "7.11.0"
 
-project(group: "org.lattejava", name: "http", version: "1.0.0", licenses: ["MIT"]) {
+project(group: "org.lattejava", name: "http", version: "0.1.0", licenses: ["MIT"]) {
   workflow {
     standard()
   }
@@ -39,12 +39,11 @@ project(group: "org.lattejava", name: "http", version: "1.0.0", licenses: ["MIT"
 }
 
 // Plugins
-dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.1.1")
-java = loadPlugin(id: "org.lattejava.plugin:java:0.1.1")
-javaTestNG = loadPlugin(id: "org.lattejava.plugin:java-testng:0.1.1")
-idea = loadPlugin(id: "org.lattejava.plugin:idea:0.1.1")
-release = loadPlugin(id: "org.lattejava.plugin:release-git:0.1.2")
-pom = loadPlugin(id: "org.lattejava.plugin:pom:0.1.1")
+dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.1.4")
+java = loadPlugin(id: "org.lattejava.plugin:java:0.1.4")
+javaTestNG = loadPlugin(id: "org.lattejava.plugin:java-testng:0.1.4")
+idea = loadPlugin(id: "org.lattejava.plugin:idea:0.1.4")
+release = loadPlugin(id: "org.lattejava.plugin:release-git:0.1.4")
 
 java.settings.javaVersion = "21"
 javaTestNG.settings.javaVersion = "21"
@@ -90,15 +89,9 @@ target(name: "idea", description: "Updates the IntelliJ IDEA module file", depen
 }
 
 target(name: "pom", description: "Updates the pom.xml file") {
-  pom.update()
+  fail("No POM support yet")
 }
 
 target(name: "print-dependency-tree", description: "Prints the dependency tree") {
   dependency.printFull()
-}
-
-target(name: "publish", description: "Publish to MVN repo", dependsOn: ["clean", "build"]) {
-  if (new ProcessBuilder('mvn', 'clean', 'deploy', '-Prelease').inheritIO().start().waitFor() != 0) {
-    fail("deploy failed")
-  }
 }
