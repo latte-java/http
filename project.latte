@@ -7,7 +7,7 @@ restifyVersion = "4.2.1"
 slf4jVersion = "2.0.17"
 testngVersion = "7.11.0"
 
-project(group: "org.lattejava", name: "http", version: "0.1.0", licenses: ["MIT"]) {
+project(group: "org.lattejava", name: "http", version: "0.1.1", licenses: ["MIT"]) {
   workflow {
     standard()
   }
@@ -39,15 +39,15 @@ project(group: "org.lattejava", name: "http", version: "0.1.0", licenses: ["MIT"
 }
 
 // Plugins
-dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.1.4")
-java = loadPlugin(id: "org.lattejava.plugin:java:0.1.4")
-javaTestNG = loadPlugin(id: "org.lattejava.plugin:java-testng:0.1.4")
-idea = loadPlugin(id: "org.lattejava.plugin:idea:0.1.4")
-release = loadPlugin(id: "org.lattejava.plugin:release-git:0.1.4")
+dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.1.5")
+java = loadPlugin(id: "org.lattejava.plugin:java:0.1.5")
+javaTestNG = loadPlugin(id: "org.lattejava.plugin:java-testng:0.1.5")
+idea = loadPlugin(id: "org.lattejava.plugin:idea:0.1.5")
+release = loadPlugin(id: "org.lattejava.plugin:release-git:0.1.5")
 
 java.settings.javaVersion = "21"
 javaTestNG.settings.javaVersion = "21"
-javaTestNG.settings.jvmArguments = "--add-exports java.base/sun.security.x509=ALL-UNNAMED --add-exports java.base/sun.security.util=ALL-UNNAMED "
+javaTestNG.settings.jvmArguments = "--add-modules java.net.http --add-reads org.lattejava.http=java.net.http --add-exports java.base/sun.security.x509=org.lattejava.http --add-exports java.base/sun.security.util=org.lattejava.http"
 javaTestNG.settings.testngArguments = "-listener org.lattejava.http.BaseTest\$TestListener"
 
 target(name: "clean", description: "Cleans the build directory") {
@@ -55,10 +55,12 @@ target(name: "clean", description: "Cleans the build directory") {
 }
 
 target(name: "build", description: "Compiles the Java source files and creates a JAR") {
-  // We want to file compile on prod code if we need any -add-exports, so separate the prod and test compiles
+  // The main code uses module-info.java for everything, so the args should be empty
   java.settings.compilerArguments = ""
   java.compileMain()
-  java.settings.compilerArguments = "--add-exports java.base/sun.security.x509=ALL-UNNAMED --add-exports java.base/sun.security.util=ALL-UNNAMED -XDignore.symbol.file"
+
+  // The test code needs the HTTP client and the internal x509 classes to run the tests
+  java.settings.compilerArguments = "--add-modules java.net.http --add-reads org.lattejava.http=java.net.http --add-exports java.base/sun.security.x509=org.lattejava.http --add-exports java.base/sun.security.util=org.lattejava.http"
   java.compileTest()
 
   java.jar()
