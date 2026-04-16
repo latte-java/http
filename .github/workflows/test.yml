@@ -23,9 +23,9 @@ jobs:
         run: echo "127.0.0.1 local.lattejava.org" | sudo tee -a /etc/hosts
       - name: Install Savant Build
         run: |
-          curl -sL savantbuild.org/install | bash
-          mkdir -p ~/.config/savant/plugins
-          cat <<EOF > ~/.config/savant/plugins/org.savantbuild.plugin.java.properties
+          curl -fsSL https://lattejava.org/cli/install | bash
+          mkdir -p ~/.config/latte/plugins
+          cat <<EOF > ~/.config/latte/plugins/org.savantbuild.plugin.java.properties
           21=${JAVA_HOME_21_X64}
           EOF
         shell: bash
@@ -33,7 +33,7 @@ jobs:
         run: |
           export JAVA_HOME=${JAVA_HOME_21_X64}
           export PATH=~/.local/bin:${JAVA_HOME}/bin:$PATH
-          sb clean int --excludePerformance --excludeTimeouts
+          latte clean int --excludePerformance --excludeTimeouts
         shell: bash
       - name: Archive TestNG reports
         if: failure()
