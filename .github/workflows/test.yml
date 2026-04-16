@@ -22,7 +22,6 @@ jobs:
           curl -fsSL https://lattejava.org/cli/install | bash
           ~/.local/bin/javaenv install 21
           ~/.local/bin/javaenv install 25
-          EOF
         shell: bash
       - name: Run the build
         run: |
