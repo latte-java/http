@@ -22,6 +22,11 @@ jobs:
           curl -fsSL https://lattejava.org/cli/install | bash
           ~/.local/bin/javaenv install 21
           ~/.local/bin/javaenv install 25
+          cat <<EOF > ~/.config/latte/config.properties
+          latteRepositoryS3AccessKeyID=fake
+          latteRepositoryS3SecretAccessKey=fakse
+          latteRepositoryS3URL=https://fake.r2.cloudflarestorage.com⏎
+          EOF
         shell: bash
       - name: Run the build
         run: |
