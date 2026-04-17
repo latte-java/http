@@ -31,7 +31,7 @@ latte test --skipTests               # Skip all tests (useful with int target)
 
 - Java 21 required (specified in `project.latte`)
 - Test JVM needs `--add-exports java.base/sun.security.x509=ALL-UNNAMED --add-exports java.base/sun.security.util=ALL-UNNAMED` (for self-signed cert generation in tests)
-- Tests use a custom TestNG listener: `org.lattejava.http.BaseTest$TestListener`
+- Tests use a custom TestNG listener: `org.lattejava.http.server.BaseTest$TestListener`
 - Zero production dependencies; test deps: jackson5, restify, testng, slf4j-nop
 
 ## Architecture

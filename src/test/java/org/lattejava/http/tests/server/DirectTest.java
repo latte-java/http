@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.net.Socket;
 
@@ -21,7 +21,7 @@ import java.net.Socket;
  * @author Brian Pontarelli
  */
 public class DirectTest {
-  public static void main(String[] args) throws Exception {
+  static void main(String[] args) throws Exception {
     try (Socket socket = new Socket("127.0.0.1", 8080)) {
       var os = socket.getOutputStream();
       os.write("GET /css/style.css?1.51.2 HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/8.7.1\r\nAccept: */*\r\n\r\n".getBytes());

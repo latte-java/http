@@ -13,18 +13,20 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http.io;
+package org.lattejava.http.tests.io;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 
-import org.lattejava.http.BaseTest;
 import org.lattejava.http.HTTPValues.Headers;
+import org.lattejava.http.io.PushbackInputStream;
 import org.lattejava.http.server.HTTPRequest;
 import org.lattejava.http.server.HTTPServerConfiguration;
 import org.lattejava.http.server.io.HTTPInputStream;
+import org.lattejava.http.tests.server.BaseTest;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 
 /**

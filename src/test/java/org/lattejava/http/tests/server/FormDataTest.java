@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -33,6 +33,7 @@ import org.lattejava.http.server.HTTPHandler;
 import org.lattejava.http.server.HTTPServer;
 import org.lattejava.http.server.HTTPServerConfiguration;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNull;
 
@@ -275,7 +276,7 @@ public class FormDataTest extends BaseTest {
           bodyParameters.add("param" + String.format("%05d", i) + "=" + value);
         }
 
-        if (bodyParameters.size() > 0) {
+        if (!bodyParameters.isEmpty()) {
           body += String.join("&", bodyParameters);
         }
 
@@ -301,7 +302,7 @@ public class FormDataTest extends BaseTest {
           headers.add("header" + String.format("%05d", i) + ": " + "X".repeat(headerSize));
         }
 
-        if (headers.size() > 0) {
+        if (!headers.isEmpty()) {
           request += String.join("\r\n", headers) + "\r\n";
         }
 

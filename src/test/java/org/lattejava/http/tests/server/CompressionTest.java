@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -39,10 +39,8 @@ import org.lattejava.http.server.CountingInstrumenter;
 import org.lattejava.http.server.HTTPHandler;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotEquals;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertNull;
+
+import static org.testng.Assert.*;
 import static org.testng.AssertJUnit.fail;
 
 /**
@@ -51,7 +49,7 @@ import static org.testng.AssertJUnit.fail;
  * @author Brian Pontarelli
  */
 public class CompressionTest extends BaseTest {
-  private final Path file = Paths.get("src/test/java/org/lattejava/http/ChunkedTest.java");
+  private final Path file = Paths.get("src/test/java/org/lattejava/http/tests/server/ChunkedTest.java");
 
   @DataProvider(name = "chunkedSchemes")
   public Object[][] chunkedSchemes() {
@@ -133,8 +131,8 @@ public class CompressionTest extends BaseTest {
                      .header(Headers.TransferEncoding, "chunked")
                      .POST(BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(requestPayload)))
                      .build(),
-          r -> BodySubscribers.ofInputStream()
-      );
+          _ -> BodySubscribers.ofInputStream()
+                                );
 
       assertEquals(response.statusCode(), 200);
       String expectedResponseEncoding = null;
@@ -165,7 +163,7 @@ public class CompressionTest extends BaseTest {
 
   @Test
   public void compressBadContentLength() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setCompress(true);
       res.setContentLength(1_000_000); // Ignored
       res.setHeader(Headers.ContentType, "text/plain");
@@ -187,7 +185,7 @@ public class CompressionTest extends BaseTest {
                                             .uri(uri)
                                             .GET()
                                             .build(),
-          r -> BodySubscribers.ofInputStream());
+          _ -> BodySubscribers.ofInputStream());
       assertEquals(response.headers().firstValue(Headers.ContentEncoding).orElse(null), ContentEncodings.Gzip);
       assertEquals(response.statusCode(), 200);
       assertEquals(new String(new GZIPInputStream(response.body()).readAllBytes(), StandardCharsets.UTF_8), Files.readString(file));
@@ -196,7 +194,7 @@ public class CompressionTest extends BaseTest {
 
   @Test(groups = "performance")
   public void compressPerformance() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       // Use case, do not call response.setCompress(true)
       res.setHeader(Headers.ContentType, "text/plain");
       res.setStatus(200);
@@ -218,8 +216,8 @@ public class CompressionTest extends BaseTest {
         long start = System.currentTimeMillis();
         for (int i = 0; i < counter; i++) {
           var response = compress
-              ? client.send(HttpRequest.newBuilder().header(Headers.AcceptEncoding, ContentEncodings.Gzip).uri(uri).GET().build(), r -> BodySubscribers.ofInputStream())
-              : client.send(HttpRequest.newBuilder().header(Headers.AcceptEncoding, ContentEncodings.Gzip).uri(uri).GET().build(), r -> BodySubscribers.ofString(StandardCharsets.UTF_8));
+              ? client.send(HttpRequest.newBuilder().header(Headers.AcceptEncoding, ContentEncodings.Gzip).uri(uri).GET().build(), _ -> BodySubscribers.ofInputStream())
+              : client.send(HttpRequest.newBuilder().header(Headers.AcceptEncoding, ContentEncodings.Gzip).uri(uri).GET().build(), _ -> BodySubscribers.ofString(StandardCharsets.UTF_8));
 
           var result = compress
               ? new String(new GZIPInputStream((InputStream) response.body()).readAllBytes(), StandardCharsets.UTF_8)
@@ -257,7 +255,7 @@ public class CompressionTest extends BaseTest {
 
     HTTPHandler handler = (req, res) -> {
 
-      assertEquals(req.isChunked(), false);
+      assertFalse(req.isChunked());
 
       // We forced a Content-Length by telling the JDK client not to chunk, so it will be present.
       // - We can still correctly use the Content-Length because it is used by the FixedLengthInputStream which
@@ -290,8 +288,8 @@ public class CompressionTest extends BaseTest {
                      .header(Headers.ContentType, "text/plain")
                      .POST(bodyPublisher)
                      .build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                );
 
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), "");
@@ -358,7 +356,7 @@ public class CompressionTest extends BaseTest {
   public void requestedButNotAccepted(String scheme, boolean chunked) throws Exception {
     // Use case: setCompress(true), but the request does not contain the 'Accept-Encoding' header.
     //     Result: no compression
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setCompress(true);
       res.setHeader(Headers.ContentType, "text/plain");
       res.setStatus(200);
@@ -382,8 +380,8 @@ public class CompressionTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                );
 
       assertNull(response.headers().firstValue(Headers.ContentEncoding).orElse(null));
       assertEquals(response.statusCode(), 200);
@@ -395,7 +393,7 @@ public class CompressionTest extends BaseTest {
   public void requestedButNotAccepted_unSupportedEncoding(String scheme, boolean chunked) throws Exception {
     // Use case: setCompress(true), and 'Accept-Encoding: br' which is valid, but not yet supported
     //     Result: no compression
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setCompress(true);
 
       // Testing an indecisive user, can't make up their mind... this is allowed as long as you have not written ay bytes.
@@ -435,8 +433,8 @@ public class CompressionTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().header(Headers.AcceptEncoding, "br").uri(uri).GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                );
 
       assertNull(response.headers().firstValue(Headers.ContentEncoding).orElse(null));
       assertEquals(response.statusCode(), 200);
@@ -447,7 +445,7 @@ public class CompressionTest extends BaseTest {
   @Test(dataProvider = "schemes")
   public void unsupportedContentType(String scheme) throws Exception {
     // Use case: Tell the server we encoded the request using 'br'
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setHeader(Headers.ContentType, "text/plain");
       res.setStatus(200);
     };
@@ -466,8 +464,8 @@ public class CompressionTest extends BaseTest {
                      .header(Headers.ContentType, "text/plain")
                      .POST(bodyPublisher)
                      .build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                );
 
       // Expect a 415 w/ an empty body response
       assertEquals(response.statusCode(), 415);

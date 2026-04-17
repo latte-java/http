@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http.io;
+package org.lattejava.http.tests.io;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -21,18 +21,16 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import org.lattejava.http.FileInfo;
 import org.lattejava.http.ParseException;
+import org.lattejava.http.io.*;
 import org.testng.annotations.AfterTest;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 import static org.testng.FileAssert.fail;
 
@@ -112,12 +110,12 @@ public class MultipartStreamTest {
     stream.process(parameters, files);
 
     assertEquals(files.size(), 1);
-    assertEquals(files.get(0).contentType, "application/octet-stream");
-    assertEquals(Files.readString(files.get(0).file), "filecontents");
-    assertEquals(files.get(0).fileName, "foo.jpg");
-    assertEquals(files.get(0).name, "foo");
+    assertEquals(files.getFirst().contentType, "application/octet-stream");
+    assertEquals(Files.readString(files.getFirst().file), "filecontents");
+    assertEquals(files.getFirst().fileName, "foo.jpg");
+    assertEquals(files.getFirst().name, "foo");
 
-    Files.delete(files.get(0).file);
+    Files.delete(files.getFirst().file);
   }
 
   @Test
@@ -140,12 +138,12 @@ public class MultipartStreamTest {
     assertEquals(parameters.get("foo"), List.of("bar"));
 
     assertEquals(files.size(), 1);
-    assertEquals(files.get(0).contentType, "application/octet-stream");
-    assertEquals(Files.readString(files.get(0).file), "filecontents");
-    assertEquals(files.get(0).fileName, "foo.jpg");
-    assertEquals(files.get(0).name, "file");
+    assertEquals(files.getFirst().contentType, "application/octet-stream");
+    assertEquals(Files.readString(files.getFirst().file), "filecontents");
+    assertEquals(files.getFirst().fileName, "foo.jpg");
+    assertEquals(files.getFirst().name, "file");
 
-    Files.delete(files.get(0).file);
+    Files.delete(files.getFirst().file);
   }
 
   @Test
@@ -210,12 +208,12 @@ public class MultipartStreamTest {
     assertEquals(parameters.get("foo"), List.of("bar"));
 
     assertEquals(files.size(), 1);
-    assertEquals(files.get(0).contentType, "application/octet-stream");
-    assertEquals(Files.readString(files.get(0).file), "filecontents");
-    assertEquals(files.get(0).fileName, "foo.jpg");
-    assertEquals(files.get(0).name, "file");
+    assertEquals(files.getFirst().contentType, "application/octet-stream");
+    assertEquals(Files.readString(files.getFirst().file), "filecontents");
+    assertEquals(files.getFirst().fileName, "foo.jpg");
+    assertEquals(files.getFirst().name, "file");
 
-    Files.delete(files.get(0).file);
+    Files.delete(files.getFirst().file);
   }
 
   @Test

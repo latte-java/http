@@ -13,38 +13,17 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
 import java.math.BigInteger;
-import java.net.CookieHandler;
-import java.net.Socket;
-import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.net.URI;
+import java.net.*;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
-import java.security.GeneralSecurityException;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.KeyStore;
-import java.security.NoSuchAlgorithmException;
-import java.security.PrivateKey;
-import java.security.PublicKey;
-import java.security.cert.CertPath;
-import java.security.cert.CertPathParameters;
-import java.security.cert.CertPathValidator;
-import java.security.cert.CertPathValidatorException;
+import java.security.*;
+import java.security.cert.*;
 import java.security.cert.Certificate;
-import java.security.cert.CertificateFactory;
-import java.security.cert.PKIXParameters;
-import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -66,36 +45,14 @@ import org.lattejava.http.log.FileLoggerFactory;
 import org.lattejava.http.log.Level;
 import org.lattejava.http.log.LoggerFactory;
 import org.lattejava.http.security.SecurityTools;
-import org.lattejava.http.server.AlwaysContinueExpectValidator;
-import org.lattejava.http.server.ExpectValidator;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPListenerConfiguration;
-import org.lattejava.http.server.HTTPServer;
-import org.lattejava.http.server.Instrumenter;
+import org.lattejava.http.server.*;
 import org.testng.ITestListener;
 import org.testng.ITestResult;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.AfterSuite;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.BeforeSuite;
-import org.testng.annotations.DataProvider;
+import org.testng.annotations.*;
 import sun.security.util.KnownOIDs;
 import sun.security.util.ObjectIdentifier;
-import sun.security.x509.AlgorithmId;
-import sun.security.x509.BasicConstraintsExtension;
-import sun.security.x509.CertificateAlgorithmId;
-import sun.security.x509.CertificateExtensions;
-import sun.security.x509.CertificateSerialNumber;
-import sun.security.x509.CertificateValidity;
-import sun.security.x509.CertificateVersion;
-import sun.security.x509.CertificateX509Key;
-import sun.security.x509.DNSName;
-import sun.security.x509.GeneralName;
-import sun.security.x509.GeneralNames;
-import sun.security.x509.SubjectAlternativeNameExtension;
-import sun.security.x509.X500Name;
-import sun.security.x509.X509CertImpl;
-import sun.security.x509.X509CertInfo;
+import sun.security.x509.*;
+
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.fail;
 
@@ -138,12 +95,12 @@ public abstract class BaseTest {
 
   public static KeyPair rootKeyPair;
 
-  protected boolean verbose;
-
   static {
     System.setProperty("sun.net.http.retryPost", "false");
     System.setProperty("jdk.httpclient.allowRestrictedHeaders", "connection");
   }
+
+  protected boolean verbose;
 
   /**
    * Generates keypairs and certificates for Root CA -> Intermediate -> Server Certificate.

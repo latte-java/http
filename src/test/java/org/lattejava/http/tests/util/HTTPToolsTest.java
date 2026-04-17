@@ -13,29 +13,26 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http.util;
+package org.lattejava.http.tests.util;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
 import com.inversoft.json.ToString;
-import org.lattejava.http.BaseTest;
 import org.lattejava.http.HTTPMethod;
 import org.lattejava.http.io.PushbackInputStream;
 import org.lattejava.http.server.HTTPRequest;
 import org.lattejava.http.server.HTTPServerConfiguration;
-import org.lattejava.http.server.internal.HTTPBuffers;
 import org.lattejava.http.server.io.HTTPInputStream;
+import org.lattejava.http.tests.server.BaseTest;
+import org.lattejava.http.util.HTTPTools;
 import org.lattejava.http.util.HTTPTools.HeaderValue;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 
 /**
@@ -236,8 +233,7 @@ public class HTTPToolsTest extends BaseTest {
     PushbackInputStream pushbackInputStream = new PushbackInputStream(is, null);
 
     HTTPRequest httpRequest = new HTTPRequest();
-    HTTPBuffers buffers = new HTTPBuffers(configuration);
-    byte[] requestBuffer = buffers.requestBuffer();
+    byte[] requestBuffer = new byte[configuration.getRequestBufferSize()];
 
     HTTPTools.initialize(configuration.getLoggerFactory());
     HTTPTools.parseRequestPreamble(pushbackInputStream, 128 * 1024, httpRequest, requestBuffer, () -> {

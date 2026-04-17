@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -25,15 +25,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.AlwaysContinueExpectValidator;
-import org.lattejava.http.server.CountingInstrumenter;
-import org.lattejava.http.server.ExpectValidator;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
+import org.lattejava.http.server.*;
 import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+
+import static org.testng.Assert.*;
 
 /**
  * Tests the HTTP server response to 'Expect: 100 Continue'.
@@ -96,8 +91,8 @@ public class ExpectTest extends BaseTest {
         URI uri = makeURI(scheme, "");
         var response = client.send(
             HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").expectContinue(true).POST(BodyPublishers.ofString(RequestBody)).build(),
-            r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-        );
+            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                  );
 
         assertEquals(response.statusCode(), 200);
         assertEquals(response.body(), ExpectedResponse);
@@ -108,7 +103,7 @@ public class ExpectTest extends BaseTest {
 
   @Test(dataProvider = "schemes")
   public void expectReject(String scheme) throws Exception {
-    HTTPHandler handler = (req, res) -> fail("Should not have been called");
+    HTTPHandler handler = (_, _) -> fail("Should not have been called");
 
     ExpectValidator validator = (req, res) -> {
       println("Validating");
@@ -122,8 +117,8 @@ public class ExpectTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").expectContinue(true).POST(BodyPublishers.ofString(RequestBody)).build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                );
 
       assertEquals(response.statusCode(), 417);
       assertEquals(response.body(), "");

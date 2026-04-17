@@ -13,20 +13,20 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http.server;
+package org.lattejava.http.tests.server;
 
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 
+import org.lattejava.http.server.HTTPContext;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertNull;
-import static org.testng.Assert.assertTrue;
+
+import static org.testng.Assert.*;
 
 /**
  * Tests for HTTPContext focusing on path traversal security and resource resolution.
@@ -38,9 +38,8 @@ import static org.testng.Assert.assertTrue;
  * @author Dan Moore
  */
 public class HTTPContextTest {
-  private Path tempDir;
-
   private HTTPContext context;
+  private Path tempDir;
 
   @BeforeMethod
   public void setup() throws IOException {
@@ -68,7 +67,7 @@ public class HTTPContextTest {
     // Cleanup temp files
     if (tempDir != null && Files.exists(tempDir)) {
       Files.walk(tempDir)
-           .sorted((a, b) -> b.compareTo(a)) // Delete files before directories
+           .sorted(Comparator.reverseOrder()) // Delete files before directories
            .forEach(path -> {
              try {
                Files.deleteIfExists(path);
@@ -81,6 +80,22 @@ public class HTTPContextTest {
     // Cleanup secret file from parent
     Path secretFile = tempDir.getParent().resolve("secret.txt");
     Files.deleteIfExists(secretFile);
+  }
+
+  /**
+   * Test attribute storage (not security related, but completeness).
+   */
+  @Test
+  public void testAttributeStorage() {
+    context.setAttribute("test", "value");
+    assertEquals(context.getAttribute("test"), "value");
+
+    context.setAttribute("number", 42);
+    assertEquals(context.getAttribute("number"), 42);
+
+    Object removed = context.removeAttribute("test");
+    assertEquals(removed, "value");
+    assertNull(context.getAttribute("test"));
   }
 
   /**
@@ -107,6 +122,31 @@ public class HTTPContextTest {
     URL subdirUrl = context.getResource("subdir/file.txt");
     assertNotNull(subdirUrl, "Should resolve subdir/file.txt");
     assertTrue(subdirUrl.toString().contains("file.txt"));
+  }
+
+  /**
+   * Test that non-existent files return null (not exceptions).
+   */
+  @Test
+  public void testNonExistentFileReturnsNull() {
+    URL result = context.getResource("does-not-exist.txt");
+    assertNull(result);
+  }
+
+  /**
+   * Test edge case: path that goes down then up but stays within baseDir.
+   * For example: "subdir/../index.html" should resolve to "index.html"
+   */
+  @Test
+  public void testNormalizedPathWithinBaseDirSucceeds() {
+    // This path traverses up but stays within baseDir after normalization
+    URL result = context.getResource("subdir/../index.html");
+    assertNotNull(result, "Should allow subdir/../index.html as it normalizes to index.html");
+    assertTrue(result.toString().contains("index.html"));
+
+    Path resolved = context.resolve("subdir/../index.html");
+    assertNotNull(resolved, "Should resolve subdir/../index.html");
+    assertEquals(resolved, tempDir.resolve("index.html"));
   }
 
   /**
@@ -137,42 +177,6 @@ public class HTTPContextTest {
   }
 
   /**
-   * Test URL-encoded path traversal attacks.
-   * Attackers often URL-encode the ../ sequences to bypass naive filters.
-   */
-  @Test
-  public void testUrlEncodedTraversalBlocked() {
-    // URL-encoded ../ is %2e%2e%2f
-    URL result1 = context.getResource("%2e%2e%2fsecret.txt");
-    assertNull(result1, "Should block URL-encoded traversal %2e%2e%2fsecret.txt");
-
-    URL result2 = context.getResource("%2e%2e%2f%2e%2e%2fsecret.txt");
-    assertNull(result2, "Should block %2e%2e%2f%2e%2e%2fsecret.txt");
-
-    // Mixed encoded and plain
-    URL result3 = context.getResource("css/%2e%2e%2f%2e%2e%2fsecret.txt");
-    assertNull(result3, "Should block css/%2e%2e%2f%2e%2e%2fsecret.txt");
-  }
-
-  /**
-   * Test that resolve() method also prevents path traversal.
-   */
-  @Test
-  public void testResolvePathTraversalBlocked() {
-    // Simple parent directory traversal
-    Path result1 = context.resolve("../secret.txt");
-    assertNull(result1, "Should block ../secret.txt in resolve()");
-
-    // Multiple parent traversals
-    Path result2 = context.resolve("../../etc/passwd");
-    assertNull(result2, "Should block ../../etc/passwd in resolve()");
-
-    // Traversal with valid path prefix
-    Path result3 = context.resolve("css/../../secret.txt");
-    assertNull(result3, "Should block css/../../secret.txt in resolve()");
-  }
-
-  /**
    * Test that resolve() works correctly for legitimate paths.
    */
   @Test
@@ -194,43 +198,38 @@ public class HTTPContextTest {
   }
 
   /**
-   * Test edge case: path that goes down then up but stays within baseDir.
-   * For example: "subdir/../index.html" should resolve to "index.html"
+   * Test that resolve() method also prevents path traversal.
    */
   @Test
-  public void testNormalizedPathWithinBaseDirSucceeds() {
-    // This path traverses up but stays within baseDir after normalization
-    URL result = context.getResource("subdir/../index.html");
-    assertNotNull(result, "Should allow subdir/../index.html as it normalizes to index.html");
-    assertTrue(result.toString().contains("index.html"));
+  public void testResolvePathTraversalBlocked() {
+    // Simple parent directory traversal
+    Path result1 = context.resolve("../secret.txt");
+    assertNull(result1, "Should block ../secret.txt in resolve()");
 
-    Path resolved = context.resolve("subdir/../index.html");
-    assertNotNull(resolved, "Should resolve subdir/../index.html");
-    assertEquals(resolved, tempDir.resolve("index.html"));
+    // Multiple parent traversals
+    Path result2 = context.resolve("../../etc/passwd");
+    assertNull(result2, "Should block ../../etc/passwd in resolve()");
+
+    // Traversal with valid path prefix
+    Path result3 = context.resolve("css/../../secret.txt");
+    assertNull(result3, "Should block css/../../secret.txt in resolve()");
   }
 
   /**
-   * Test that non-existent files return null (not exceptions).
+   * Test URL-encoded path traversal attacks.
+   * Attackers often URL-encode the ../ sequences to bypass naive filters.
    */
   @Test
-  public void testNonExistentFileReturnsNull() {
-    URL result = context.getResource("does-not-exist.txt");
-    assertNull(result);
-  }
+  public void testUrlEncodedTraversalBlocked() {
+    // URL-encoded ../ is %2e%2e%2f
+    URL result1 = context.getResource("%2e%2e%2fsecret.txt");
+    assertNull(result1, "Should block URL-encoded traversal %2e%2e%2fsecret.txt");
 
-  /**
-   * Test attribute storage (not security related, but completeness).
-   */
-  @Test
-  public void testAttributeStorage() {
-    context.setAttribute("test", "value");
-    assertEquals(context.getAttribute("test"), "value");
+    URL result2 = context.getResource("%2e%2e%2f%2e%2e%2fsecret.txt");
+    assertNull(result2, "Should block %2e%2e%2f%2e%2e%2fsecret.txt");
 
-    context.setAttribute("number", 42);
-    assertEquals(context.getAttribute("number"), 42);
-
-    Object removed = context.removeAttribute("test");
-    assertEquals(removed, "value");
-    assertNull(context.getAttribute("test"));
+    // Mixed encoded and plain
+    URL result3 = context.getResource("css/%2e%2e%2f%2e%2e%2fsecret.txt");
+    assertNull(result3, "Should block css/%2e%2e%2f%2e%2e%2fsecret.txt");
   }
 }

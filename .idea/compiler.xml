@@ -14,7 +14,7 @@
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
-      <module name="http" options="--add-exports java.base/sun.security.x509=ALL-UNNAMED --add-exports java.base/sun.security.util=ALL-UNNAMED -XDignore.symbol.file" />
+      <module name="http" options="--add-exports java.base/sun.security.x509=ALL-UNNAMED,org.lattejava.http.tests --add-exports java.base/sun.security.util=ALL-UNNAMED,org.lattejava.http.tests -XDignore.symbol.file" />
     </option>
   </component>
 </project>

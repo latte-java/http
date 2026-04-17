@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.net.URI;
 import java.net.http.HttpRequest;
@@ -28,6 +28,7 @@ import org.lattejava.http.server.CountingInstrumenter;
 import org.lattejava.http.server.HTTPHandler;
 import org.lattejava.http.server.HTTPServer;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 
 /**
@@ -55,15 +56,16 @@ public class ParameterTest extends BaseTest {
     CountingInstrumenter instrumenter = new CountingInstrumenter();
     try (HTTPServer ignore = makeServer(scheme, handler, instrumenter).start()) {
       URI uri = makeURI(scheme, "?one=two&three=four");
-      var client = makeClient(scheme, null);
-      var response = client.send(
-          HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, ContentTypes.Form).POST(BodyPublishers.ofString("one=again&five=six&seven=eight")).build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+      try (var client = makeClient(scheme, null)) {
+        var response = client.send(
+            HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, ContentTypes.Form).POST(BodyPublishers.ofString("one=again&five=six&seven=eight")).build(),
+            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+        );
 
-      assertEquals(response.statusCode(), 200);
-      assertEquals(instrumenter.getServers(), 1);
-      assertEquals(instrumenter.getConnections(), 1);
+        assertEquals(response.statusCode(), 200);
+        assertEquals(instrumenter.getServers(), 1);
+        assertEquals(instrumenter.getConnections(), 1);
+      }
     }
   }
 
@@ -84,7 +86,7 @@ public class ParameterTest extends BaseTest {
       URI uri = makeURI(scheme, "?one=two&three=four");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);

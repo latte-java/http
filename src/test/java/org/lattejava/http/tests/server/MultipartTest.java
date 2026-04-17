@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import org.lattejava.http.FileInfo;
 import org.lattejava.http.HTTPValues.Headers;
 import org.lattejava.http.io.MultipartConfiguration;
 import org.lattejava.http.io.MultipartFileUploadPolicy;
@@ -38,6 +39,7 @@ import org.lattejava.http.server.HTTPHandler;
 import org.lattejava.http.server.HTTPServer;
 import org.lattejava.http.server.HTTPServerConfiguration;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNull;
 
@@ -101,8 +103,8 @@ public class MultipartTest extends BaseTest {
                      .uri(uri)
                      .header(Headers.ContentType, "multipart/form-data; boundary=----WebKitFormBoundaryTWfMVJErBoLURJIe")
                      .POST(BodyPublishers.ofString(Body)).build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                );
 
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), ExpectedResponse);
@@ -115,12 +117,12 @@ public class MultipartTest extends BaseTest {
     withScheme(scheme)
         .withFileSize(10 * 1024 * 1024) // 10 Mb
         .withConfiguration(config -> config.withMultipartConfiguration(
-            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
-                                        // Max file size is 2Mb
-                                        .withMaxFileSize(2 * 1024 * 1024)
-                                        // Max request size is 15 Mb
-                                        .withMaxRequestSize(15 * 1024 * 1024))
-        )
+                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
+                                            // Max file size is 2Mb
+                                            .withMaxFileSize(2 * 1024 * 1024)
+                                            // Max request size is 15 Mb
+                                            .withMaxRequestSize(15 * 1024 * 1024))
+                          )
         .expectResponse("""
             HTTP/1.1 413 \r
             connection: close\r
@@ -136,8 +138,8 @@ public class MultipartTest extends BaseTest {
     withScheme(scheme)
         .withFileCount(5)
         .withConfiguration(config -> config.withMultipartConfiguration(
-            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow))
-        )
+                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow))
+                          )
         .expectResponse("""
             HTTP/1.1 200 \r
             connection: keep-alive\r
@@ -154,8 +156,8 @@ public class MultipartTest extends BaseTest {
     withScheme(scheme)
         .withFileCount(5)
         .withConfiguration(config -> config.withMultipartConfiguration(
-            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Ignore))
-        )
+                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Ignore))
+                          )
         // Ignored means that we will not see any files in the request handler
         .expectedFileCount(0)
         .expectResponse("""
@@ -173,8 +175,8 @@ public class MultipartTest extends BaseTest {
     // File uploads rejected
     withScheme(scheme)
         .withConfiguration(config -> config.withMultipartConfiguration(
-            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Reject))
-        )
+                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Reject))
+                          )
         // 5 * 1 MB = 5 Megabytes
         .withFileCount(5)
         .withFileSize(1024 * 1024)
@@ -197,12 +199,12 @@ public class MultipartTest extends BaseTest {
         .withFileSize(1024 * 1024)   // 1 Mb
         .withFileCount(15)           // 15 files
         .withConfiguration(config -> config.withMultipartConfiguration(
-            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
-                                        // Max file size is 2 Megabytes
-                                        .withMaxFileSize(2 * 1024 * 1024)
-                                        // Max request size is 3 Mb
-                                        .withMaxRequestSize(3 * 1024 * 1024))
-        )
+                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
+                                            // Max file size is 2 Megabytes
+                                            .withMaxFileSize(2 * 1024 * 1024)
+                                            // Max request size is 3 Mb
+                                            .withMaxRequestSize(3 * 1024 * 1024))
+                          )
         .expectResponse("""
             HTTP/1.1 413 \r
             connection: close\r
@@ -230,7 +232,7 @@ public class MultipartTest extends BaseTest {
                                                                            .withMaxRequestSize(5L * 1024 * 1024 * 1024))
                                            // Max request size is 3 Megabytes
                                            .withMaxRequestBodySize(Map.of("*", 3 * 1024 * 1024))
-        )
+                          )
         .expectResponse("""
             HTTP/1.1 413 \r
             connection: close\r
@@ -240,10 +242,6 @@ public class MultipartTest extends BaseTest {
         // If the request is large enough, because we throw an exception before we have emptied the InputStream
         // we will take an exception while trying to write all the bytes to the server.
         .assertOptionalExceptionOnWrite(SocketException.class);
-  }
-
-  private Builder withConfiguration(Consumer<HTTPServerConfiguration> configuration) throws Exception {
-    return new Builder("http").withConfiguration(configuration);
   }
 
   private Builder withScheme(String scheme) {
@@ -334,12 +332,12 @@ public class MultipartTest extends BaseTest {
         // Build the request body per the builder specs.
         String boundary = "-----WebKitFormBoundaryTWfMVJErBoLURJIe";
         String body = boundary +
-                      """
-                          \r
-                          Content-Disposition: form-data; name="foo"\r
-                          \r
-                          bar\r
-                          """;
+            """
+                \r
+                Content-Disposition: form-data; name="foo"\r
+                \r
+                bar\r
+                """;
 
         String file = "X".repeat(fileSize);
         // Append files to the request body

@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
@@ -24,6 +24,21 @@ import org.testng.annotations.Test;
  * @author Daniel DeGroff
  */
 public class HTTP11SocketTest extends BaseSocketTest {
+  @Test(invocationCount = 100)
+  public void bad_request() throws Exception {
+    // Invalid HTTP header
+    withRequest("""
+            cat /etc/password\r
+            \r
+            {body}"""
+               ).expectResponse("""
+        HTTP/1.1 400 \r
+        connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
   /**
    * Bare line feed (\n) instead of CRLF (\r\n) in the request line.
    * <p>
@@ -36,28 +51,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // Bare \n (missing \r) after the protocol version. The preamble parser only accepts \r as the transition from
     // RequestProtocol to RequestCR. A bare \n will cause a ParseException.
     withRequest("""
-        GET / HTTP/1.1
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
-        HTTP/1.1 400 \r
-        connection: close\r
-        content-length: 0\r
-        \r
-        """);
-  }
-
-  @Test(invocationCount = 100)
-  public void bad_request() throws Exception {
-    // Invalid HTTP header
-    withRequest("""
-        cat /etc/password\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -75,13 +75,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
   @Test(invocationCount = 100)
   public void case_insensitive_header_matching() throws Exception {
     withRequest("""
-        GET / HTTP/1.1\r
-        HOST: cyberdyne-systems.com\r
-        CONTENT-TYPE: plain/text\r
-        CONTENT-LENGTH: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            HOST: cyberdyne-systems.com\r
+            CONTENT-TYPE: plain/text\r
+            CONTENT-LENGTH: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 200 \r
         connection: keep-alive\r
         content-length: 0\r
@@ -101,46 +101,6 @@ public class HTTP11SocketTest extends BaseSocketTest {
     };
   }
 
-  @Test(invocationCount = 100)
-  public void duplicate_host_header() throws Exception {
-    // Duplicate Host header
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
-        HTTP/1.1 400 \r
-        connection: close\r
-        content-length: 0\r
-        \r
-        """);
-  }
-
-  @Test(invocationCount = 100)
-  public void duplicate_host_header_withTransferEncoding() throws Exception {
-    // Duplicate Host header w/ Transfer-Encoding instead of Content-Length
-    // - In this case the Transfer-Encoding is only to ensure we can correctly drain the InputStream so the client can read the response.
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Transfer-Encoding: chunked\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
-        HTTP/1.1 400 \r
-        connection: close\r
-        content-length: 0\r
-        \r
-        """);
-  }
-
   /**
    * Connection: close on HTTP/1.1 should result in a 200 and the response should include connection: close.
    * <p>
@@ -149,14 +109,14 @@ public class HTTP11SocketTest extends BaseSocketTest {
   @Test
   public void connection_close() throws Exception {
     withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Connection: close\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Connection: close\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 200 \r
         connection: close\r
         content-length: 0\r
@@ -175,7 +135,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
   public void control_characters_in_header_name() throws Exception {
     // NUL byte (0x00) in header name. The parser only accepts token characters for header names.
     withRequest("GET / HTTP/1.1\r\nHost: cyberdyne-systems.com\r\nX-Bad\0Header: value\r\nContent-Length: {contentLength}\r\n\r\n{body}"
-    ).expectResponse("""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -193,14 +153,54 @@ public class HTTP11SocketTest extends BaseSocketTest {
   @Test
   public void duplicate_content_length_different_values() throws Exception {
     withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        Content-Length: 20\r
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            Content-Length: 20\r
+            \r
+            {body}"""
+               ).expectResponse("""
+        HTTP/1.1 400 \r
+        connection: close\r
+        content-length: 0\r
         \r
-        {body}"""
-    ).expectResponse("""
+        """);
+  }
+
+  @Test(invocationCount = 100)
+  public void duplicate_host_header() throws Exception {
+    // Duplicate Host header
+    withRequest("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
+        HTTP/1.1 400 \r
+        connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
+  @Test(invocationCount = 100)
+  public void duplicate_host_header_withTransferEncoding() throws Exception {
+    // Duplicate Host header w/ Transfer-Encoding instead of Content-Length
+    // - In this case the Transfer-Encoding is only to ensure we can correctly drain the InputStream so the client can read the response.
+    withRequest("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Transfer-Encoding: chunked\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -220,13 +220,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // Create a header value that, combined with the rest of the preamble, exceeds the configured max.
     String longValue = "x".repeat(300);
     withRequest("GET / HTTP/1.1\r\nHost: cyberdyne-systems.com\r\nX-Large: " + longValue + "\r\nContent-Length: {contentLength}\r\n\r\n{body}"
-    ).withMaxRequestHeaderSize(256)
-     .expectResponse("""
-         HTTP/1.1 431 \r
-         connection: close\r
-         content-length: 0\r
-         \r
-         """);
+               ).withMaxRequestHeaderSize(256)
+                .expectResponse("""
+                    HTTP/1.1 431 \r
+                    connection: close\r
+                    content-length: 0\r
+                    \r
+                    """);
   }
 
   /**
@@ -245,12 +245,12 @@ public class HTTP11SocketTest extends BaseSocketTest {
   public void host_header_required() throws Exception {
     // Host header is required, return 400 if not provided
     withRequest("""
-        GET / HTTP/1.1\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -262,14 +262,36 @@ public class HTTP11SocketTest extends BaseSocketTest {
   public void host_header_required_with_X_Forwarded_Host() throws Exception {
     // Ensure that X-Forwarded-Host doesn't count for the Host header
     withRequest("""
-        GET / HTTP/1.1\r
-        X-Forwarded-Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            X-Forwarded-Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
+        connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
+  /**
+   * HTTP/1.0 with Host header should be accepted. HTTP/1.0 defaults to Connection: close.
+   * <p>
+   * See <a href="https://www.rfc-editor.org/rfc/rfc9112#section-7.2">RFC 9112 Section 7.2</a>
+   */
+  @Test
+  public void http_1_0_with_host() throws Exception {
+    withRequest("""
+            GET / HTTP/1.0\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
+        HTTP/1.1 200 \r
         connection: close\r
         content-length: 0\r
         \r
@@ -287,35 +309,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
   @Test
   public void http_1_0_without_host() throws Exception {
     withRequest("""
-        GET / HTTP/1.0\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.0\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
-        connection: close\r
-        content-length: 0\r
-        \r
-        """);
-  }
-
-  /**
-   * HTTP/1.0 with Host header should be accepted. HTTP/1.0 defaults to Connection: close.
-   * <p>
-   * See <a href="https://www.rfc-editor.org/rfc/rfc9112#section-7.2">RFC 9112 Section 7.2</a>
-   */
-  @Test
-  public void http_1_0_with_host() throws Exception {
-    withRequest("""
-        GET / HTTP/1.0\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
-        HTTP/1.1 200 \r
         connection: close\r
         content-length: 0\r
         \r
@@ -343,13 +343,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // Too large, we will take a NumberFormatException and set this value to null in the request.
     // - So as it is written, we won't return the user an error, but we will assume that a body is not present.
     withRequest(("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: 9223372036854775808\r
-        \r
-        {body}""")
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: 9223372036854775808\r
+            \r
+            {body}""")
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -358,13 +358,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
 
     // Negative
     withRequest(("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: -1\r
-        \r
-        {body}""")
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: -1\r
+            \r
+            {body}""")
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -373,13 +373,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
 
     // Max Long - but negative
     withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: -9223372036854775807\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: -9223372036854775807\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -398,13 +398,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // Invalid: HTTP/1
     // - missing the '.' (dot) and the second digit.
     withRequest("""
-        GET / HTTP/1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse(
+            GET / HTTP/1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse(
         """
             HTTP/1.1 505 \r
             connection: close\r
@@ -415,13 +415,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // Invalid: HTTP/1.
     // - missing the minor version digit
     withRequest("""
-        GET / HTTP/1.\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 505 \r
         connection: close\r
         content-length: 0\r
@@ -430,13 +430,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
 
     // Invalid: HTTP/1.2
     withRequest("""
-        GET / HTTP/1.2\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.2\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 505 \r
         connection: close\r
         content-length: 0\r
@@ -445,13 +445,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
 
     // Invalid: HTTP/9.9
     withRequest("""
-        GET / HTTP/9.9\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/9.9\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 505 \r
         connection: close\r
         content-length: 0\r
@@ -464,13 +464,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // Use case: Using keep alive, and the request handler doesn't read the payload.
     // - Ensure the HTTP worker is able to drain the bytes so the next request starts with an empty byte array.
     withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 200 \r
         connection: keep-alive\r
         content-length: 0\r
@@ -484,13 +484,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // - This will fail during the preamble parsing so we are not returning a 505 in this case. My opinion is that
     //   this is not an invalid protocol version, it is simply a malformed request.
     withRequest("""
-        GET / PTTH/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / PTTH/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -501,13 +501,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // - This will fail during the preamble parsing so we are not returning a 505 in this case. My opinion is that
     //   this is not an invalid protocol version, it is simply a malformed request.
     withRequest("""
-        GET / HHHH/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HHHH/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -520,13 +520,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // - This will fail during the preamble parsing so we are not returning a 505 in this case. My opinion is that
     //   this is not an invalid protocol version, it is simply a malformed request.
     withRequest("""
-        GET /\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET /\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -544,7 +544,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
   @Test
   public void nul_bytes_in_request_line() throws Exception {
     withRequest("GET /\0path HTTP/1.1\r\nHost: cyberdyne-systems.com\r\nContent-Length: {contentLength}\r\n\r\n{body}"
-    ).expectResponse("""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
         content-length: 0\r
@@ -565,9 +565,58 @@ public class HTTP11SocketTest extends BaseSocketTest {
     // Header continuation line (obs-fold): value followed by \r\n then a space-prefixed continuation.
     // The parser does not support obs-fold and rejects the SP after the header LF.
     withRequest("GET / HTTP/1.1\r\nHost: cyberdyne-systems.com\r\nX-Custom: value\r\n continued\r\nContent-Length: {contentLength}\r\n\r\n{body}"
-    ).expectResponse("""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
+  @Test(dataProvider = "chunk-extensions", invocationCount = 100)
+  public void transfer_encoding_chunked_extensions(String chunkExtension) throws Exception {
+    // Ensure we can properly ignore chunked extensions
+    withRequest("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Transfer-Encoding: chunked\r
+            \r
+            {body}"""
+               ).withChunkedExtension(chunkExtension)
+                .expectResponse("""
+                    HTTP/1.1 200 \r
+                    connection: keep-alive\r
+                    content-length: 0\r
+                    \r
+                    """);
+  }
+
+  /**
+   * Content-Length header requirements.
+   * </p>
+   * See <a href="https://www.rfc-editor.org/rfc/rfc7230#section-3.3.2">RFC 7230 Section 3.3.2</a> See <a
+   * href="https://httpwg.org/specs/rfc7230.html#header.content-length">RFC 7230 Content-Length</a>
+   * </p>
+   * <pre>
+   *  A sender MUST NOT send a Content-Length header field in any message
+   *  that contains a Transfer-Encoding header field.
+   * </pre>
+   */
+  @Test(invocationCount = 250)
+  public void transfer_encoding_content_length() throws Exception {
+    // When Transfer-Encoding is provided, Content-Length should be omitted. If they are both present, Content-Length is ignored.
+    withRequest("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type: plain/text\r
+            Content-Length: {contentLength}\r
+            Transfer-Encoding: chunked\r
+            \r
+            {body}"""
+               ).expectResponse("""
+        HTTP/1.1 200 \r
+        connection: keep-alive\r
         content-length: 0\r
         \r
         """);
@@ -586,13 +635,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
   public void uri_exceeding_max_header_size() throws Exception {
     String longPath = "/" + "a".repeat(300);
     withRequest("GET " + longPath + " HTTP/1.1\r\nHost: cyberdyne-systems.com\r\nContent-Length: {contentLength}\r\n\r\n{body}"
-    ).withMaxRequestHeaderSize(256)
-     .expectResponse("""
-         HTTP/1.1 431 \r
-         connection: close\r
-         content-length: 0\r
-         \r
-         """);
+               ).withMaxRequestHeaderSize(256)
+                .expectResponse("""
+                    HTTP/1.1 431 \r
+                    connection: close\r
+                    content-length: 0\r
+                    \r
+                    """);
   }
 
   /**
@@ -606,64 +655,15 @@ public class HTTP11SocketTest extends BaseSocketTest {
   @Test
   public void whitespace_before_header_colon() throws Exception {
     withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type : plain/text\r
-        Content-Length: {contentLength}\r
-        \r
-        {body}"""
-    ).expectResponse("""
+            GET / HTTP/1.1\r
+            Host: cyberdyne-systems.com\r
+            Content-Type : plain/text\r
+            Content-Length: {contentLength}\r
+            \r
+            {body}"""
+               ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
-        content-length: 0\r
-        \r
-        """);
-  }
-
-  @Test(dataProvider = "chunk-extensions", invocationCount = 100)
-  public void transfer_encoding_chunked_extensions(String chunkExtension) throws Exception {
-    // Ensure we can properly ignore chunked extensions
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Transfer-Encoding: chunked\r
-        \r
-        {body}"""
-    ).withChunkedExtension(chunkExtension)
-     .expectResponse("""
-         HTTP/1.1 200 \r
-         connection: keep-alive\r
-         content-length: 0\r
-         \r
-         """);
-  }
-
-  /**
-   * Content-Length header requirements.
-   * </p>
-   * See <a href="https://www.rfc-editor.org/rfc/rfc7230#section-3.3.2">RFC 7230 Section 3.3.2</a> See <a
-   * href="https://httpwg.org/specs/rfc7230.html#header.content-length">RFC 7230 Content-Length</a>
-   * </p>
-   * <pre>
-   *  A sender MUST NOT send a Content-Length header field in any message
-   *  that contains a Transfer-Encoding header field.
-   * </pre>
-   */
-  @Test(invocationCount = 250)
-  public void transfer_encoding_content_length() throws Exception {
-    // When Transfer-Encoding is provided, Content-Length should be omitted. If they are both present, Content-Length is ignored.
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        Content-Type: plain/text\r
-        Content-Length: {contentLength}\r
-        Transfer-Encoding: chunked\r
-        \r
-        {body}"""
-    ).expectResponse("""
-        HTTP/1.1 200 \r
-        connection: keep-alive\r
         content-length: 0\r
         \r
         """);

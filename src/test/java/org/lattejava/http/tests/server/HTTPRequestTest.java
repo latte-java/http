@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -24,9 +24,8 @@ import org.lattejava.http.HTTPValues.Headers;
 import org.lattejava.http.server.HTTPRequest;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+
+import static org.testng.Assert.*;
 
 /**
  * Tests the HTTPRequest.

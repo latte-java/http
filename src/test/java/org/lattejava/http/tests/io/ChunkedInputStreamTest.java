@@ -13,15 +13,18 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http.io;
+package org.lattejava.http.tests.io;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
-import org.lattejava.http.util.ThrowingFunction;
+import org.lattejava.http.io.ChunkedInputStream;
+import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.tests.util.ThrowingFunction;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 
 /**
@@ -79,18 +82,18 @@ public class ChunkedInputStreamTest {
   @Test
   public void multipleChunks() throws Exception {
     withBody("""
-        A\r
-        1234567890\r
-        14\r
-        12345678901234567890\r
-        1E\r
-        123456789012345678901234567890\r
-        0\r
-        \r
-        """
-    ).assertResult("123456789012345678901234567890123456789012345678901234567890")
-     .assertLeftOverBytes(0)
-     .assertNextRead(ChunkedInputStream::read, -1);
+            A\r
+            1234567890\r
+            14\r
+            12345678901234567890\r
+            1E\r
+            123456789012345678901234567890\r
+            0\r
+            \r
+            """
+            ).assertResult("123456789012345678901234567890123456789012345678901234567890")
+             .assertLeftOverBytes(0)
+             .assertNextRead(ChunkedInputStream::read, -1);
   }
 
   @Test
@@ -104,8 +107,8 @@ public class ChunkedInputStreamTest {
             0\r
             \r
             """
-    ).assertResult("Hi mom!")
-     .assertLeftOverBytes(0);
+            ).assertResult("Hi mom!")
+             .assertLeftOverBytes(0);
   }
 
   @Test

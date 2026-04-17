@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
 import java.net.CookieManager;
 import java.net.HttpCookie;
@@ -25,16 +25,15 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
 
+import org.lattejava.http.Cookie;
 import org.lattejava.http.Cookie.SameSite;
 import org.lattejava.http.HTTPValues.Headers;
 import org.lattejava.http.server.CountingInstrumenter;
 import org.lattejava.http.server.HTTPHandler;
 import org.lattejava.http.server.HTTPServer;
 import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertNull;
-import static org.testng.Assert.assertTrue;
+
+import static org.testng.Assert.*;
 
 /**
  * @author Brian Pontarelli
@@ -53,19 +52,20 @@ public class CookieTest extends BaseTest {
     try (HTTPServer ignore = makeServer("http", handler).start()) {
       URI uri = URI.create("http://localhost:4242/%0d%0aSet-Cookie:injected=true%0d%0a?client_id=foo");
       CookieManager cookieHandler = new CookieManager();
-      var client = makeClient("http", cookieHandler);
-      HttpRequest request = HttpRequest.newBuilder()
-                                       .uri(uri)
-                                       .GET()
-                                       .build();
+      try (var client = makeClient("http", cookieHandler)) {
+        HttpRequest request = HttpRequest.newBuilder()
+                                         .uri(uri)
+                                         .GET()
+                                         .build();
 
-      var response = client.send(request, r -> BodySubscribers.discarding());
-      assertEquals(response.statusCode(), 200);
+        var response = client.send(request, _ -> BodySubscribers.discarding());
+        assertEquals(response.statusCode(), 200);
 
-      List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
-      assertEquals(response.statusCode(), 200);
-      assertNull(response.headers().firstValue("Set-Cookie").orElse(null));
-      assertEquals(cookies.size(), 0);
+        List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
+        assertEquals(response.statusCode(), 200);
+        assertNull(response.headers().firstValue("Set-Cookie").orElse(null));
+        assertEquals(cookies.size(), 0);
+      }
     }
   }
 
@@ -373,19 +373,20 @@ public class CookieTest extends BaseTest {
     try (HTTPServer ignore = makeServer(scheme, handler, instrumenter).start()) {
       URI uri = makeURI(scheme, "");
       CookieManager cookieHandler = new CookieManager();
-      var client = makeClient(scheme, cookieHandler);
-      var response = client.send(
-          HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.Cookie, "request-2=request-value-2").header(Headers.ContentType, "application/json").GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+      try (var client = makeClient(scheme, cookieHandler)) {
+        var response = client.send(
+            HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.Cookie, "request-2=request-value-2").header(Headers.ContentType, "application/json").GET().build(),
+            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                  );
 
-      List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
-      assertEquals(response.statusCode(), 200);
-      assertEquals(cookies.size(), 2);
-      assertEquals(cookies.stream().filter(c -> c.getName().equals("response")).findFirst().orElseThrow().getValue(), "response-value");
-      assertEquals(cookies.stream().filter(c -> c.getName().equals("response-2")).findFirst().orElseThrow().getValue(), "response-value-2");
-      assertTrue(response.headers().allValues("Set-Cookie").contains("response=response-value; SameSite=Lax"));
-      assertTrue(response.headers().allValues("Set-Cookie").contains("response-2=response-value-2; Max-Age=42"));
+        List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
+        assertEquals(response.statusCode(), 200);
+        assertEquals(cookies.size(), 2);
+        assertEquals(cookies.stream().filter(c -> c.getName().equals("response")).findFirst().orElseThrow().getValue(), "response-value");
+        assertEquals(cookies.stream().filter(c -> c.getName().equals("response-2")).findFirst().orElseThrow().getValue(), "response-value-2");
+        assertTrue(response.headers().allValues("Set-Cookie").contains("response=response-value; SameSite=Lax"));
+        assertTrue(response.headers().allValues("Set-Cookie").contains("response-2=response-value-2; Max-Age=42"));
+      }
     }
   }
 
@@ -403,23 +404,24 @@ public class CookieTest extends BaseTest {
     try (HTTPServer ignore = makeServer(scheme, handler, instrumenter).start()) {
       URI uri = makeURI(scheme, "");
       CookieManager cookieHandler = new CookieManager();
-      var client = makeClient(scheme, cookieHandler);
-      var response = client.send(
-          HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.ContentType, "application/json").GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-      );
+      try (var client = makeClient(scheme, cookieHandler)) {
+        var response = client.send(
+            HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.ContentType, "application/json").GET().build(),
+            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                                  );
 
-      List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
-      assertEquals(response.statusCode(), 200);
-      assertEquals(cookies.size(), 1);
-      assertEquals(cookies.get(0).getName(), "response");
-      assertEquals(cookies.get(0).getValue(), "response-value");
-      assertEquals(response.headers().firstValue("Set-Cookie").orElse(null), "response=response-value; SameSite=Lax");
+        List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
+        assertEquals(response.statusCode(), 200);
+        assertEquals(cookies.size(), 1);
+        assertEquals(cookies.getFirst().getName(), "response");
+        assertEquals(cookies.getFirst().getValue(), "response-value");
+        assertEquals(response.headers().firstValue("Set-Cookie").orElse(null), "response=response-value; SameSite=Lax");
+      }
     }
   }
 
   @Test
   public void toRequestHeader() {
-    assertEquals("foo=bar", new Cookie("foo", "bar").toRequestHeader());
+    assertEquals(new Cookie("foo", "bar").toRequestHeader(), "foo=bar");
   }
 }

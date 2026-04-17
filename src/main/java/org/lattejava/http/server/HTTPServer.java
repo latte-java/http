@@ -105,6 +105,8 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
 
       // Clean up the threads that did start
       close();
+
+      throw new IllegalStateException("Unable to start the HTTP server because one of the listeners threw an exception.", e);
     }
 
     return this;

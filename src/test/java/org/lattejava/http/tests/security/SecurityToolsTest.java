@@ -13,7 +13,7 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http.security;
+package org.lattejava.http.tests.security;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -23,9 +23,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import org.lattejava.http.BaseTest;
+import org.lattejava.http.security.SecurityTools;
+import org.lattejava.http.tests.server.BaseTest;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
+
 import static org.testng.Assert.assertEquals;
 
 /**
@@ -52,7 +54,7 @@ public class SecurityToolsTest extends BaseTest {
                                        .uri(URI.create("https://lattejava.org"))
                                        .GET()
                                        .build();
-      var response = client.send(request, r -> BodySubscribers.ofString(StandardCharsets.UTF_8));
+      var response = client.send(request, _ -> BodySubscribers.ofString(StandardCharsets.UTF_8));
       assertEquals(response.statusCode(), 200);
     }
   }

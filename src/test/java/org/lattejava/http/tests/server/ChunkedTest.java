@@ -13,13 +13,9 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http;
+package org.lattejava.http.tests.server;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.Writer;
+import java.io.*;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
@@ -37,9 +33,8 @@ import org.lattejava.http.server.CountingInstrumenter;
 import org.lattejava.http.server.HTTPHandler;
 import org.lattejava.http.server.HTTPServer;
 import org.testng.annotations.Test;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+
+import static org.testng.Assert.*;
 
 /**
  * Tests various chunked Transfer-Encoding capabilities of the HTTP server.
@@ -92,7 +87,7 @@ public class ChunkedTest extends BaseTest {
                                               .POST(BodyPublishers.ofInputStream(() ->
                                                   new ByteArrayInputStream(responseBodyBytes)))
                                               .build(),
-            r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -149,7 +144,7 @@ public class ChunkedTest extends BaseTest {
                                               .POST(BodyPublishers.ofInputStream(() ->
                                                   new ByteArrayInputStream(responseBodyBytes)))
                                               .build(),
-            r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -164,7 +159,7 @@ public class ChunkedTest extends BaseTest {
 
   @Test(dataProvider = "schemes")
   public void chunkedResponse(String scheme) throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setHeader(Headers.ContentType, "text/plain");
       res.setStatus(200);
 
@@ -182,7 +177,7 @@ public class ChunkedTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);
@@ -198,7 +193,7 @@ public class ChunkedTest extends BaseTest {
         parm=some values
         theRest=some other values
         """;
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setHeader(Headers.ContentType, "text/html; charset=UTF-8");
       res.setHeader(Headers.CacheControl, "no-cache");
       res.setStatus(200);
@@ -230,8 +225,8 @@ public class ChunkedTest extends BaseTest {
 
   @Test(dataProvider = "schemes")
   public void chunkedResponseStreamingFile(String scheme) throws Exception {
-    Path file = Paths.get("src/test/java/org/lattejava/http/ChunkedTest.java");
-    HTTPHandler handler = (req, res) -> {
+    Path file = Paths.get("src/test/java/org/lattejava/http/tests/server/ChunkedTest.java");
+    HTTPHandler handler = (_, res) -> {
       res.setHeader(Headers.ContentType, "text/plain");
       res.setStatus(200);
 
@@ -249,7 +244,7 @@ public class ChunkedTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);
@@ -265,7 +260,7 @@ public class ChunkedTest extends BaseTest {
         parm=some values
         theRest=some other values
         """;
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setHeader(Headers.ContentType, "text/html; charset=UTF-8");
       res.setHeader(Headers.CacheControl, "no-cache");
       res.setStatus(200);
@@ -283,7 +278,7 @@ public class ChunkedTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).GET().build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), html);
@@ -297,7 +292,7 @@ public class ChunkedTest extends BaseTest {
     String responseBody = "These pretzels are making me thirsty. ".repeat(16_000);
     byte[] responseBodyBytes = responseBody.getBytes(StandardCharsets.UTF_8);
 
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setHeader(Headers.ContentType, "text/plain");
       res.setStatus(200);
 
@@ -322,7 +317,7 @@ public class ChunkedTest extends BaseTest {
       for (int i = 0; i < iterations; i++) {
         var response = client.send(
             HttpRequest.newBuilder().uri(uri).GET().build(),
-            r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -412,7 +407,7 @@ public class ChunkedTest extends BaseTest {
                      .POST(BodyPublishers.ofInputStream(() ->
                          new ByteArrayInputStream(RequestBody.getBytes())))
                      .build(),
-          r -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);
