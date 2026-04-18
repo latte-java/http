@@ -23,12 +23,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import org.lattejava.http.Cookie;
@@ -282,11 +277,36 @@ public class HTTPResponse {
     writer = null;
   }
 
+  /**
+   * Sends a redirect to the client using a status code of 302.
+   *
+   * @param uri The URI to redirect to.
+   */
   public void sendRedirect(String uri) {
-    setHeader(Headers.Location, uri);
-    status = Status.MovedTemporarily;
+    sendRedirect(uri, Status.MovedTemporarily);
   }
 
+  /**
+   * Sends a redirect to the client using the given status code.
+   *
+   * @param uri    The URI to redirect to.
+   * @param status The status code to use.
+   */
+  public void sendRedirect(String uri, int status) {
+    if (status < 300 || status > 399) {
+      throw new IllegalArgumentException("Status code must be between 300 and 399.");
+    }
+
+    setHeader(Headers.Location, uri);
+    this.status = status;
+  }
+
+  /**
+   * Adds a date header to the response using a ZonedDateTime object that is converted to an RFC 1123 date string.
+   *
+   * @param name  The name of the header.
+   * @param value The date to use.
+   */
   public void setDateHeader(String name, ZonedDateTime value) {
     addHeader(name, DateTimeFormatter.RFC_1123_DATE_TIME.format(value));
   }
