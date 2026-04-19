@@ -34,6 +34,7 @@ import org.lattejava.http.io.MultipartConfiguration;
 import org.lattejava.http.io.PushbackInputStream;
 import org.lattejava.http.log.Logger;
 import org.lattejava.http.server.ExceptionHandlerContext;
+import org.lattejava.http.server.HTTPContext;
 import org.lattejava.http.server.HTTPHandler;
 import org.lattejava.http.server.HTTPListenerConfiguration;
 import org.lattejava.http.server.HTTPRequest;
@@ -59,6 +60,8 @@ public class HTTPWorker implements Runnable {
 
   private final HTTPServerConfiguration configuration;
 
+  private final HTTPContext context;
+
   private final PushbackInputStream inputStream;
 
   private final Instrumenter instrumenter;
@@ -77,10 +80,11 @@ public class HTTPWorker implements Runnable {
 
   private volatile State state;
 
-  public HTTPWorker(Socket socket, HTTPServerConfiguration configuration, Instrumenter instrumenter, HTTPListenerConfiguration listener,
-                    Throughput throughput) throws IOException {
+  public HTTPWorker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                    HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
     this.socket = socket;
     this.configuration = configuration;
+    this.context = context;
     this.instrumenter = instrumenter;
     this.listener = listener;
     this.throughput = throughput;
@@ -117,7 +121,7 @@ public class HTTPWorker implements Runnable {
 
       while (true) {
         logger.trace("[{}] Running HTTP worker. Block while we wait to read the preamble", Thread.currentThread().threadId());
-        request = new HTTPRequest(configuration.getContextPath(), listener.getCertificate() != null ? "https" : "http", listener.getPort(), socket.getInetAddress().getHostAddress());
+        request = new HTTPRequest(context, configuration.getContextPath(), listener.getCertificate() != null ? "https" : "http", listener.getPort(), socket.getInetAddress().getHostAddress());
 
         // Create a deep copy of the MultipartConfiguration so that the request may optionally modify the configuration on a per-request basis.
         request.getMultiPartStreamProcessor().setMultipartConfiguration(new MultipartConfiguration(configuration.getMultipartConfiguration()));

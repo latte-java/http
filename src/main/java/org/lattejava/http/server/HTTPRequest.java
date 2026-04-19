@@ -60,6 +60,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   private String contentType;
 
+  private HTTPContext context;
+
   private String contextPath;
 
   private Charset encoding = StandardCharsets.UTF_8;
@@ -104,9 +106,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     this.multipartStreamProcessor.getMultiPartConfiguration().withMultipartBufferSize(multipartBufferSize);
   }
 
-  public HTTPRequest(String contextPath, String scheme, int port, String ipAddress) {
+  public HTTPRequest(HTTPContext context, String contextPath, String scheme, int port, String ipAddress) {
     Objects.requireNonNull(contextPath);
     Objects.requireNonNull(scheme);
+    this.context = context;
     this.contextPath = contextPath;
     this.scheme = scheme;
     this.port = port;
@@ -302,6 +305,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   public void setContentType(String contentType) {
     this.contentType = contentType;
+  }
+
+  public HTTPContext getContext() {
+    return context;
   }
 
   public String getContextPath() {

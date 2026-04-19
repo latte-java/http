@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 
 import org.lattejava.http.log.Logger;
 import org.lattejava.http.security.SecurityTools;
+import org.lattejava.http.server.HTTPContext;
 import org.lattejava.http.server.HTTPListenerConfiguration;
 import org.lattejava.http.server.HTTPServerConfiguration;
 import org.lattejava.http.server.Instrumenter;
@@ -48,6 +49,8 @@ public class HTTPServerThread extends Thread {
 
   private final HTTPServerConfiguration configuration;
 
+  private final HTTPContext context;
+
   private final Instrumenter instrumenter;
 
   private final HTTPListenerConfiguration listener;
@@ -62,11 +65,12 @@ public class HTTPServerThread extends Thread {
 
   private volatile boolean running;
 
-  public HTTPServerThread(HTTPServerConfiguration configuration, HTTPListenerConfiguration listener)
+  public HTTPServerThread(HTTPServerConfiguration configuration, HTTPContext context, HTTPListenerConfiguration listener)
       throws IOException, GeneralSecurityException {
     super("HTTP server [" + listener.getBindAddress().toString() + ":" + listener.getPort() + "]");
 
     this.configuration = configuration;
+    this.context = context;
     this.listener = listener;
     this.instrumenter = configuration.getInstrumenter();
     this.logger = configuration.getLoggerFactory().getLogger(HTTPServerThread.class);
@@ -75,8 +79,8 @@ public class HTTPServerThread extends Thread {
     this.cleaner = new HTTPServerCleanerThread();
 
     if (listener.isTLS()) {
-      SSLContext context = SecurityTools.serverContext(listener.getCertificateChain(), listener.getPrivateKey());
-      this.socket = context.getServerSocketFactory().createServerSocket();
+      SSLContext sslContext = SecurityTools.serverContext(listener.getCertificateChain(), listener.getPrivateKey());
+      this.socket = sslContext.getServerSocketFactory().createServerSocket();
     } else {
       this.socket = new ServerSocket();
     }
@@ -112,7 +116,7 @@ public class HTTPServerThread extends Thread {
         }
 
         Throughput throughput = new Throughput(configuration.getReadThroughputCalculationDelay().toMillis(), configuration.getWriteThroughputCalculationDelay().toMillis());
-        HTTPWorker runnable = new HTTPWorker(clientSocket, configuration, instrumenter, listener, throughput);
+        HTTPWorker runnable = new HTTPWorker(clientSocket, configuration, context, instrumenter, listener, throughput);
         Thread client = Thread.ofVirtual()
                               .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
                               .start(runnable);

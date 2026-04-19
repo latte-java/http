@@ -93,7 +93,7 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
 
     try {
       for (HTTPListenerConfiguration listener : configuration.getListeners()) {
-        HTTPServerThread server = new HTTPServerThread(configuration, listener);
+        HTTPServerThread server = new HTTPServerThread(configuration, context, listener);
         servers.add(server);
         server.start();
         logger.info("HTTP server listening on port [{}]", listener.getPort());
