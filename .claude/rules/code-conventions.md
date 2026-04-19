@@ -7,22 +7,24 @@ paths:
 
 ## Acronym Naming
 
-Always use full uppercase for acronyms in Java identifiers — class names, method names, field names, local variables. Do NOT use title-case (camelCase-with-only-the-first-letter-uppercase) for acronyms.
+Always use full uppercase for acronyms in Java identifiers — class names, method names, field names, local variables. Do NOT use title-case (camelCase-with-only-the-first-letter-uppercase) for acronyms. If a field or method name starts with an acronym, lowercase the entire acronym.
 
 ### Examples
 
-| Wrong | Right |
-|-------|-------|
+| Wrong              | Right              |
+|--------------------|--------------------|
 | `JsonBodySupplier` | `JSONBodySupplier` |
-| `XmlParser` | `XMLParser` |
-| `HttpRequest` | `HTTPRequest` |
-| `ApiClient` | `APIClient` |
-| `JwtToken` | `JWTToken` |
-| `UrlBuilder` | `URLBuilder` |
-| `SqlQuery` | `SQLQuery` |
-| `parseXml()` | `parseXML()` |
-| `toJson()` | `toJSON()` |
-| `getHttpStatus()` | `getHTTPStatus()` |
+| `XmlParser`        | `XMLParser`        |
+| `HttpRequest`      | `HTTPRequest`      |
+| `ApiClient`        | `APIClient`        |
+| `JwtToken`         | `JWTToken`         |
+| `UrlBuilder`       | `URLBuilder`       |
+| `SqlQuery`         | `SQLQuery`         |
+| `parseXml()`       | `parseXML()`       |
+| `toJson()`         | `toJSON()`         |
+| `getHttpStatus()`  | `getHTTPStatus()`  |
+| `jSONProcess()`    | `jsonProcess()`    |
+| `JSONProcess()`    | `jsonProcess()`    |
 
 ### Scope
 
@@ -77,3 +79,55 @@ module org.lattejava.web {
   requires org.lattejava.http;
 }
 ```
+
+## Blank lines
+
+Remove blank lines between fields.
+
+### Example
+
+```java
+// Wrong
+public class Example {
+  private final String field1;
+  
+  private final String field2;
+}
+
+// Right
+public class Example {
+  private final String field1;
+  private final String field2;
+}
+```
+
+## Imports
+
+Prefer module imports over class imports. If a class is using class imports, attempt to replace as many as possible with module imports.
+
+### Example
+
+```java
+// Before
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+// After
+import module java.base;
+```
+
+Add a blank line between import groups.
+
+## Order inside classes
+
+Inside a class, the order should always be:
+
+- Static fields (ordered by visibility then alphabetically)
+- Instance fields (ordered by visibility then alphabetically)
+- Constructors (ordered by number of parameters)
+- Static methods (ordered by visibility then alphabetically)
+- Instance methods (ordered by visibility then alphabetically)
+- Inner classes (ordered by visibility then alphabetically)
+- Enum constants (ordered alphabetically)
+- Nested classes (ordered alphabetically)

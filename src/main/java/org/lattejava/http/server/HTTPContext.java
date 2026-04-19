@@ -15,18 +15,14 @@
  */
 package org.lattejava.http.server;
 
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import module java.base;
 
 /**
- * An object that is the context of the server. It can store global attributes and also a base directory from which files can be loaded.
+ * An object that is the context of the server. It can store global attributes and also a base directory from which
+ * files can be loaded.
  * <p>
- * This might be useful for MVCs and applications is they need a way to locate files based on a location such as an application directory.
+ * This might be useful for MVCs and applications is they need a way to locate files based on a location such as an
+ * application directory.
  *
  * @author Brian Pontarelli
  */
@@ -59,11 +55,12 @@ public class HTTPContext {
   }
 
   /**
-   * Attempts to retrieve a file or classpath resource at the given path. If the path is invalid, this will return null. If the classpath is
-   * borked or the path somehow cannot be converted to a URL, then this throws an exception.
+   * Attempts to retrieve a file or classpath resource at the given path. If the path is invalid, this will return null.
+   * If the classpath is borked or the path somehow cannot be converted to a URL, then this throws an exception.
    * <p>
-   * This method protects against path traversal attacks by normalizing the resolved path and ensuring it stays within the baseDir.
-   * Attempts to escape the baseDir using sequences like {@code ../} will cause this method to return null.
+   * This method protects against path traversal attacks by normalizing the resolved path and ensuring it stays within
+   * the baseDir. Attempts to escape the baseDir using sequences like {@code ../} will cause this method to return
+   * null.
    *
    * @param path The path.
    * @return The URL to the resource or null.
@@ -109,8 +106,8 @@ public class HTTPContext {
   /**
    * Locates the path given the webapps baseDir (passed into the constructor).
    * <p>
-   * This method protects against path traversal attacks by normalizing the resolved path and ensuring it stays within the baseDir.
-   * Attempts to escape the baseDir using sequences like {@code ../} will return null.
+   * This method protects against path traversal attacks by normalizing the resolved path and ensuring it stays within
+   * the baseDir. Attempts to escape the baseDir using sequences like {@code ../} will return null.
    *
    * @param appPath The app path to a resource (like an FTL file).
    * @return The resolved path, or null if the path attempts to escape the baseDir.
