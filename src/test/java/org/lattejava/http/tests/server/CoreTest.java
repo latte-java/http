@@ -1243,4 +1243,33 @@ public class CoreTest extends BaseTest {
       assertEquals(response.body(), ExpectedResponse);
     }
   }
+
+  /**
+   * A GET handler that declares a Content-Length but writes no body bytes should produce a response with Content-Length: 0. The server
+   * defensively overrides the handler's claim so that the client does not hang waiting for bytes that never come. This is the intentional
+   * counterpart to the HEAD "CDN escape hatch" case in HeadTest, where the handler-set Content-Length IS preserved.
+   */
+  @Test(dataProvider = "schemes")
+  public void get_handlerSetsContentLength_butWritesNothing_serverOverridesToZero(String scheme) throws Exception {
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      res.setContentLength(100L);
+      // Intentionally write nothing.
+    };
+
+    try (var ignore = makeServer(scheme, handler).start();
+         var client = makeClient(scheme, null)) {
+
+      var response = client.send(HttpRequest.newBuilder()
+                                            .uri(makeURI(scheme, ""))
+                                            .GET()
+                                            .build(),
+          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8));
+
+      assertEquals(response.statusCode(), 200);
+      assertEquals(response.headers().firstValue("content-length").orElseThrow(), "0",
+          "A GET handler that writes no bytes must produce Content-Length: 0, even if it set a different value. This is the server's defensive override to prevent the client from hanging on a mismatched Content-Length.");
+      assertEquals(response.body(), "");
+    }
+  }
 }

@@ -22,6 +22,7 @@ import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 
+import org.lattejava.http.HTTPMethod;
 import org.lattejava.http.HTTPProcessingException;
 import org.lattejava.http.HTTPValues;
 import org.lattejava.http.HTTPValues.Connections;
@@ -158,6 +159,13 @@ public class HTTPWorker implements Runnable {
         if (status != null) {
           closeSocketOnError(response, status);
           return;
+        }
+
+        // Automatic HEAD handling: dispatch through GET logic but suppress body output. The HTTPRequest captured HEAD as the originalMethod on
+        // the first setMethod call during preamble parsing, so isHeadRequest() remains true even after this rewrite.
+        if (request.getMethod().is(HTTPMethod.HEAD)) {
+          outputStream.setSuppressBody(true);
+          request.setMethod(HTTPMethod.GET);
         }
 
         // Handle the Expect: 100-continue request header.

@@ -48,11 +48,15 @@ public class HTTPOutputStream extends OutputStream {
 
   private final ServerToSocketOutputStream serverToSocket;
 
+  private boolean bodySuppressed;
+
   private boolean committed;
 
   private boolean compress;
 
   private OutputStream delegate;
+
+  private boolean suppressBody;
 
   private boolean wroteOneByteToClient;
 
@@ -111,15 +115,32 @@ public class HTTPOutputStream extends OutputStream {
     this.compress = compress;
   }
 
+  /**
+   * Enables or disables body-byte suppression for this response. When enabled, the preamble is still written normally (identical to a GET
+   * response), but any subsequent {@link #write} calls become no-ops and the chunked/gzip/deflate delegates are not installed. Intended for
+   * HEAD request handling.
+   *
+   * @param suppressBody true to drop all body output.
+   */
+  public void setSuppressBody(boolean suppressBody) {
+    if (committed) {
+      throw new IllegalStateException("The HTTPResponse body suppression cannot be modified once bytes have been written to it.");
+    }
+
+    this.suppressBody = suppressBody;
+  }
+
   public void reset() {
     if (wroteOneByteToClient) {
       throw new IllegalStateException("The HTTPOutputStream can't be reset after it has been committed, meaning at least one byte was written back to the client.");
     }
 
+    bodySuppressed = false;
     serverToSocket.reset();
     committed = false;
     compress = false;
     delegate = serverToSocket;
+    // suppressBody is intentionally preserved across reset() so that HEAD error responses (triggered via response.reset() in closeSocketOnError) continue to suppress the body. HTTPOutputStream is constructed fresh per connection iteration in HTTPWorker, so there is no cross-request bleed.
   }
 
   /**
@@ -145,6 +166,11 @@ public class HTTPOutputStream extends OutputStream {
   @Override
   public void write(byte[] buffer, int offset, int length) throws IOException {
     commit(false);
+
+    if (bodySuppressed) {
+      return;
+    }
+
     delegate.write(buffer, offset, length);
 
     if (instrumenter != null) {
@@ -155,6 +181,11 @@ public class HTTPOutputStream extends OutputStream {
   @Override
   public void write(int b) throws IOException {
     commit(false);
+
+    if (bodySuppressed) {
+      return;
+    }
+
     delegate.write(b);
 
     if (instrumenter != null) {
@@ -179,51 +210,82 @@ public class HTTPOutputStream extends OutputStream {
 
     committed = true;
 
-    // +++++++++++ Step 1: Determine if there is content and set up the compression, encoding, chunking, and length headers +++++++++++
-    boolean twoOhFour = response.getStatus() == 204;
+    int status = response.getStatus();
+    boolean noBodyStatus = status == 204 || status == 304;
+
+    // HEAD always suppresses body bytes; 204 and 304 must never carry a body per RFC 9110.
+    bodySuppressed = suppressBody || noBodyStatus;
+
     boolean gzip = false;
     boolean deflate = false;
     boolean chunked = false;
 
-    // If the output stream is closing, but nothing has been written yet, we can safely set the Content-Length header to 0 to let the client
-    // know nothing more is coming beyond the preamble
-    if (closing && !twoOhFour) { // 204 status is specifically "No Content" so we shouldn't write the content-length header if the status is 204
-      response.setContentLength(0L);
+    if (noBodyStatus) {
+      // 204/304 must not carry Content-Length, Transfer-Encoding, or a body (RFC 9110 §15.3.5 / §15.4.5 / RFC 7230 §3.3.2).
+      response.removeHeader(Headers.ContentLength);
+      response.removeHeader(Headers.TransferEncoding);
     } else {
-      // 204 status is specifically "No Content" so we shouldn't write the content-encoding and vary headers if the status is 204
-      if (compress && !twoOhFour) {
-        for (String encoding : acceptEncodings) {
-          if (encoding.equalsIgnoreCase(ContentEncodings.Gzip)) {
-            response.setHeader(Headers.ContentEncoding, ContentEncodings.Gzip);
-            response.setHeader(Headers.Vary, Headers.AcceptEncoding);
-            response.removeHeader(Headers.ContentLength); // Compression will change the length, so we'll chunk instead
-            gzip = true;
-            break;
-          } else if (encoding.equalsIgnoreCase(ContentEncodings.Deflate)) {
-            response.setHeader(Headers.ContentEncoding, ContentEncodings.Deflate);
-            response.setHeader(Headers.Vary, Headers.AcceptEncoding);
-            response.removeHeader(Headers.ContentLength); // Compression will change the length, so we'll chunk instead
-            deflate = true;
-            break;
-          }
-        }
+      // RFC 7230 §3.3.3: a sender must not send Content-Length in a message that also has Transfer-Encoding. TE wins.
+      boolean handlerSetTransferEncoding = response.getHeader(Headers.TransferEncoding) != null;
+      if (handlerSetTransferEncoding) {
+        response.removeHeader(Headers.ContentLength);
       }
 
-      if (response.getContentLength() == null && !twoOhFour) { // 204 status is specifically "No Content" so we shouldn't write the transfer-encoding header if the status is 204
-        response.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-        chunked = true;
+      if (closing) {
+        // Handler wrote no bytes.
+        if (suppressBody) {
+          // HEAD: preserve the handler's framing so CDN-style handlers can report a synthetic Content-Length or indicate chunked framing
+          // without actually generating a body. Only default to Content-Length: 0 when the handler set nothing.
+          if (response.getContentLength() == null && !handlerSetTransferEncoding) {
+            response.setContentLength(0L);
+          }
+        } else {
+          // GET defensive override: the handler declared framing but produced no bytes. Strip any Transfer-Encoding (no chunks were sent)
+          // and force Content-Length: 0 so the client does not wait for a body.
+          if (handlerSetTransferEncoding) {
+            response.removeHeader(Headers.TransferEncoding);
+          }
+          response.setContentLength(0L);
+        }
+      } else {
+        // Handler is writing bytes.
+        if (compress) {
+          for (String encoding : acceptEncodings) {
+            if (encoding.equalsIgnoreCase(ContentEncodings.Gzip)) {
+              response.setHeader(Headers.ContentEncoding, ContentEncodings.Gzip);
+              response.setHeader(Headers.Vary, Headers.AcceptEncoding);
+              response.removeHeader(Headers.ContentLength);
+              gzip = true;
+              break;
+            } else if (encoding.equalsIgnoreCase(ContentEncodings.Deflate)) {
+              response.setHeader(Headers.ContentEncoding, ContentEncodings.Deflate);
+              response.setHeader(Headers.Vary, Headers.AcceptEncoding);
+              response.removeHeader(Headers.ContentLength);
+              deflate = true;
+              break;
+            }
+          }
+        }
+
+        if (handlerSetTransferEncoding) {
+          // Handler asked for chunked framing explicitly. Wrap the delegate so the bytes are actually chunk-framed on the wire.
+          chunked = true;
+        } else if (response.getContentLength() == null) {
+          response.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
+          chunked = true;
+        }
       }
     }
 
-    // +++++++++++ Step 2: Write the preamble. This must be first without any other output stream interference +++++++++++
+    // Write the preamble to the socket.
     HTTPTools.writeResponsePreamble(response, delegate);
 
-    // +++++++++++ Step 3: Bail if there is no content +++++++++++
-    if (closing || twoOhFour) {
+    // Bail if no body bytes will follow.
+    if (bodySuppressed || closing) {
       return;
     }
 
-    // +++++++++++ Step 4: Set up the delegates for the body (if there is any) +++++++++++
+    // Install body delegate(s).
     if (chunked) {
       delegate = new ChunkedOutputStream(delegate, buffers.chunkBuffer(), buffers.chuckedOutputStream());
       if (instrumenter != null) {

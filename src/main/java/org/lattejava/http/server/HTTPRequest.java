@@ -15,51 +15,20 @@
  */
 package org.lattejava.http.server;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Locale;
-import java.util.Locale.LanguageRange;
-import java.util.Map;
-import java.util.Objects;
-import java.util.SortedSet;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
+import module java.base;
+import module org.lattejava.http;
+import java.util.Locale.*;
 
-import org.lattejava.http.BodyException;
-import org.lattejava.http.Buildable;
-import org.lattejava.http.Cookie;
-import org.lattejava.http.FileInfo;
-import org.lattejava.http.HTTPMethod;
-import org.lattejava.http.HTTPValues.Connections;
-import org.lattejava.http.HTTPValues.ContentEncodings;
-import org.lattejava.http.HTTPValues.ContentTypes;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.HTTPValues.Protocols;
-import org.lattejava.http.HTTPValues.TransferEncodings;
-import org.lattejava.http.io.MultipartStreamProcessor;
-import org.lattejava.http.util.HTTPTools;
-import org.lattejava.http.util.HTTPTools.HeaderValue;
-import org.lattejava.http.util.WeightedString;
+import org.lattejava.http.HTTPValues.*;
+import org.lattejava.http.util.HTTPTools.*;
 
 /**
- * An HTTP request that is received by the HTTP server. This contains all the relevant information from the request including any file
- * uploads and the InputStream that the server can read from to handle the HTTP body.
+ * An HTTP request that is received by the HTTP server. This contains all the relevant information from the request,
+ * including any file uploads and the InputStream that the server can read from to handle the HTTP body.
  * <p>
- * This is mutable because the server is not trying to enforce that the request is always the same as the one it received. There are many
- * cases where requests values are mutated, removed, or replaced. Rather than using a janky delegate or wrapper, this is simply mutable.
+ * This is mutable because the server is not trying to enforce that the request is always the same as the one it
+ * received. There are many cases where requests values are mutated, removed, or replaced. Rather than using a janky
+ * delegate or wrapper, this is simply mutable.
  *
  * @author Brian Pontarelli
  */
@@ -108,6 +77,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   private boolean multipart;
 
   private String multipartBoundary;
+
+  private HTTPMethod originalMethod;
 
   private String path = "/";
 
@@ -254,7 +225,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Retrieves all the request attributes. This returns the direct Map so changes to the Map will affect all attributes.
+   * Retrieves all the request attributes. This returns the direct Map so changes to the Map will affect all
+   * attributes.
    *
    * @return The attribute Map.
    */
@@ -354,8 +326,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Processes the HTTP request body completely by calling {@link #getFormData()}. If the {@code Content-Type} header is multipart, then the
-   * processing of the body will extract the files.
+   * Processes the HTTP request body completely by calling {@link #getFormData()}. If the {@code Content-Type} header is
+   * multipart, then the processing of the body will extract the files.
    *
    * @return The files, if any.
    */
@@ -365,9 +337,9 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Processes the HTTP request body completely if the {@code Content-Type} header is equal to {@link ContentTypes#Form}. If this method is
-   * called multiple times, the body is only processed the first time. This is not thread-safe, so you need to ensure you protect against
-   * multiple threads calling this method concurrently.
+   * Processes the HTTP request body completely if the {@code Content-Type} header is equal to
+   * {@link ContentTypes#Form}. If this method is called multiple times, the body is only processed the first time. This
+   * is not thread-safe, so you need to ensure you protect against multiple threads calling this method concurrently.
    * <p>
    * If the {@code Content-Type} is not {@link ContentTypes#Form}, this will always return an empty Map.
    * <p>
@@ -438,7 +410,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   public String getIPAddress() {
     String xIPAddress = getHeader(Headers.XForwardedFor);
-    if (xIPAddress == null || xIPAddress.trim().length() == 0) {
+    if (xIPAddress == null || xIPAddress.trim().isEmpty()) {
       return ipAddress;
     }
 
@@ -465,7 +437,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public Locale getLocale() {
-    return locales.size() > 0 ? locales.getFirst() : Locale.getDefault();
+    return !locales.isEmpty() ? locales.getFirst() : Locale.getDefault();
   }
 
   public List<Locale> getLocales() {
@@ -476,7 +448,17 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     return method;
   }
 
+  /**
+   * Sets the effective HTTP method for this request. The first call also fixes the original wire method, which is
+   * exposed via {@link #isHeadRequest()}. Subsequent calls update only the effective method and do not affect
+   * {@link #isHeadRequest()}.
+   *
+   * @param method The method to set.
+   */
   public void setMethod(HTTPMethod method) {
+    if (this.originalMethod == null) {
+      this.originalMethod = method;
+    }
     this.method = method;
   }
 
@@ -489,14 +471,15 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Calls {@link #getParameters()} to combine everything and then returns the first parameter value for the given name.
+   * Calls {@link #getParameters()} to combine everything and then returns the first parameter value for the given
+   * name.
    *
    * @param name The name of the parameter
    * @return The parameter values or null if the parameter doesn't exist.
    */
   public String getParameter(String name) {
     List<String> values = getParameters().get(name);
-    if (values != null && values.size() > 0) {
+    if (values != null && !values.isEmpty()) {
       return values.getFirst();
     }
 
@@ -504,10 +487,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Combines the URL parameters and the form data that might exist in the body of the HTTP request. The Map returned is not linked back to
-   * the URL parameters or form data. Changing it will not impact either of those Maps. If this method is called multiple times, the merging
-   * of all the data is only done the first time and then cached. This is not thread-safe, so you need to ensure you protect against
-   * multiple threads calling this method concurrently.
+   * Combines the URL parameters and the form data that might exist in the body of the HTTP request. The Map returned is
+   * not linked back to the URL parameters or form data. Changing it will not impact either of those Maps. If this
+   * method is called multiple times, the merging of all the data is only done the first time and then cached. This is
+   * not thread-safe, so you need to ensure you protect against multiple threads calling this method concurrently.
    *
    * @return The combined parameters.
    */
@@ -605,7 +588,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   public String getURLParameter(String name) {
     List<String> values = urlParameters.get(name);
-    return (values != null && values.size() > 0) ? values.getFirst() : null;
+    return (values != null && !values.isEmpty()) ? values.getFirst() : null;
   }
 
   public List<String> getURLParameters(String name) {
@@ -622,8 +605,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * @return True if the request can reasonably be assumed to have a body. This uses the fact that the request is chunked or that
-   *     {@code Content-Length} header was provided.
+   * @return True if the request can reasonably be assumed to have a body. This uses the fact that the request is
+   *     chunked or that {@code Content-Length} header was provided.
    */
   public boolean hasBody() {
     if (isChunked()) {
@@ -639,11 +622,21 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Determines if the request is asking for the server to keep the connection alive. This is based on the Connection header.
-   * <p>
-   * This method will account for HTTP 1.0 and 1.1 protocol versions. In HTTP 1.0, you must explicitly ask for a persistent connection, and
-   * in HTTP 1.1 it is on by default, and you must request for it to be disabled by providing the <code>Connection: close</code> request
+   * @return True if the original wire method of this request was HEAD, regardless of any later
+   *     {@link #setMethod(HTTPMethod)} call (e.g., the server's HEAD-to-GET rewrite). Handlers can use this to
+   *     short-circuit body generation while still writing correct response headers.
+   */
+  public boolean isHeadRequest() {
+    return originalMethod != null && originalMethod.is(HTTPMethod.HEAD);
+  }
+
+  /**
+   * Determines if the request is asking for the server to keep the connection alive. This is based on the Connection
    * header.
+   * <p>
+   * This method will account for HTTP 1.0 and 1.1 protocol versions. In HTTP 1.0, you must explicitly ask for a
+   * persistent connection, and in HTTP 1.1 it is on by default, and you must request for it to be disabled by providing
+   * the <code>Connection: close</code> request header.
    *
    * @return True if the Connection header is missing or not `Close`.
    */
@@ -836,7 +829,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
         if (colon > 0) {
           this.host = value.substring(0, colon);
           String portString = value.substring(colon + 1);
-          if (portString.length() > 0) {
+          if (!portString.isEmpty()) {
             try {
               this.port = Integer.parseInt(portString);
             } catch (NumberFormatException e) {

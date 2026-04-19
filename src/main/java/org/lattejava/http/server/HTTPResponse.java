@@ -15,24 +15,11 @@
  */
 package org.lattejava.http.server;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.stream.Collectors;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.Cookie;
-import org.lattejava.http.HTTPValues.ContentTypes;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.HTTPValues.Status;
-import org.lattejava.http.server.io.HTTPOutputStream;
-import org.lattejava.http.util.HTTPTools;
-import org.lattejava.http.util.HTTPTools.HeaderValue;
+import org.lattejava.http.HTTPValues.*;
+import org.lattejava.http.util.HTTPTools.*;
 
 /**
  * An HTTP response that the server sends back to a client. The handler that processes the HTTP request can fill out this object and the
