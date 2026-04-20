@@ -15,35 +15,21 @@
  */
 package org.lattejava.http.util;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.URLDecoder;
-import java.nio.charset.Charset;
-import java.nio.charset.IllegalCharsetNameException;
-import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.HexFormat;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+import java.io.*;
+import java.net.*;
+import java.nio.charset.*;
+import java.util.*;
 
-import org.lattejava.http.HTTPMethod;
-import org.lattejava.http.HTTPValues.ControlBytes;
-import org.lattejava.http.HTTPValues.HeaderBytes;
-import org.lattejava.http.HTTPValues.ProtocolBytes;
-import org.lattejava.http.ParseException;
-import org.lattejava.http.RequestHeadersTooLargeException;
+import org.lattejava.http.*;
+import org.lattejava.http.HTTPValues.*;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.log.Logger;
-import org.lattejava.http.log.LoggerFactory;
-import org.lattejava.http.server.HTTPRequest;
-import org.lattejava.http.server.HTTPResponse;
-import org.lattejava.http.server.io.ConnectionClosedException;
+import org.lattejava.http.log.*;
+import org.lattejava.http.server.*;
+import org.lattejava.http.server.io.*;
 
 public final class HTTPTools {
+  private static final boolean[] TOKEN_CHARS = buildTokenCharTable();
+
   private static Logger logger;
 
   /**
@@ -126,8 +112,8 @@ public final class HTTPTools {
    */
   public static boolean isTokenCharacter(byte ch) {
     return ch == '!' || ch == '#' || ch == '$' || ch == '%' || ch == '&' || ch == '\'' || ch == '*' || ch == '+' || ch == '-' || ch == '.' ||
-           ch == '^' || ch == '_' || ch == '`' || ch == '|' || ch == '~' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-           (ch >= '0' && ch <= '9');
+        ch == '^' || ch == '_' || ch == '`' || ch == '|' || ch == '~' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+        (ch >= '0' && ch <= '9');
   }
 
   /**
@@ -239,7 +225,8 @@ public final class HTTPTools {
   }
 
   /**
-   * Parses URL encoded data either from a URL parameter list in the query string or the form body. Assumes the values are UTF-8 encoded.
+   * Parses URL encoded data either from a URL parameter list in the query string or the form body. Assumes the values
+   * are UTF-8 encoded.
    *
    * @param data   The data as a character array.
    * @param start  The start index to start parsing from.
@@ -310,8 +297,8 @@ public final class HTTPTools {
   /**
    * Parses the request preamble directly from the given InputStream.
    * <p>
-   * The HTTP request is made up of the request line, headers and an optional body. The request preamble comprises the Request line and the
-   * Headers. All that remains after the preamble is the optional body.
+   * The HTTP request is made up of the request line, headers and an optional body. The request preamble comprises the
+   * Request line and the Headers. All that remains after the preamble is the optional body.
    *
    * @param inputStream          The input stream to read the preamble from.
    * @param maxRequestHeaderSize The maximum number of bytes to read for the header. If exceed throw an exception.
@@ -388,6 +375,84 @@ public final class HTTPTools {
   }
 
   /**
+   * Validates that a cookie value, domain, or path contains no CR, LF, NUL, or {@code ;}. The first three split the
+   * HTTP response; a semicolon would inject an additional cookie attribute (e.g., {@code Secure},
+   * {@code Domain=attacker.example}).
+   *
+   * @param value     The value to validate.
+   * @param fieldName A human-readable description of the field, used in the exception message.
+   * @throws IllegalArgumentException If the value contains CR, LF, NUL, or {@code ;}.
+   */
+  public static void validateResponseCookieAttribute(String value, String fieldName) {
+    if (value == null) {
+      return;
+    }
+
+    // String.indexOf(char) is a HotSpot intrinsic (vectorized on compact strings), materially faster than a per-char charAt loop on the
+    // common path where no bad chars are present.
+    int cr = value.indexOf('\r');
+    int lf = value.indexOf('\n');
+    int nul = value.indexOf('\0');
+    int sc = value.indexOf(';');
+    if (cr < 0 && lf < 0 && nul < 0 && sc < 0) {
+      return;
+    }
+
+    int badIdx = firstNonNegativeMin(cr, lf, nul, sc);
+    throw makeInvalidFieldCharException(value.charAt(badIdx), badIdx, fieldName);
+  }
+
+  /**
+   * Validates that a string intended for a response field value (header value, status message, redirect URI) contains
+   * no CR, LF, or NUL. Any of these would split the HTTP response and allow an attacker to forge headers or additional
+   * responses.
+   *
+   * @param value     The value to validate.
+   * @param fieldName A human-readable description of the field, used in the exception message.
+   * @throws IllegalArgumentException If the value contains CR, LF, or NUL.
+   */
+  public static void validateResponseFieldValue(String value, String fieldName) {
+    if (value == null) {
+      return;
+    }
+
+    int cr = value.indexOf('\r');
+    int lf = value.indexOf('\n');
+    int nul = value.indexOf('\0');
+    if (cr < 0 && lf < 0 && nul < 0) {
+      return;
+    }
+
+    int badIdx = firstNonNegativeMin(cr, lf, nul);
+    throw makeInvalidFieldCharException(value.charAt(badIdx), badIdx, fieldName);
+  }
+
+  /**
+   * Validates that a response header name contains only RFC 7230 tchar characters, rejecting CR, LF, NUL, colon,
+   * whitespace, and any non-ASCII byte. A caller-supplied name that bypasses this check would enable HTTP response
+   * header injection.
+   *
+   * @param name The header name to validate.
+   * @throws IllegalArgumentException If the name is empty or contains any non-token character.
+   */
+  public static void validateResponseHeaderName(String name) {
+    if (name == null) {
+      return;
+    }
+
+    if (name.isEmpty()) {
+      throw new IllegalArgumentException("Response header name must not be empty.");
+    }
+
+    for (int i = 0; i < name.length(); i++) {
+      char c = name.charAt(i);
+      if (c >= 128 || !TOKEN_CHARS[c]) {
+        throw new IllegalArgumentException("Invalid character [0x" + String.format("%02X", (int) c) + "] at index [" + i + "] in response header name.");
+      }
+    }
+  }
+
+  /**
    * Writes the HTTP response head section (status line, headers, etc).
    *
    * @param response     The response.
@@ -395,6 +460,27 @@ public final class HTTPTools {
    * @throws IOException If the stream threw an exception.
    */
   public static void writeResponsePreamble(HTTPResponse response, OutputStream outputStream) throws IOException {
+    // Single choke point for HTTP response-splitting defense (see docs/security/audit-2026-04-20.md Vuln 4). Every surface that can put
+    // attacker-influenced bytes into the response preamble — status message, header names/values, cookie components — is validated here
+    // before any byte is written. If a bad value is found, the IAE propagates to the worker's catch-all, which resets the response and
+    // returns a clean 500, rather than flushing a partially-written (and splittable) preamble.
+    validateResponseFieldValue(response.getStatusMessage(), "status message");
+    for (var entry : response.getHeadersMap().entrySet()) {
+      String name = entry.getKey();
+      validateResponseHeaderName(name);
+      for (String value : entry.getValue()) {
+        validateResponseFieldValue(value, "value of response header [" + name + "]");
+      }
+    }
+
+    var cookies = response.getCookies();
+    for (var cookie : cookies) {
+      validateResponseHeaderName(cookie.name);
+      validateResponseCookieAttribute(cookie.value, "value of cookie [" + cookie.name + "]");
+      validateResponseCookieAttribute(cookie.domain, "domain of cookie [" + cookie.name + "]");
+      validateResponseCookieAttribute(cookie.path, "path of cookie [" + cookie.name + "]");
+    }
+
     writeStatusLine(response, outputStream);
 
     // Write the headers (minus the cookies)
@@ -410,7 +496,7 @@ public final class HTTPTools {
     }
 
     // Write the cookies
-    for (var cookie : response.getCookies()) {
+    for (var cookie : cookies) {
       outputStream.write(HeaderBytes.SetCookie);
       outputStream.write(':');
       outputStream.write(' ');
@@ -419,6 +505,28 @@ public final class HTTPTools {
     }
 
     outputStream.write(ControlBytes.CRLF);
+  }
+
+  private static boolean[] buildTokenCharTable() {
+    boolean[] table = new boolean[128];
+    for (int c = 0; c < 128; c++) {
+      table[c] = isTokenCharacter((byte) c);
+    }
+    return table;
+  }
+
+  private static int firstNonNegativeMin(int... values) {
+    int min = Integer.MAX_VALUE;
+    for (int v : values) {
+      if (v >= 0 && v < min) {
+        min = v;
+      }
+    }
+    return min;
+  }
+
+  private static IllegalArgumentException makeInvalidFieldCharException(char c, int index, String fieldName) {
+    return new IllegalArgumentException("Invalid character [0x" + String.format("%02X", (int) c) + "] at index [" + index + "] in " + fieldName + ".");
   }
 
   private static void parseHeaderParameter(char[] chars, int start, int end, Map<String, String> parameters) {
