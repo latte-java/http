@@ -29,6 +29,7 @@ import org.lattejava.http.HTTPValues.Connections;
 import org.lattejava.http.HTTPValues.ContentEncodings;
 import org.lattejava.http.HTTPValues.Headers;
 import org.lattejava.http.HTTPValues.Protocols;
+import org.lattejava.http.HTTPValues.TransferEncodings;
 import org.lattejava.http.ParseException;
 import org.lattejava.http.io.MultipartConfiguration;
 import org.lattejava.http.io.PushbackInputStream;
@@ -425,11 +426,44 @@ public class HTTPWorker implements Runnable {
       return Status.BadRequest;
     }
 
-    // If Transfer-Encoding is present, ignore Content-Length
-    // - In theory it is an error to send both the Transfer-Encoding and the Content-Length headers.
-    //   However, as long as we ignore Content-Length we should be ok. Earlier specs indicate Transfer-Encoding should take precedence,
-    //   later specs imply it is an error. Seems ok to allow it and just ignore it.
-    if (request.getHeader(Headers.TransferEncoding) == null) {
+    // Validate Transfer-Encoding and Content-Length per RFC 9112 §6.1 (see docs/security/audit-2026-04-20.md Vuln 1). This server only
+    // supports the "chunked" transfer coding, so anything else must be rejected rather than silently discarded — mishandling TE is the
+    // classic request-smuggling primitive. Specifically we reject: multiple Transfer-Encoding headers, TE values that aren't exactly
+    // "chunked" after trimming (e.g. "identity", "chunked, identity", "xchunked", "chunked " with trailing whitespace), and the CL+TE
+    // coexistence that a front-end proxy might resolve differently than we do.
+    var transferEncodingHeaders = request.getHeaders(Headers.TransferEncoding);
+    if (transferEncodingHeaders != null && !transferEncodingHeaders.isEmpty()) {
+      if (transferEncodingHeaders.size() != 1) {
+        if (debugEnabled) {
+          logger.debug("Invalid request. Multiple Transfer-Encoding headers. [{}]", String.join(", ", transferEncodingHeaders));
+        }
+
+        return Status.BadRequest;
+      }
+
+      String rawTransferEncoding = transferEncodingHeaders.getFirst();
+      if (!TransferEncodings.Chunked.equalsIgnoreCase(rawTransferEncoding.trim())) {
+        if (debugEnabled) {
+          logger.debug("Invalid request. Unsupported Transfer-Encoding. [{}]", rawTransferEncoding);
+        }
+
+        return Status.BadRequest;
+      }
+
+      if (request.getHeader(Headers.ContentLength) != null) {
+        if (debugEnabled) {
+          logger.debug("Invalid request. Both Transfer-Encoding and Content-Length present. [{}] [{}]", rawTransferEncoding, request.getHeader(Headers.ContentLength));
+        }
+
+        return Status.BadRequest;
+      }
+
+      // Normalize the stored value so downstream code (HTTPRequest.isChunked, ChunkedInputStream routing) sees an exact match regardless
+      // of incidental whitespace or case in the original header.
+      if (!TransferEncodings.Chunked.equals(rawTransferEncoding)) {
+        request.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
+      }
+    } else {
       var requestedContentLengthHeaders = request.getHeaders(Headers.ContentLength);
       if (requestedContentLengthHeaders != null) {
         if (requestedContentLengthHeaders.size() != 1) {
@@ -451,10 +485,6 @@ public class HTTPWorker implements Runnable {
           return Status.BadRequest;
         }
       }
-    } else {
-      // To simplify downstream code and remove ambiguity. If we have a Transfer-Encoding request header, remove Content-Length.
-      request.setContentLength(null);
-      request.removeHeader(Headers.ContentLength);
     }
 
     // Validate Content-Encoding, we currently support deflate and gzip.

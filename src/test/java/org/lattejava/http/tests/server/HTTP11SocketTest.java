@@ -598,19 +598,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
   }
 
   /**
-   * Content-Length header requirements.
-   * </p>
-   * See <a href="https://www.rfc-editor.org/rfc/rfc7230#section-3.3.2">RFC 7230 Section 3.3.2</a> See <a
-   * href="https://httpwg.org/specs/rfc7230.html#header.content-length">RFC 7230 Content-Length</a>
-   * </p>
-   * <pre>
-   *  A sender MUST NOT send a Content-Length header field in any message
-   *  that contains a Transfer-Encoding header field.
-   * </pre>
+   * A request that carries both Content-Length and Transfer-Encoding is rejected as 400. Per RFC 9112 §6.1, such a message is ambiguous —
+   * different intermediaries resolve the precedence differently — and is a classic request-smuggling primitive (see
+   * docs/security/audit-2026-04-20.md Vuln 1). Silently stripping Content-Length (RFC 7230's older guidance) is unsafe because a front-end
+   * proxy that honored Content-Length would desync from this server.
    */
   @Test(invocationCount = 250)
   public void transfer_encoding_content_length() throws Exception {
-    // When Transfer-Encoding is provided, Content-Length should be omitted. If they are both present, Content-Length is ignored.
     withRequest("""
             GET / HTTP/1.1\r
             Host: cyberdyne-systems.com\r
@@ -620,8 +614,8 @@ public class HTTP11SocketTest extends BaseSocketTest {
             \r
             {body}"""
                ).expectResponse("""
-        HTTP/1.1 200 \r
-        connection: keep-alive\r
+        HTTP/1.1 400 \r
+        connection: close\r
         content-length: 0\r
         \r
         """);
