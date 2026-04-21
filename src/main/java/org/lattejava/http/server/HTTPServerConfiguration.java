@@ -15,18 +15,12 @@
  */
 package org.lattejava.http.server;
 
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+import java.nio.file.*;
+import java.time.*;
+import java.util.*;
 
-import org.lattejava.http.io.MultipartConfiguration;
-import org.lattejava.http.log.LoggerFactory;
-import org.lattejava.http.log.SystemOutLoggerFactory;
+import org.lattejava.http.io.*;
+import org.lattejava.http.log.*;
 
 /**
  * The HTTP Server configuration.
@@ -66,6 +60,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   private int maxBytesToDrain = 256 * 1024; // 256 Kilobytes
 
   private int maxPendingSocketConnections = 250;
+
+  private int maxRequestChunkSize = 1024 * 1024; // 1 Megabyte
 
   private int maxRequestHeaderSize = 128 * 1024; // 128 Kilobytes
 
@@ -139,8 +135,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The timeout between a socket being accepted by the server and the first byte being read. This is distinct and separate from the
-   *     timeout for subsequent reads after the connection has been "kept alive".
+   * @return The timeout between a socket being accepted by the server and the first byte being read. This is distinct
+   *     and separate from the timeout for subsequent reads after the connection has been "kept alive".
    */
   public Duration getInitialReadTimeoutDuration() {
     return initialReadTimeoutDuration;
@@ -154,8 +150,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The timeout between requests when the server is in Keep-Alive mode. This is the maximum value to prevent DoS attacks that use
-   *     the HTTP headers to set extremely long timeouts.
+   * @return The timeout between requests when the server is in Keep-Alive mode. This is the maximum value to prevent
+   *     DoS attacks that use the HTTP headers to set extremely long timeouts.
    */
   public Duration getKeepAliveTimeoutDuration() {
     return keepAliveTimeoutDuration;
@@ -176,18 +172,19 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * When using keep-alive, this configuration represents the maximum number of bytes to drain from the InputStream when the request handler
-   * did not read all available bytes. This is done to drain the InputStream, attempting to reach the end of the request in order to prepare
-   * for the next request.
+   * When using keep-alive, this configuration represents the maximum number of bytes to drain from the InputStream when
+   * the request handler did not read all available bytes. This is done to drain the InputStream, attempting to reach
+   * the end of the request in order to prepare for the next request.
    * <p>
    * If you are not using keep-alive, this configuration will not be utilized.
    * <p>
-   * When this configured limit is reached, the socket will be closed. This would be equivalent to adding Connection: close to the request.
-   * Setting this limit too low could cause connections not to be re-used, setting this limit too high simply means that the server will
-   * take more time to read more bytes from the client before being able to re-use the connection.
+   * When this configured limit is reached, the socket will be closed. This would be equivalent to adding Connection:
+   * close to the request. Setting this limit too low could cause connections not to be re-used, setting this limit too
+   * high simply means that the server will take more time to read more bytes from the client before being able to
+   * re-use the connection.
    *
-   * @return The maximum number of bytes to drain from the InputStream when the request handler did not read all available bytes. Defaults
-   *     to 256 Kilobytes.
+   * @return The maximum number of bytes to drain from the InputStream when the request handler did not read all
+   *     available bytes. Defaults to 256 Kilobytes.
    */
   public int getMaxBytesToDrain() {
     return maxBytesToDrain;
@@ -196,9 +193,10 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   /**
    * The maximum number of pending socket connections per HTTP listener.
    * <p>
-   * This number represents how many pending socket connections are allowed to queue before they are rejected. Once the connection is
-   * accepted by the server socket, a client socket is created and handed to an HTTP Worker. This queue length only needs to be large enough
-   * to buffer the incoming requests as fast as we can accept them and hand them to a worker.
+   * This number represents how many pending socket connections are allowed to queue before they are rejected. Once the
+   * connection is accepted by the server socket, a client socket is created and handed to an HTTP Worker. This queue
+   * length only needs to be large enough to buffer the incoming requests as fast as we can accept them and hand them to
+   * a worker.
    *
    * @return The maximum number of pending socket connections per HTTP listener. Defaults to 250.
    */
@@ -207,30 +205,40 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * The map that specifies the maximum size in bytes of the HTTP request body by Content-Type. This configuration excludes the size of the
-   * HTTP request header.
+   * The map that specifies the maximum size in bytes of the HTTP request body by Content-Type. This configuration
+   * excludes the size of the HTTP request header.
    * <p>
-   * The returned map is keyed by Content-Type, and will contain a default value identified by '*', and may optionally contain a content
-   * type value with a wild card '*' as the subtype. For example, 'application/*' will match all subtypes of an application/ content type.
+   * The returned map is keyed by Content-Type, and will contain a default value identified by '*', and may optionally
+   * contain a content type value with a wild card '*' as the subtype. For example, 'application/*' will match all
+   * subtypes of an application/ content type.
    *
-   * @return the map keyed by Content-Type indicating the maximum size in bytes of the HTTP request body.  Defaults to 128 Megabytes as a
-   *     default, and 10 Megabytes for application/x-www-form-urlencoded.
+   * @return the map keyed by Content-Type indicating the maximum size in bytes of the HTTP request body.  Defaults to
+   *     128 Megabytes as a default, and 10 Megabytes for application/x-www-form-urlencoded.
    */
   public Map<String, Integer> getMaxRequestBodySize() {
     return maxRequestBodySize;
   }
 
   /**
-   * @return the maximum size of the HTTP request header in bytes. This configuration does not affect the HTTP response header. Defaults to
-   *     128 Kilobytes.
+   * @return The maximum size of a single chunk in a request body that uses chunked Transfer-Encoding. A chunk whose
+   *     declared size exceeds this value is rejected before any body bytes are read. Also bounds the hex chunk-size
+   *     string length to prevent integer overflow. Defaults to 1 Megabyte.
+   */
+  public int getMaxRequestChunkSize() {
+    return maxRequestChunkSize;
+  }
+
+  /**
+   * @return the maximum size of the HTTP request header in bytes. This configuration does not affect the HTTP response
+   *     header. Defaults to 128 Kilobytes.
    */
   public int getMaxRequestHeaderSize() {
     return maxRequestHeaderSize;
   }
 
   /**
-   * This limit only applies when using a persistent connection. If this number is reached without hitting a Keep-Alive timeout the
-   * connection will be closed just as it would be if the Keep-Alive timeout was reached.
+   * This limit only applies when using a persistent connection. If this number is reached without hitting a Keep-Alive
+   * timeout the connection will be closed just as it would be if the Keep-Alive timeout was reached.
    *
    * @return The maximum number of requests that can be handled by a single persistent connection. Defaults to 100,000.
    */
@@ -246,8 +254,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * This configuration is the minimum number of bytes per second that a client must send a request to the server before the server closes
-   * the connection.
+   * This configuration is the minimum number of bytes per second that a client must send a request to the server before
+   * the server closes the connection.
    * <p>
    * A value of -1 indicates the minimum read throughput limitation has been disabled.
    *
@@ -258,8 +266,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * This configuration is the minimum number of bytes per second that a client must read the response from the server before the server
-   * closes the connection.
+   * This configuration is the minimum number of bytes per second that a client must read the response from the server
+   * before the server closes the connection.
    * <p>
    * A value of -1 indicates the minimum write throughput limitation has been disabled.
    *
@@ -270,8 +278,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The multipart buffer size in bytes. This is primary used for parsing multipart requests by the {@link HTTPRequest} class.
-   *     Defaults to 16 Kilobytes.
+   * @return The multipart buffer size in bytes. This is primary used for parsing multipart requests by the
+   *     {@link HTTPRequest} class. Defaults to 16 Kilobytes.
    */
   @Deprecated
   public int getMultipartBufferSize() {
@@ -286,9 +294,9 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The timeout between when the request has been fully read and the first byte is written. This provides the worker thread to
-   *     perform work before it begins to write. This timeout should be relatively short depending on how long you want the browser/client
-   *     to wait before the response comes back. Defaults to 10 seconds.
+   * @return The timeout between when the request has been fully read and the first byte is written. This provides the
+   *     worker thread to perform work before it begins to write. This timeout should be relatively short depending on
+   *     how long you want the browser/client to wait before the response comes back. Defaults to 10 seconds.
    */
   public Duration getProcessingTimeoutDuration() {
     return processingTimeoutDuration;
@@ -309,16 +317,16 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The size of the buffer used to store the response. This allows the server to handle exceptions and errors without writing back
-   *     a 200 response that is actually an error. Defaults to 64 Kilobytes.
+   * @return The size of the buffer used to store the response. This allows the server to handle exceptions and errors
+   *     without writing back a 200 response that is actually an error. Defaults to 64 Kilobytes.
    */
   public int getResponseBufferSize() {
     return responseBufferSize;
   }
 
   /**
-   * @return The duration that the server will wait while worker threads complete before forcibly shutting itself down. Defaults to 10
-   *     seconds.
+   * @return The duration that the server will wait while worker threads complete before forcibly shutting itself down.
+   *     Defaults to 10 seconds.
    */
   public Duration getShutdownDuration() {
     return shutdownDuration;
@@ -496,6 +504,22 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
     this.maxRequestBodySize.put("*", DefaultMaxRequestSizes.get("*"));
     // Store lower case keys
     maxRequestBodySize.forEach((k, v) -> this.maxRequestBodySize.put(k.toLowerCase(Locale.ROOT), v));
+    return this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public HTTPServerConfiguration withMaxRequestChunkSize(int maxRequestChunkSize) {
+    // The upper bound is 0x0FFFFFFF (268,435,455). Any larger would allow an 8-character hex chunk size, and an attacker sending
+    // 0x80000000..0xFFFFFFFF would then produce a negative int after parseInt. Cap here so the hex-length cap in ChunkedInputStream stays
+    // consistent with the config.
+    if (maxRequestChunkSize < 1 || maxRequestChunkSize > 0x0FFFFFFF) {
+      throw new IllegalArgumentException("The maximum request chunk size must be between 1 and [" + 0x0FFFFFFF + "] (~256 Megabytes).");
+    }
+
+    this.maxRequestChunkSize = maxRequestChunkSize;
     return this;
   }
 

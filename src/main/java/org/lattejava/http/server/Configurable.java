@@ -15,17 +15,16 @@
  */
 package org.lattejava.http.server;
 
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.Map;
+import java.nio.file.*;
+import java.time.*;
+import java.util.*;
 
-import org.lattejava.http.io.MultipartConfiguration;
-import org.lattejava.http.log.LoggerFactory;
-import org.lattejava.http.log.SystemOutLoggerFactory;
+import org.lattejava.http.io.*;
+import org.lattejava.http.log.*;
 
 /**
- * An interface that identifies something that is configurable. Mainly, this allows the HTTPServer to be configured or to be passed a
- * configuration.
+ * An interface that identifies something that is configurable. Mainly, this allows the HTTPServer to be configured or
+ * to be passed a configuration.
  *
  * @param <T> The type of configurable for casting.
  */
@@ -37,8 +36,8 @@ public interface Configurable<T extends Configurable<T>> {
   HTTPServerConfiguration configuration();
 
   /**
-   * Sets the base directory for this server. This is passed to the HTTPContext, which is available from this class. This defaults to the
-   * current working directory of the process.
+   * Sets the base directory for this server. This is passed to the HTTPContext, which is available from this class.
+   * This defaults to the current working directory of the process.
    *
    * @param baseDir The base dir.
    * @return This.
@@ -51,7 +50,8 @@ public interface Configurable<T extends Configurable<T>> {
   /**
    * Sets the buffer size for the chunked input stream. Defaults to 4 Kilobytes.
    *
-   * @param chunkedBufferSize the buffer size used to read a request body that was encoded using 'chunked' transfer-encoding.
+   * @param chunkedBufferSize the buffer size used to read a request body that was encoded using 'chunked'
+   *                          transfer-encoding.
    * @return This.
    */
   default T withChunkedBufferSize(int chunkedBufferSize) {
@@ -63,14 +63,15 @@ public interface Configurable<T extends Configurable<T>> {
    * Sets the default compression behavior for the HTTP response. This behavior can be optionally set per response. See
    * {@link HTTPResponse#setCompress(boolean)}. Defaults to true.
    * <p>
-   * Set this configuration to <code>true</code> if you want to compress the response when the Accept-Encoding header is present. Set this
-   * configuration to <code>false</code> if you want to require the request handler to use {@link HTTPResponse#setCompress(boolean)} in
-   * order to compress the response.
+   * Set this configuration to <code>true</code> if you want to compress the response when the Accept-Encoding header is
+   * present. Set this configuration to <code>false</code> if you want to require the request handler to use
+   * {@link HTTPResponse#setCompress(boolean)} in order to compress the response.
    * <p>
-   * Regardless of this configuration, you always have the option to use {@link HTTPResponse#setCompress(boolean)} on a per-response basis
-   * as an override.
+   * Regardless of this configuration, you always have the option to use {@link HTTPResponse#setCompress(boolean)} on a
+   * per-response basis as an override.
    * <p>
-   * When the request does not contain an Accept-Encoding the response will not be compressed regardless of this configuration.
+   * When the request does not contain an Accept-Encoding the response will not be compressed regardless of this
+   * configuration.
    *
    * @param compressByDefault true if you want to compress by default, or false to not compress by default.
    * @return This.
@@ -81,9 +82,9 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the prefix of the URIs that this server handles. Technically, the server will accept all inbound connections, but if a context
-   * path is set, it can assist the application with building URIs (in HTML for example). This value will be accessible via the
-   * {@link HTTPRequest#getContextPath()} method.
+   * Sets the prefix of the URIs that this server handles. Technically, the server will accept all inbound connections,
+   * but if a context path is set, it can assist the application with building URIs (in HTML for example). This value
+   * will be accessible via the {@link HTTPRequest#getContextPath()} method.
    *
    * @param contextPath The context path for the server.
    * @return This.
@@ -120,8 +121,8 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the duration that the server will attempt to read the first byte from a client. This is the very first byte after the socket
-   * connection has been accepted by the server. Defaults to 2 seconds.
+   * Sets the duration that the server will attempt to read the first byte from a client. This is the very first byte
+   * after the socket connection has been accepted by the server. Defaults to 2 seconds.
    *
    * @param duration The duration.
    * @return This.
@@ -143,8 +144,8 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the duration that the server will allow client connections to remain open and idle after each request has been processed. This is
-   * the Keep-Alive state before the first byte of the next request is read. Defaults to 20 seconds.
+   * Sets the duration that the server will allow client connections to remain open and idle after each request has been
+   * processed. This is the Keep-Alive state before the first byte of the next request is read. Defaults to 20 seconds.
    *
    * @param duration The duration.
    * @return This.
@@ -155,8 +156,8 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Adds a listener configuration for the server. This will listen on the address and port of the configuration but will share the thread
-   * pool of the server.
+   * Adds a listener configuration for the server. This will listen on the address and port of the configuration but
+   * will share the thread pool of the server.
    *
    * @param listener The listener.
    * @return This.
@@ -181,9 +182,10 @@ public interface Configurable<T extends Configurable<T>> {
   /**
    * Sets the maximum number of pending socket connections per HTTP listener.
    * <p>
-   * This number represents how many pending socket connections are allowed to queue before they are rejected. Once the connection is
-   * accepted by the server socket, a client socket is created and handed to an HTTP Worker. This queue length only needs to be large enough
-   * to buffer the incoming requests as fast as we can accept them and hand them to a worker.
+   * This number represents how many pending socket connections are allowed to queue before they are rejected. Once the
+   * connection is accepted by the server socket, a client socket is created and handed to an HTTP Worker. This queue
+   * length only needs to be large enough to buffer the incoming requests as fast as we can accept them and hand them to
+   * a worker.
    * <p>
    * Defaults to 200.
    *
@@ -195,13 +197,14 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the maximum size of the HTTP request body by Content-Type. If this limit is exceeded, the connection will be closed.
+   * Sets the maximum size of the HTTP request body by Content-Type. If this limit is exceeded, the connection will be
+   * closed.
    * <p>
-   * The default size is identified by the "*" key. This default value will be used if a more specific value has not been configured for the
-   * requested Content-Type.
+   * The default size is identified by the "*" key. This default value will be used if a more specific value has not
+   * been configured for the requested Content-Type.
    * <p>
-   * You may also use wildcards to match one to many subtypes. For example, "application/*" will provide a max size for all content types
-   * beginning with application/ when an exact match has not been configured.
+   * You may also use wildcards to match one to many subtypes. For example, "application/*" will provide a max size for
+   * all content types beginning with application/ when an exact match has not been configured.
    * <p>
    * An example lookup for the Content-Type "application/x-www-form-urlencoded" is:
    * <ol>
@@ -226,9 +229,23 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the maximum size of the HTTP request header. The request header includes the HTTP request line, and all HTTP request headers,
-   * essentially everything except the request body. If this maximum limit is exceeded, the connection will be closed. Defaults to 128
-   * Kilobytes.
+   * Sets the maximum size in bytes of a single chunk in a chunked-encoded request body. A chunk whose declared hex size
+   * exceeds this value is rejected as a malformed request before any body bytes are read. This defends against a 4 GiB
+   * (and larger) chunk size that would otherwise truncate when narrowed to an int and collide with the terminator
+   * chunk, enabling request smuggling. Defaults to 1 Megabyte.
+   *
+   * @param maxRequestChunkSize the maximum per-chunk size in bytes.
+   * @return This.
+   */
+  default T withMaxRequestChunkSize(int maxRequestChunkSize) {
+    configuration().withMaxRequestChunkSize(maxRequestChunkSize);
+    return (T) this;
+  }
+
+  /**
+   * Sets the maximum size of the HTTP request header. The request header includes the HTTP request line, and all HTTP
+   * request headers, essentially everything except the request body. If this maximum limit is exceeded, the connection
+   * will be closed. Defaults to 128 Kilobytes.
    * <p>
    * Set this to -1 to disable this limitation.
    *
@@ -241,10 +258,11 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the base directory for this server. This is passed to the HTTPContext, which is available from this class. This defaults to the
-   * current working directory of the process. Defaults to 100,000.
+   * Sets the base directory for this server. This is passed to the HTTPContext, which is available from this class.
+   * This defaults to the current working directory of the process. Defaults to 100,000.
    *
-   * @param maxRequestsPerConnection The maximum number of requests that can be handled by a single persistent connection.
+   * @param maxRequestsPerConnection The maximum number of requests that can be handled by a single persistent
+   *                                 connection.
    * @return This.
    */
   default T withMaxRequestsPerConnection(int maxRequestsPerConnection) {
@@ -253,8 +271,8 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * This configures the maximum size of a chunk in the response when the server is using chunked response encoding. Defaults to 16
-   * Kilobytes.
+   * This configures the maximum size of a chunk in the response when the server is using chunked response encoding.
+   * Defaults to 16 Kilobytes.
    *
    * @param size The size in bytes.
    * @return This.
@@ -265,11 +283,12 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the maximum number of bytes the server will allow worker threads to drain after calling the request handler. If the request
-   * handler does not read all the bytes, and this limit is exceeded the connection will be closed. Defaults to 128 Kilobytes bytes.
+   * Sets the maximum number of bytes the server will allow worker threads to drain after calling the request handler.
+   * If the request handler does not read all the bytes, and this limit is exceeded the connection will be closed.
+   * Defaults to 128 Kilobytes bytes.
    *
-   * @param maxBytesToDrain The maximum number of bytes to drain from the InputStream if the request handler did not read all the available
-   *                        bytes.
+   * @param maxBytesToDrain The maximum number of bytes to drain from the InputStream if the request handler did not
+   *                        read all the available bytes.
    * @return This.
    */
   default T withMaximumBytesToDrain(int maxBytesToDrain) {
@@ -278,8 +297,8 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * This configures the minimum number of bytes per second that a client must send a request to the server before the server closes the
-   * connection. Set this to -1 to disable this check.
+   * This configures the minimum number of bytes per second that a client must send a request to the server before the
+   * server closes the connection. Set this to -1 to disable this check.
    *
    * @param bytesPerSecond The bytes per second throughput.
    * @return This.
@@ -290,8 +309,8 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * This configures the minimum number of bytes per second that a client must read the response from the server before the server closes
-   * the connection. Set this to -1 to disable this check.
+   * This configures the minimum number of bytes per second that a client must read the response from the server before
+   * the server closes the connection. Set this to -1 to disable this check.
    *
    * @param bytesPerSecond The bytes per second throughput.
    * @return This.
@@ -328,8 +347,8 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the duration that the server will allow worker threads to run after the final request byte is read and before the first response
-   * byte is written. Defaults to 10 seconds.
+   * Sets the duration that the server will allow worker threads to run after the final request byte is read and before
+   * the first response byte is written. Defaults to 10 seconds.
    *
    * @param duration The duration.
    * @return This.
@@ -340,10 +359,11 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * This configures the duration of the initial delay before calculating and enforcing the minimum read throughput. Defaults to 5 seconds.
+   * This configures the duration of the initial delay before calculating and enforcing the minimum read throughput.
+   * Defaults to 5 seconds.
    * <p>
-   * This accounts for some warm up period, and exempts short-lived connections that may have smaller payloads that are more difficult to
-   * calculate a reasonable minimum read throughput.
+   * This accounts for some warm up period, and exempts short-lived connections that may have smaller payloads that are
+   * more difficult to calculate a reasonable minimum read throughput.
    *
    * @param duration The duration to delay the enforcement of the minimum read throughput.
    * @return This.
@@ -365,9 +385,10 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the size of the buffer that is used to store the HTTP response before any bytes are written back to the client. This is useful
-   * when the server is generating the response but encounters an error. In this case, the server will throw out the response and change to
-   * a 500 error response. This defaults to 64 Kilobytes. Negative values disable the response buffer.
+   * Sets the size of the buffer that is used to store the HTTP response before any bytes are written back to the
+   * client. This is useful when the server is generating the response but encounters an error. In this case, the server
+   * will throw out the response and change to a 500 error response. This defaults to 64 Kilobytes. Negative values
+   * disable the response buffer.
    * <p>
    * Set to -1 do disable buffering completely.
    *
@@ -382,7 +403,8 @@ public interface Configurable<T extends Configurable<T>> {
   /**
    * Sets the duration the server will wait for running requests to be completed. Defaults to 10 seconds.
    *
-   * @param duration The duration the server will wait for all running request processing threads to complete their work.
+   * @param duration The duration the server will wait for all running request processing threads to complete their
+   *                 work.
    * @return This.
    */
   default T withShutdownDuration(Duration duration) {
@@ -392,8 +414,8 @@ public interface Configurable<T extends Configurable<T>> {
 
   /**
    *
-   * Sets the unexpected exception handler. This handler will be called when an unexpected exception is taken while processing the HTTP
-   * request by the HTTP worker.
+   * Sets the unexpected exception handler. This handler will be called when an unexpected exception is taken while
+   * processing the HTTP request by the HTTP worker.
    * <p>
    * This allows you to customize the status code and logging behavior.
    * <p>
@@ -408,11 +430,11 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * This configures the duration of the initial delay before calculating and enforcing the minimum write throughput. Defaults to 5
-   * seconds.
+   * This configures the duration of the initial delay before calculating and enforcing the minimum write throughput.
+   * Defaults to 5 seconds.
    * <p>
-   * This accounts for some warm up period, and exempts short-lived connections that may have smaller payloads that are more difficult to
-   * calculate a reasonable minimum write throughput.
+   * This accounts for some warm up period, and exempts short-lived connections that may have smaller payloads that are
+   * more difficult to calculate a reasonable minimum write throughput.
    *
    * @param duration The duration to delay the enforcement of the minimum write throughput.
    * @return This.

@@ -15,17 +15,15 @@
  */
 package org.lattejava.http.tests.io;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.io.*;
+import java.nio.charset.*;
 
-import org.lattejava.http.io.ChunkedInputStream;
+import org.lattejava.http.io.*;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.tests.util.ThrowingFunction;
-import org.testng.annotations.Test;
+import org.lattejava.http.tests.util.*;
+import org.testng.annotations.*;
 
-import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.*;
 
 /**
  * @author Brian Pontarelli
@@ -80,20 +78,78 @@ public class ChunkedInputStreamTest {
   }
 
   @Test
+  public void chunkSizeAtConfiguredMaxIsAccepted() throws Exception {
+    // Exactly at the boundary — 16 bytes with maxChunkSize=16. Should be accepted.
+    var body = "10\r\n" + "A".repeat(16) + "\r\n0\r\n\r\n";
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), null);
+    var inputStream = new ChunkedInputStream(pushback, 1024, 16);
+
+    byte[] result = inputStream.readAllBytes();
+    assertEquals(new String(result, StandardCharsets.UTF_8), "A".repeat(16));
+  }
+
+  @Test
+  public void chunkSizeExceedsConfiguredMax() throws Exception {
+    // Chunk size is valid hex (4 chars, fits in int) but exceeds the configured 1 KB max. Rejected before any body bytes would have been
+    // copied out so an attacker cannot force the server to allocate or buffer an oversized chunk.
+    var body = "10000\r\n" + "A".repeat(65536) + "\r\n0\r\n\r\n";
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), null);
+    var inputStream = new ChunkedInputStream(pushback, 1024, 1024);
+
+    try {
+      inputStream.readAllBytes();
+      fail("Expected ChunkException for chunk size exceeding configured maximum.");
+    } catch (ChunkException expected) {
+      assertTrue(expected.getMessage().contains("exceeds the configured maximum"), "Unexpected message: " + expected.getMessage());
+      assertTrue(expected.getMessage().contains("[65536]"));
+      assertTrue(expected.getMessage().contains("[1024]"));
+    }
+  }
+
+  @Test
+  public void chunkSizeHexAtMaxLengthIsAccepted() throws Exception {
+    // 7-character hex is the largest accepted length. Use leading zeros so the parsed value is a small chunk (1 byte) we can actually
+    // read, confirming the parser accepts the 7th-char case without tripping the "exceeds the maximum length" guard.
+    var body = "0000001\r\nA\r\n0\r\n\r\n";
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), null);
+    var inputStream = new ChunkedInputStream(pushback, 1024, 1024 * 1024);
+
+    byte[] result = inputStream.readAllBytes();
+    assertEquals(new String(result, StandardCharsets.UTF_8), "A");
+  }
+
+  @Test
+  public void chunkSizeHexTooLong() throws Exception {
+    // 8 hex characters — would parse to a value that could wrap to negative or collide with 0 after int-cast. Reject at the 8th hex char
+    // before parsing, which also closes the Vuln 2 smuggling primitive (a 0x100000000 hex value casting to 0 and being treated as the
+    // terminator chunk).
+    var body = "100000000\r\n"; // 9 hex chars; the 8th will trigger the cap
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), null);
+    var inputStream = new ChunkedInputStream(pushback, 1024, 1024 * 1024);
+
+    try {
+      inputStream.readAllBytes();
+      fail("Expected ChunkException for over-long chunk size hex.");
+    } catch (ChunkException expected) {
+      assertTrue(expected.getMessage().contains("exceeds the maximum length"), "Unexpected message: " + expected.getMessage());
+    }
+  }
+
+  @Test
   public void multipleChunks() throws Exception {
     withBody("""
-            A\r
-            1234567890\r
-            14\r
-            12345678901234567890\r
-            1E\r
-            123456789012345678901234567890\r
-            0\r
-            \r
-            """
-            ).assertResult("123456789012345678901234567890123456789012345678901234567890")
-             .assertLeftOverBytes(0)
-             .assertNextRead(ChunkedInputStream::read, -1);
+        A\r
+        1234567890\r
+        14\r
+        12345678901234567890\r
+        1E\r
+        123456789012345678901234567890\r
+        0\r
+        \r
+        """
+    ).assertResult("123456789012345678901234567890123456789012345678901234567890")
+     .assertLeftOverBytes(0)
+     .assertNextRead(ChunkedInputStream::read, -1);
   }
 
   @Test
@@ -107,8 +163,8 @@ public class ChunkedInputStreamTest {
             0\r
             \r
             """
-            ).assertResult("Hi mom!")
-             .assertLeftOverBytes(0);
+    ).assertResult("Hi mom!")
+     .assertLeftOverBytes(0);
   }
 
   @Test
@@ -126,7 +182,7 @@ public class ChunkedInputStreamTest {
             123456789012345678901234567890\r
             0\r
             \r
-            """), 1024);
+            """), 1024, 1024 * 1024);
     // All chunks will be read on the first attempt because the buffer is large enough
     assertEquals(inputStream.read(buf), 60);
     var result = new String(buf, 0, 60);
@@ -147,7 +203,7 @@ public class ChunkedInputStreamTest {
             12345678901234567890\r
             0\r
             \r
-            """), 1024);
+            """), 1024, 1024 * 1024);
 
     // All chunks will be read on the first attempt because the buffer is large enough
     assertEquals(inputStream.read(buf), 30);
@@ -225,7 +281,7 @@ public class ChunkedInputStreamTest {
 
     public Builder assertResult(String expected) throws IOException {
       pushbackInputStream = new PushbackInputStream(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), null);
-      chunkedInputStream = new ChunkedInputStream(pushbackInputStream, 2048);
+      chunkedInputStream = new ChunkedInputStream(pushbackInputStream, 2048, 1024 * 1024);
 
       String actual = new String(chunkedInputStream.readAllBytes(), StandardCharsets.UTF_8);
       assertEquals(actual, expected);

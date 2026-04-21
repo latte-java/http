@@ -15,20 +15,15 @@
  */
 package org.lattejava.http.server.io;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.InflaterInputStream;
+import java.io.*;
+import java.util.zip.*;
 
-import org.lattejava.http.ContentTooLargeException;
-import org.lattejava.http.HTTPValues.ContentEncodings;
-import org.lattejava.http.io.ChunkedInputStream;
-import org.lattejava.http.io.FixedLengthInputStream;
+import org.lattejava.http.*;
+import org.lattejava.http.HTTPValues.*;
+import org.lattejava.http.io.*;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.log.Logger;
-import org.lattejava.http.server.HTTPRequest;
-import org.lattejava.http.server.HTTPServerConfiguration;
-import org.lattejava.http.server.Instrumenter;
+import org.lattejava.http.log.*;
+import org.lattejava.http.server.*;
 
 /**
  * An InputStream intended to read the HTTP request body.
@@ -45,6 +40,8 @@ public class HTTPInputStream extends InputStream {
   private final Instrumenter instrumenter;
 
   private final Logger logger;
+
+  private final int maxRequestChunkSize;
 
   private final int maximumBytesToDrain;
 
@@ -72,6 +69,7 @@ public class HTTPInputStream extends InputStream {
     this.delegate = pushbackInputStream;
     this.pushbackInputStream = pushbackInputStream;
     this.chunkedBufferSize = configuration.getChunkedBufferSize();
+    this.maxRequestChunkSize = configuration.getMaxRequestChunkSize();
     this.maximumBytesToDrain = configuration.getMaxBytesToDrain();
     this.maximumContentLength = maximumContentLength;
   }
@@ -167,7 +165,7 @@ public class HTTPInputStream extends InputStream {
       // the request we would have removed Content-Length during validation to remove ambiguity. See HTTPWorker.validatePreamble.
       if (request.isChunked()) {
         logger.trace("Client indicated it was sending an entity-body in the request. Handling body using chunked encoding.");
-        delegate = new ChunkedInputStream(pushbackInputStream, chunkedBufferSize);
+        delegate = new ChunkedInputStream(pushbackInputStream, chunkedBufferSize, maxRequestChunkSize);
         if (instrumenter != null) {
           instrumenter.chunkedRequest();
         }

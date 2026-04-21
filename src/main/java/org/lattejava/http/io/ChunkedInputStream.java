@@ -15,12 +15,12 @@
  */
 package org.lattejava.http.io;
 
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 
-import org.lattejava.http.ParseException;
-import org.lattejava.http.util.HTTPTools;
-import static org.lattejava.http.util.HTTPTools.makeParseException;
+import org.lattejava.http.*;
+import org.lattejava.http.util.*;
+
+import static org.lattejava.http.util.HTTPTools.*;
 
 /**
  * A filter InputStream that handles the chunked body while passing the body bytes down to the delegate stream.
@@ -28,6 +28,12 @@ import static org.lattejava.http.util.HTTPTools.makeParseException;
  * @author Brian Pontarelli
  */
 public class ChunkedInputStream extends InputStream {
+  // RFC 9112 §7.1 chunk-size is a hex number. Integer.MAX_VALUE is "7FFFFFFF" (8 hex chars); any 8-char value starting with 8..F would
+  // wrap to a negative int after parseInt, and 0x100000000 would truncate to 0 and collide with the terminator chunk. Capping the hex
+  // string at 7 chars keeps the parsed value in [0, 0x0FFFFFFF] and eliminates every overflow path without needing to parse as long.
+  // See docs/security/audit-2026-04-20.md Vuln 2.
+  private static final int MaxHeaderSizeHexLength = 7;
+
   private final byte[] b1 = new byte[1];
 
   private final byte[] buffer;
@@ -35,6 +41,8 @@ public class ChunkedInputStream extends InputStream {
   private final PushbackInputStream delegate;
 
   private final StringBuilder headerSizeHex = new StringBuilder();
+
+  private final int maxChunkSize;
 
   private int bufferIndex;
 
@@ -48,9 +56,10 @@ public class ChunkedInputStream extends InputStream {
 
   private ChunkedBodyState state = ChunkedBodyState.ChunkSize;
 
-  public ChunkedInputStream(PushbackInputStream delegate, int bufferSize) {
+  public ChunkedInputStream(PushbackInputStream delegate, int bufferSize, int maxChunkSize) {
     this.delegate = delegate;
     this.buffer = new byte[bufferSize];
+    this.maxChunkSize = maxChunkSize;
   }
 
   @Override
@@ -89,6 +98,10 @@ public class ChunkedInputStream extends InputStream {
 
         // Capture the character to calculate the next chunk size
         if (nextState == ChunkedBodyState.ChunkSize) {
+          if (headerSizeHex.length() >= MaxHeaderSizeHexLength) {
+            throw new ChunkException("Chunk size hex exceeds the maximum length of [" + MaxHeaderSizeHexLength + "] characters.");
+          }
+
           headerSizeHex.appendCodePoint(buffer[bufferIndex]);
           state = nextState;
           bufferIndex++;
@@ -101,8 +114,12 @@ public class ChunkedInputStream extends InputStream {
             throw new ChunkException("Chunk size is missing");
           }
 
-          // This is the start of a chunk, so set the size and counter and reset the size hex string
-          chunkSize = (int) Long.parseLong(headerSizeHex, 0, headerSizeHex.length(), 16);
+          // This is the start of a chunk, so set the size and counter and reset the size hex string. The MaxHeaderSizeHexLength cap above
+          // guarantees the parsed int is non-negative; the config-driven check below bounds it to what the server is willing to accept.
+          chunkSize = Integer.parseInt(headerSizeHex, 0, headerSizeHex.length(), 16);
+          if (chunkSize > maxChunkSize) {
+            throw new ChunkException("Chunk size [" + chunkSize + "] exceeds the configured maximum of [" + maxChunkSize + "] bytes.");
+          }
 
           chunkBytesRead = 0;
           chunkBytesRemaining = chunkSize;
