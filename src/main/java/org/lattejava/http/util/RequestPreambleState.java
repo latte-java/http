@@ -174,9 +174,13 @@ public enum RequestPreambleState {
         return HeaderColon; // Re-using this state because HeaderSP would be the same
       } else if (ch == '\r') {
         return HeaderCR; // Empty header
+      } else if (HTTPTools.isValueCharacter(ch)) {
+        return HeaderValue;
       }
 
-      return HeaderValue;
+      // Otherwise the byte is invalid for a field value (e.g. bare LF, NUL, or other control). Reject rather than fall through, or a
+      // header like "X: \nY: Z" would store LF as the first byte of the value — a smuggling-adjacent primitive.
+      throw makeParseException(ch, this);
     }
 
     @Override

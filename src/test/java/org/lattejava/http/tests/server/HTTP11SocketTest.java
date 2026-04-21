@@ -235,7 +235,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
   }
 
   /**
-   * Host header requirements. Must be provided, and not duplicated.
+   * Host header requirements. Must be provided and not duplicated.
    * </p>
    * See <a href="https://www.rfc-editor.org/rfc/rfc7230#section-5.4">RFC 7230 Section 5.4</a>
    * </p>
@@ -343,7 +343,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
   @Test(invocationCount = 100)
   public void invalid_content_length() throws Exception {
     // In this implementation the Content-Length is stored as a long, and as such we will take a Number Format Exception if the number exceeds Long.MAX_VALUE.
-    // - The above-mentioned RFC does indicate we should account for this - Long.MAX_VALUE is 2^63 - 1 which seems like a reasonable limit.
+    // - The above-mentioned RFC does indicate we should account for this - Long.MAX_VALUE is 2^63 - 1, which seems like a reasonable limit.
 
     // Too large, we will take a NumberFormatException and set this value to null in the request.
     // - So as it is written, we won't return the user an error, but we will assume that a body is not present.
@@ -485,8 +485,8 @@ public class HTTP11SocketTest extends BaseSocketTest {
 
   @Test(invocationCount = 100)
   public void mangled_version() throws Exception {
-    // HTTP reversed, does not begin with HTTP/
-    // - This will fail during the preamble parsing so we are not returning a 505 in this case. My opinion is that
+    // HTTP reversed does not begin with HTTP/
+    // - This will fail during the preamble parsing, so we are not returning a 505 in this case. My opinion is that
     //   this is not an invalid protocol version, it is simply a malformed request.
     withRequest("""
             GET / PTTH/1.1\r
@@ -503,7 +503,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
         """);
 
     // Repeated allowed characters, does not begin with HTTP/
-    // - This will fail during the preamble parsing so we are not returning a 505 in this case. My opinion is that
+    // - This will fail during the preamble parsing, so we are not returning a 505 in this case. My opinion is that
     //   this is not an invalid protocol version, it is simply a malformed request.
     withRequest("""
             GET / HHHH/1.1\r
@@ -522,7 +522,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
 
   @Test(invocationCount = 100)
   public void missing_protocol() throws Exception {
-    // - This will fail during the preamble parsing so we are not returning a 505 in this case. My opinion is that
+    // - This will fail during the preamble parsing, so we are not returning a 505 in this case. My opinion is that
     //   this is not an invalid protocol version, it is simply a malformed request.
     withRequest("""
             GET /\r
@@ -626,7 +626,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
    * <p>
    * See <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.15">RFC 9110 Section 15.5.15</a>
    * <p>
-   * Note: the server does not have a separate URI length limit. The URI is part of the preamble which is bounded by
+   * Note: the server does not have a separate URI length limit. The URI is part of the preamble, which is bounded by
    * maxRequestHeaderSize. Exceeding this limit returns 431 (Request Header Fields Too Large) rather than the
    * RFC-specified 414 (URI Too Long). This test documents the current behavior.
    */
@@ -670,11 +670,11 @@ public class HTTP11SocketTest extends BaseSocketTest {
 
   /**
    * GET handler that explicitly sets Transfer-Encoding: chunked and writes bytes. The server must wrap the output
-   * delegate in ChunkedOutputStream so the bytes are chunk-framed on the wire — not emitted raw.
+   * delegate in ChunkedOutputStream, so the bytes are chunk-framed on the wire — not emitted raw.
    */
   @Test
   public void get_handlerSetsTransferEncodingChunked_writesBytes_serverChunksFrames() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
       res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
       res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
@@ -704,7 +704,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
    */
   @Test
   public void get_handlerSetsTransferEncodingChunked_noWrite_strippedForContentLengthZero() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
       res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
       // Writes nothing.
@@ -730,7 +730,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
    */
   @Test
   public void get_handlerSetsBothContentLengthAndTransferEncoding_writes_contentLengthStripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
       res.setContentLength(8L);
       res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
@@ -756,12 +756,12 @@ public class HTTP11SocketTest extends BaseSocketTest {
   }
 
   /**
-   * GET to a 204 handler that writes bytes. The body must be suppressed and neither content-length nor
+   * GET to a 204 handler that writes bytes. The body must be suppressed, and neither content-length nor
    * transfer-encoding should appear in the preamble (RFC 9110 §15.3.5).
    */
   @Test
   public void get_status204_handlerWritesBytes_bodySuppressed() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(204);
       res.getOutputStream().write("0123456789".getBytes(StandardCharsets.UTF_8));
     };
@@ -780,12 +780,12 @@ public class HTTP11SocketTest extends BaseSocketTest {
   }
 
   /**
-   * GET to a 304 handler that writes bytes. The body must be suppressed and neither content-length nor
+   * GET to a 304 handler that writes bytes. The body must be suppressed, and neither content-length nor
    * transfer-encoding should appear in the preamble (RFC 9110 §15.4.5).
    */
   @Test
   public void get_status304_handlerWritesBytes_bodySuppressed() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(304);
       res.getOutputStream().write("cached content".getBytes(StandardCharsets.UTF_8));
     };
@@ -808,7 +808,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
    */
   @Test
   public void get_status204_handlerSetsContentLength_stripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(204);
       res.setContentLength(50L);
     };
@@ -831,7 +831,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
    */
   @Test
   public void get_status304_handlerSetsContentLength_stripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(304);
       res.setContentLength(50L);
     };
@@ -855,7 +855,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
    */
   @Test
   public void get_handlerSetsBothContentLengthAndTransferEncoding_noWrite_defensiveContentLengthZero() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
       res.setContentLength(50L);
       res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
@@ -880,7 +880,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
    */
   @Test
   public void get_status304_handlerSetsTransferEncoding_stripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(304);
       res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
     };

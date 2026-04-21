@@ -126,10 +126,12 @@ public final class HTTPTools {
     return ch >= '!' && ch <= '~';
   }
 
-  // RFC9110 section-5.5 allows for "obs-text", which includes 0x80-0xFF, but really shouldn't be used.
+  // RFC 9110 §5.5 field-content = field-vchar [ 1*( SP / HTAB / field-vchar ) field-vchar ], where field-vchar = VCHAR / obs-text. Bare
+  // CR and bare LF are excluded — accepting LF here would let an attacker splice a second header into a field value, and a front-end proxy
+  // that splits on LF would disagree with us on header boundaries. See docs/security/audit-2026-04-20.md Vuln 3.
   public static boolean isValueCharacter(byte ch) {
     int intVal = ch & 0xFF;  // Convert the value into an integer without extending the sign bit.
-    return isURICharacter(ch) || intVal == ' ' || intVal == '\t' || intVal == '\n' || intVal >= 0x80;
+    return isURICharacter(ch) || intVal == ' ' || intVal == '\t' || intVal >= 0x80;
   }
 
   /**
