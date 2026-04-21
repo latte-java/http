@@ -15,23 +15,15 @@
  */
 package org.lattejava.http.tests.io;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.io.*;
+import java.nio.file.*;
 import java.util.*;
 
-import org.lattejava.http.FileInfo;
-import org.lattejava.http.ParseException;
+import org.lattejava.http.*;
 import org.lattejava.http.io.*;
-import org.testng.annotations.AfterTest;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.testng.annotations.*;
 
-import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.*;
 import static org.testng.FileAssert.fail;
 
 /**
@@ -216,6 +208,40 @@ public class MultipartStreamTest {
     Files.delete(files.getFirst().file);
   }
 
+  /**
+   * Regression for docs/security/audit-2026-04-20.md Vuln 5. The previous {@code start += end} arithmetic in
+   * {@code MultipartStream.reload} overshot the real write offset whenever {@code InputStream.read} returned fewer
+   * bytes than requested — a routine condition under TCP segmentation or slow/TLS clients. The loop then wrote
+   * subsequent chunks into the wrong buffer positions, leaving uninitialized gaps that {@code findBoundary} would scan
+   * as if they were real bytes, and eventually overrunning the buffer end with an {@code IndexOutOfBoundsException}.
+   * This test drips the body one byte at a time, which forces {@code reload} to iterate enough times for the bug to
+   * manifest; with the {@code start += read} fix it parses normally.
+   */
+  @Test
+  public void trickling_one_byte_at_a_time() throws IOException {
+    byte[] body = """
+        ------WebKitFormBoundaryTWfMVJErBoLURJIe\r
+        Content-Disposition: form-data; name="foo"\r
+        \r
+        bar\r
+        ------WebKitFormBoundaryTWfMVJErBoLURJIe\r
+        Content-Disposition: form-data; name="file"; filename="foo.jpg"\r
+        \r
+        filecontents\r
+        ------WebKitFormBoundaryTWfMVJErBoLURJIe--""".getBytes();
+    Map<String, List<String>> parameters = new HashMap<>();
+    List<FileInfo> files = new LinkedList<>();
+    MultipartStream stream = new MultipartStream(new TricklingInputStream(body), "----WebKitFormBoundaryTWfMVJErBoLURJIe".getBytes(), fileManager, new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow));
+    stream.process(parameters, files);
+
+    assertEquals(parameters.get("foo"), List.of("bar"));
+    assertEquals(files.size(), 1);
+    assertEquals(Files.readString(files.getFirst().file), "filecontents");
+    assertEquals(files.getFirst().fileName, "foo.jpg");
+    assertEquals(files.getFirst().name, "file");
+    Files.delete(files.getFirst().file);
+  }
+
   @Test
   public void truncated() throws IOException {
     ByteArrayInputStream is = new ByteArrayInputStream("""
@@ -280,6 +306,42 @@ public class MultipartStreamTest {
         result.add("" + part.length);
       }
       return "{" + String.join(",", result) + "}";
+    }
+  }
+
+  /**
+   * An {@link InputStream} that returns exactly one byte per {@code read} call. Models the worst-case behavior of a
+   * slow / TLS / heavily segmented client and forces {@code MultipartStream.reload} to iterate once per byte.
+   */
+  public static class TricklingInputStream extends InputStream {
+    private final byte[] source;
+
+    private int index;
+
+    public TricklingInputStream(byte[] source) {
+      this.source = source;
+    }
+
+    @Override
+    public int read() {
+      if (index >= source.length) {
+        return -1;
+      }
+
+      return source[index++] & 0xFF;
+    }
+
+    @Override
+    public int read(byte[] buffer, int offset, int length) {
+      if (index >= source.length) {
+        return -1;
+      }
+      if (length == 0) {
+        return 0;
+      }
+
+      buffer[offset] = source[index++];
+      return 1;
     }
   }
 }

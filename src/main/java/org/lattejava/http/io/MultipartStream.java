@@ -15,33 +15,15 @@
  */
 package org.lattejava.http.io;
 
-import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+import java.io.*;
+import java.nio.charset.*;
+import java.nio.file.*;
+import java.util.*;
 
-import org.lattejava.http.ContentTooLargeException;
-import org.lattejava.http.FileInfo;
-import org.lattejava.http.HTTPValues.ContentTypes;
-import org.lattejava.http.HTTPValues.ControlBytes;
-import org.lattejava.http.HTTPValues.DispositionParameters;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.ParseException;
-import org.lattejava.http.UnprocessableContentException;
-import org.lattejava.http.util.HTTPTools;
-import org.lattejava.http.util.HTTPTools.HeaderValue;
-import org.lattejava.http.util.RequestPreambleState;
+import org.lattejava.http.*;
+import org.lattejava.http.HTTPValues.*;
+import org.lattejava.http.util.*;
+import org.lattejava.http.util.HTTPTools.*;
 
 /**
  * Handles the multipart body encoding and file uploads.
@@ -74,8 +56,8 @@ public class MultipartStream {
   /**
    * Constructs a {@code MultipartStream} with a file manager, and a multipart  configuration.
    * <p>
-   * Note that the buffer must be at least big enough to contain the boundary string, plus 4 characters for CR/LF and double dash, plus at
-   * least one byte of data.  Too small a buffer size setting will degrade performance.
+   * Note that the buffer must be at least big enough to contain the boundary string, plus 4 characters for CR/LF and
+   * double dash, plus at least one byte of data.  Too small a buffer size setting will degrade performance.
    *
    * @param input                  The {@code InputStream} to serve as a data source.
    * @param boundary               The token used for dividing the stream into {@code encapsulations}.
@@ -152,8 +134,8 @@ public class MultipartStream {
   }
 
   /**
-   * Closes a boundary by reading 2 more bytes. If those bytes are CRLF, then there are more parts. If they are --, then the body is
-   * complete.
+   * Closes a boundary by reading 2 more bytes. If those bytes are CRLF, then there are more parts. If they are --, then
+   * the body is complete.
    *
    * @return True if there are more parts.
    * @throws IOException    If any I/O operation failed.
@@ -180,10 +162,11 @@ public class MultipartStream {
   }
 
   /**
-   * Searches for the {@code boundary} in the current {@code buffer} region. At the same time, if a partial boundary is found, this sets the
-   * {@code partialBoundary} field.
+   * Searches for the {@code boundary} in the current {@code buffer} region. At the same time, if a partial boundary is
+   * found, this sets the {@code partialBoundary} field.
    *
-   * @return The position of the boundary found, counting from the beginning of the {@code buffer}, or {@code -1} if not found.
+   * @return The position of the boundary found, counting from the beginning of the {@code buffer}, or {@code -1} if not
+   *     found.
    */
   private int findBoundary() {
     int bufferIndex = current;
@@ -379,9 +362,13 @@ public class MultipartStream {
       }
 
       end += read;
-      start += end;
+      start += read;
 
-      // Keep track of all bytes read for this multipart stream. Fail if the length has been exceeded.
+      // Keep track of all bytes read for this multipart stream. Fail if the length has been exceeded. With the previous `start += end`
+      // arithmetic, `start` grew quadratically across iterations whenever `input.read` returned fewer bytes than requested — a routine
+      // condition under TCP segmentation or TLS record boundaries — so `start` would overshoot the real write offset, leaving gaps and
+      // misattributed bytes in the buffer and eventually throwing IndexOutOfBoundsException on an overrun. See
+      // docs/security/audit-2026-04-20.md Vuln 5.
       bytesRead += read;
       long maximumRequestSize = multipartConfiguration.getMaxRequestSize();
       if (bytesRead > maximumRequestSize) {
