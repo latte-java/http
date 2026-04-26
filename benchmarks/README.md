@@ -4,7 +4,7 @@ Automated benchmarking framework for comparing java-http against other Java HTTP
 
 ## Prerequisites
 
-- **Java 21+** with `JAVA_HOME` set (e.g., `export JAVA_HOME=/opt/homebrew/opt/openjdk@21`)
+- **Java 25+** with `JAVA_HOME` set (e.g., `export JAVA_HOME=/opt/homebrew/opt/openjdk@25`). The `self` server depends on the root `org.lattejava:http` build, which targets Java 25 bytecode.
 - **Latte** build tool (`latte` on PATH)
 - **wrk** HTTP benchmark tool (`brew install wrk` on macOS)
 - **jq** for JSON processing (`brew install jq` on macOS)
@@ -13,10 +13,10 @@ Automated benchmarking framework for comparing java-http against other Java HTTP
 
 ```bash
 # Run all servers, all scenarios, default 30s duration
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 ./run-benchmarks.sh
+JAVA_HOME=/opt/homebrew/opt/openjdk@25 ./run-benchmarks.sh
 
 # Quick smoke test
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 ./run-benchmarks.sh --servers self --scenarios hello --duration 5s
+JAVA_HOME=/opt/homebrew/opt/openjdk@25 ./run-benchmarks.sh --servers self --scenarios hello --duration 5s
 ```
 
 ## Servers Under Test
