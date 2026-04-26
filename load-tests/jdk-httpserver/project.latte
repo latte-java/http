@@ -15,13 +15,7 @@
  */
 project(group: "org.lattejava", name: "jdk-httpserver", version: "0.1.0", licenses: ["Apache-2.0"]) {
   workflow {
-    fetch {
-      cache()
-      url(url: "https://repository.savantbuild.org")
-    }
-    publish {
-      cache()
-    }
+    standard()
   }
 
   dependencies {
@@ -29,7 +23,7 @@ project(group: "org.lattejava", name: "jdk-httpserver", version: "0.1.0", licens
 }
 
 // Plugins
-file = loadPlugin(id: "org.savantbuild.plugin:file:2.0.0")
+file = loadPlugin(id: "org.lattejava.plugin:file:0.1.5")
 
 target(name: "clean", description: "Cleans the build directory") {
   new File("build").deleteDir()

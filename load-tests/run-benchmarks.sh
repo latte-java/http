@@ -95,7 +95,10 @@ check_command() {
 if [[ "${TOOL}" == "wrk" || "${TOOL}" == "both" ]]; then
   check_command wrk
 fi
-check_command sb
+check_command latte
+if [[ "${TOOL}" == "lattejava" || "${TOOL}" == "both" ]]; then
+  check_command sb
+fi
 check_command java
 check_command curl
 check_command jq
@@ -571,7 +574,7 @@ for server in ${SERVERS}; do
 
   echo "--- Building ${server} ---"
   build_target="$(server_build_target "${server}")"
-  (cd "${server_dir}" && sb ${build_target}) || {
+  (cd "${server_dir}" && latte ${build_target}) || {
     echo "ERROR: Failed to build ${server}, skipping."
     continue
   }

@@ -17,14 +17,7 @@ nettyVersion = "4.1.118.Final"
 
 project(group: "org.lattejava", name: "netty", version: "0.1.0", licenses: ["Apache-2.0"]) {
   workflow {
-    fetch {
-      cache()
-      url(url: "https://repository.savantbuild.org")
-      maven()
-    }
-    publish {
-      cache()
-    }
+    standard()
 
     semanticVersions {
       // Netty uses .Final suffix on all modules
@@ -57,9 +50,9 @@ project(group: "org.lattejava", name: "netty", version: "0.1.0", licenses: ["Apa
 }
 
 // Plugins
-dependency = loadPlugin(id: "org.savantbuild.plugin:dependency:2.0.0")
-file = loadPlugin(id: "org.savantbuild.plugin:file:2.0.0")
-java = loadPlugin(id: "org.savantbuild.plugin:java:2.0.0")
+dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.1.5")
+file = loadPlugin(id: "org.lattejava.plugin:file:0.1.5")
+java = loadPlugin(id: "org.lattejava.plugin:java:0.1.6")
 
 java.settings.javaVersion = "21"
 java.settings.compilerArguments = ""
@@ -72,7 +65,7 @@ target(name: "clean", description: "Cleans the build directory") {
 }
 
 target(name: "compile", description: "Compiles the Java source files") {
-  java.compile()
+  java.compileMain()
 }
 
 target(name: "jar", description: "Builds the project JARs", dependsOn: ["compile"]) {

@@ -1,0 +1,99 @@
+/*
+ * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied. See the License for the specific
+ * language governing permissions and limitations under the License.
+ */
+servletApiVersion = "6.1.0"
+tomcatVersion = "11.0.21"
+
+project(group: "org.lattejava", name: "tomcat", version: "0.1.10", licenses: ["Apache-2.0"]) {
+  workflow {
+    standard()
+  }
+
+  dependencies {
+    group(name: "provided") {
+      dependency(id: "jakarta.servlet:jakarta.servlet-api:${servletApiVersion}")
+    }
+  }
+
+  publications {
+    standard()
+  }
+}
+
+// Plugins
+file = loadPlugin(id: "org.lattejava.plugin:file:0.1.5")
+idea = loadPlugin(id: "org.lattejava.plugin:idea:0.1.5")
+java = loadPlugin(id: "org.lattejava.plugin:java:0.1.6")
+
+java.settings.javaVersion = "21"
+java.settings.compilerArguments = ""
+java.settings.mainDependencies = [
+    [group: "provided", transitive: false, fetchSource: false]
+]
+
+target(name: "clean", description: "Cleans the build directory") {
+  java.clean()
+}
+
+target(name: "compile", description: "Compiles the Java source files") {
+  java.compileMain()
+}
+
+target(name: "jar", description: "Builds the project JARs", dependsOn: ["compile"]) {
+  java.jar()
+}
+
+target(name: "tomcat", description: "Downloads Tomcat and lays out the webapp", dependsOn: ["jar"]) {
+  var tarball = new File("build/cache/apache-tomcat-${tomcatVersion}.tar.gz")
+  if (!tarball.exists()) {
+    tarball.parentFile.mkdirs()
+    var url = "https://archive.apache.org/dist/tomcat/tomcat-11/v${tomcatVersion}/bin/apache-tomcat-${tomcatVersion}.tar.gz"
+    if (new ProcessBuilder('curl', '-fsSL', '-o', tarball.absolutePath, url).inheritIO().start().waitFor() != 0) {
+      fail("Unable to download Tomcat from [" + url + "]")
+    }
+  }
+
+  var distDir = new File("build/dist/tomcat")
+  distDir.deleteDir()
+  distDir.mkdirs()
+
+  if (new ProcessBuilder('tar', '-xzf', tarball.absolutePath, '-C', distDir.absolutePath).inheritIO().start().waitFor() != 0) {
+    fail("Unable to extract Tomcat tarball [" + tarball.absolutePath + "]")
+  }
+  new File(distDir, "apache-tomcat-${tomcatVersion}").renameTo(new File(distDir, "apache-tomcat"))
+
+  // Drop our customized server.xml on top of the stock conf/
+  file.copy(to: "build/dist/tomcat/apache-tomcat/conf") {
+    fileSet(dir: "src/main/tomcat/conf")
+  }
+
+  // Lay out an exploded webapp at build/dist/tomcat/web (referenced by server.xml's Context docBase)
+  file.copy(to: "build/dist/tomcat/web") {
+    fileSet(dir: "web")
+  }
+  file.copy(to: "build/dist/tomcat/web/WEB-INF/lib") {
+    fileSet(dir: "build/jars")
+  }
+}
+
+target(name: "idea", description: "Updates the IntelliJ IDEA module file") {
+  idea.iml()
+}
+
+target(name: "start", description: "Starts the Tomcat server for load testing!", dependsOn: ["tomcat"]) {
+  if (new ProcessBuilder('./catalina.sh', 'run').directory(new File("build/dist/tomcat/apache-tomcat/bin")).inheritIO().start().waitFor() != 0) {
+    fail("Unable to start the server!")
+  }
+}
