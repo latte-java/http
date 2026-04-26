@@ -98,3 +98,11 @@ target(name: "format", description: "Formats the source code using IntelliJ's CL
 target(name: "print-dependency-tree", description: "Prints the dependency tree") {
   dependency.printFull()
 }
+
+private void exec(cmd, boolean ignoreFailure = false) {
+  def proc = cmd.execute()
+  proc.waitForProcessOutput(System.out, System.err)
+  if (!ignoreFailure && proc.exitValue() != 0) {
+    fail("Command failed [exit=${proc.exitValue()}]: ${cmd}")
+  }
+}
