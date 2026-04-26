@@ -16,8 +16,9 @@
 package org.lattejava.http.log;
 
 /**
- * A simple interface used by the HTTP server/client instances to create loggers. This removes any coupling between the HTTP server and
- * specific logging frameworks like JUL or SLF4J. Mapping between this logger and other frameworks is simple though.
+ * A simple interface used by the HTTP server/client instances to create loggers. This removes any coupling between the
+ * HTTP server and specific logging frameworks like JUL or SLF4J. Mapping between this logger and other frameworks is
+ * simple though.
  *
  * @author Brian Pontarelli
  */

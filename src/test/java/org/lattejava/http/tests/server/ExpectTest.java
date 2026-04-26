@@ -92,7 +92,7 @@ public class ExpectTest extends BaseTest {
         var response = client.send(
             HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").expectContinue(true).POST(BodyPublishers.ofString(RequestBody)).build(),
             _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                  );
+        );
 
         assertEquals(response.statusCode(), 200);
         assertEquals(response.body(), ExpectedResponse);
@@ -118,7 +118,7 @@ public class ExpectTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").expectContinue(true).POST(BodyPublishers.ofString(RequestBody)).build(),
           _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                );
+      );
 
       assertEquals(response.statusCode(), 417);
       assertEquals(response.body(), "");

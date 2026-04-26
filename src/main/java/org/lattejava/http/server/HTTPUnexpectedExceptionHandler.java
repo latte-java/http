@@ -23,10 +23,11 @@ package org.lattejava.http.server;
 public interface HTTPUnexpectedExceptionHandler {
   /**
    *
-   * This handler will be called when an unexpected exception is taken while processing an HTTP request by the HTTP worker.
+   * This handler will be called when an unexpected exception is taken while processing an HTTP request by the HTTP
+   * worker.
    * <p>
-   * The intent is that this provides additional flexibility on the status code and the logging behavior when an unexpected exception
-   * caught.
+   * The intent is that this provides additional flexibility on the status code and the logging behavior when an
+   * unexpected exception caught.
    *
    * @param context the exception context
    */

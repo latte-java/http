@@ -79,10 +79,10 @@ public class HeadRequestContractTest extends BaseTest {
          HttpClient client = HttpClient.newBuilder().connectTimeout(ClientTimeout).build()) {
 
       HttpRequest request = HttpRequest.newBuilder()
-          .uri(URI.create("http://localhost:4242/"))
-          .timeout(ClientTimeout)
-          .method("HEAD", HttpRequest.BodyPublishers.noBody())
-          .build();
+                                       .uri(URI.create("http://localhost:4242/"))
+                                       .timeout(ClientTimeout)
+                                       .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                                       .build();
 
       HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
 

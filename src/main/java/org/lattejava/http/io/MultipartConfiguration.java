@@ -18,7 +18,8 @@ package org.lattejava.http.io;
 import java.util.Objects;
 
 /**
- * Provides configuration to control the behavior of the {@link MultipartStream} parser, specifically around file uploads.
+ * Provides configuration to control the behavior of the {@link MultipartStream} parser, specifically around file
+ * uploads.
  *
  * @author Daniel DeGroff
  */
@@ -64,13 +65,13 @@ public class MultipartConfiguration {
       return false;
     }
     return deleteTemporaryFiles == that.deleteTemporaryFiles &&
-           fileUploadPolicy == that.fileUploadPolicy &&
-           maxFileSize == that.maxFileSize &&
-           maxRequestSize == that.maxRequestSize &&
-           multipartBufferSize == that.multipartBufferSize &&
-           Objects.equals(temporaryFileLocation, that.temporaryFileLocation) &&
-           Objects.equals(temporaryFilenamePrefix, that.temporaryFilenamePrefix) &&
-           Objects.equals(temporaryFilenameSuffix, that.temporaryFilenameSuffix);
+        fileUploadPolicy == that.fileUploadPolicy &&
+        maxFileSize == that.maxFileSize &&
+        maxRequestSize == that.maxRequestSize &&
+        multipartBufferSize == that.multipartBufferSize &&
+        Objects.equals(temporaryFileLocation, that.temporaryFileLocation) &&
+        Objects.equals(temporaryFilenamePrefix, that.temporaryFilenamePrefix) &&
+        Objects.equals(temporaryFilenameSuffix, that.temporaryFilenameSuffix);
   }
 
   public MultipartFileUploadPolicy getFileUploadPolicy() {
@@ -119,8 +120,8 @@ public class MultipartConfiguration {
   }
 
   /**
-   * Setting this to <code>true</code> will cause the server to delete all temporary files created while processing a multipart stream after
-   * the request handler has been invoked.
+   * Setting this to <code>true</code> will cause the server to delete all temporary files created while processing a
+   * multipart stream after the request handler has been invoked.
    * <p>
    * If you set this to <code>false</code> the request handler will need to manage cleanup of these temporary files.
    *
@@ -187,7 +188,8 @@ public class MultipartConfiguration {
   /**
    * A temporary file location used for creating temporary files.
    * <p>
-   * The specific behavior of creating temporary files will be dependant upon the {@link MultipartFileManager} implementation.
+   * The specific behavior of creating temporary files will be dependant upon the {@link MultipartFileManager}
+   * implementation.
    *
    * @param temporaryFileLocation the temporary file location. Cannot be <code>null</code>.
    * @return This.
@@ -201,8 +203,8 @@ public class MultipartConfiguration {
   /**
    * An optional filename prefix used for naming temporary files.
    * <p>
-   * This parameter may be set to <code>null</code>. When set to <code>null</code> a system default such as '.tmp' may be used when naming a
-   * temporary file depending upon the {@link MultipartFileManager} implementation.
+   * This parameter may be set to <code>null</code>. When set to <code>null</code> a system default such as '.tmp' may
+   * be used when naming a temporary file depending upon the {@link MultipartFileManager} implementation.
    *
    * @param temporaryFilenamePrefix an optional filename prefix to be used when creating temporary files.
    * @return This.
@@ -215,8 +217,9 @@ public class MultipartConfiguration {
   /**
    * An optional filename suffix used for naming temporary files.
    * <p>
-   * This parameter may be set to <code>null</code>. The specific file naming with or without this optional suffix may be dependant upon the
-   * {@link MultipartFileManager} implementation. file depending upon the {@link MultipartFileManager} implementation.
+   * This parameter may be set to <code>null</code>. The specific file naming with or without this optional suffix may
+   * be dependant upon the {@link MultipartFileManager} implementation. file depending upon the
+   * {@link MultipartFileManager} implementation.
    *
    * @param temporaryFilenameSuffix an optional filename suffix to be used when creating temporary files.
    * @return This.

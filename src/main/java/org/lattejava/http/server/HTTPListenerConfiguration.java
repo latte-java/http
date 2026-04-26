@@ -45,8 +45,8 @@ public class HTTPListenerConfiguration {
   private final boolean tls;
 
   /**
-   * Stores the configuration for a single HTTP listener for the server. This constructor sets up a non-TLS based listener that binds to all
-   * the network interfaces of the server.
+   * Stores the configuration for a single HTTP listener for the server. This constructor sets up a non-TLS based
+   * listener that binds to all the network interfaces of the server.
    *
    * @param port The port of this listener.
    */
@@ -62,7 +62,8 @@ public class HTTPListenerConfiguration {
    * Stores the configuration for a single HTTP listener for the server. This constructor sets up a TLS based listener.
    *
    * @param port        The port of this listener.
-   * @param certificate The certificate as a PEM encoded X.509 certificate String. May include intermediate CA certificates.
+   * @param certificate The certificate as a PEM encoded X.509 certificate String. May include intermediate CA
+   *                    certificates.
    * @param privateKey  The private key as a PKCS8 encoded DER private key.
    * @throws GeneralSecurityException If the private key or certificate Strings were not valid and could not be parsed.
    */
@@ -96,8 +97,8 @@ public class HTTPListenerConfiguration {
   }
 
   /**
-   * Stores the configuration for a single HTTP listener for the server. This constructor sets up a TLS based listener using the supplied
-   * certificate chain.
+   * Stores the configuration for a single HTTP listener for the server. This constructor sets up a TLS based listener
+   * using the supplied certificate chain.
    *
    * @param port             The port of this listener.
    * @param certificateChain The certificate Object.
@@ -115,7 +116,8 @@ public class HTTPListenerConfiguration {
   }
 
   /**
-   * Stores the configuration for a single HTTP listener for the server. This constructor sets up a non-TLS based listener.
+   * Stores the configuration for a single HTTP listener for the server. This constructor sets up a non-TLS based
+   * listener.
    *
    * @param bindAddress The bind address of this listener.
    * @param port        The port of this listener.

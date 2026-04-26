@@ -16,8 +16,8 @@
 package org.lattejava.http.server;
 
 /**
- * A simple counting instrumenter for the HTTPServer. This is not thread safe, so if you need accurate data, you'll want to use the
- * {@link ThreadSafeCountingInstrumenter}.
+ * A simple counting instrumenter for the HTTPServer. This is not thread safe, so if you need accurate data, you'll want
+ * to use the {@link ThreadSafeCountingInstrumenter}.
  *
  * @author Brian Pontarelli
  */

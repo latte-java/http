@@ -31,9 +31,8 @@ import static org.testng.Assert.*;
 /**
  * Tests for HTTPContext focusing on path traversal security and resource resolution.
  * <p>
- * These tests verify that HTTPContext properly prevents path traversal attacks as described in:
- * - CVE-2019-19781 (Citrix path traversal)
- * - Blog post: https://blog.dochia.dev/blog/http_edge_cases/
+ * These tests verify that HTTPContext properly prevents path traversal attacks as described in: - CVE-2019-19781
+ * (Citrix path traversal) - Blog post: https://blog.dochia.dev/blog/http_edge_cases/
  *
  * @author Dan Moore
  */
@@ -134,8 +133,8 @@ public class HTTPContextTest {
   }
 
   /**
-   * Test edge case: path that goes down then up but stays within baseDir.
-   * For example: "subdir/../index.html" should resolve to "index.html"
+   * Test edge case: path that goes down then up but stays within baseDir. For example: "subdir/../index.html" should
+   * resolve to "index.html"
    */
   @Test
   public void testNormalizedPathWithinBaseDirSucceeds() {
@@ -150,8 +149,8 @@ public class HTTPContextTest {
   }
 
   /**
-   * Test path traversal attack using ../ sequences (CVE-2019-19781 style).
-   * These attacks attempt to escape the baseDir and access parent directories.
+   * Test path traversal attack using ../ sequences (CVE-2019-19781 style). These attacks attempt to escape the baseDir
+   * and access parent directories.
    */
   @Test
   public void testPathTraversalAttacksBlocked() {
@@ -216,8 +215,7 @@ public class HTTPContextTest {
   }
 
   /**
-   * Test URL-encoded path traversal attacks.
-   * Attackers often URL-encode the ../ sequences to bypass naive filters.
+   * Test URL-encoded path traversal attacks. Attackers often URL-encode the ../ sequences to bypass naive filters.
    */
   @Test
   public void testUrlEncodedTraversalBlocked() {

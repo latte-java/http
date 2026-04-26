@@ -25,8 +25,8 @@ import org.lattejava.http.server.HTTPServer;
 import static org.testng.Assert.assertEquals;
 
 /**
- * A base class to provide some helpers for socket based tests. A socket test doesn't use an HTTP client, but instead manually writes to the
- * socket in order to have more control over the input.
+ * A base class to provide some helpers for socket based tests. A socket test doesn't use an HTTP client, but instead
+ * manually writes to the socket in order to have more control over the input.
  *
  * @author Daniel DeGroff
  */

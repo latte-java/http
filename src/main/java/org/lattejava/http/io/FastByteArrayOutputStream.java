@@ -20,8 +20,8 @@ import java.io.OutputStream;
 import java.util.Arrays;
 
 /**
- * A simple fast byte array output stream. This does no checks and has no synchronization. It simply jams data in an array and resizes in
- * increments (set in the constructor).
+ * A simple fast byte array output stream. This does no checks and has no synchronization. It simply jams data in an
+ * array and resizes in increments (set in the constructor).
  *
  * @author Brian Pontarelli
  */

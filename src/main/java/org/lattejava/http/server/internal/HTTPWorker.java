@@ -360,16 +360,16 @@ public class HTTPWorker implements Runnable {
   /**
    * Determine if we should keep the socket alive.
    * <p>
-   * Note that the HTTP request handler may have modified the 'Connection' response header, so verify the current state using the HTTP
-   * response header.
+   * Note that the HTTP request handler may have modified the 'Connection' response header, so verify the current state
+   * using the HTTP response header.
    * <p>
-   * When the client has requested HTTP/1.0, the default behavior will be to close the connection. When the client has requested HTTP/1.1,
-   * the default behavior will be to keep the connection alive.
+   * When the client has requested HTTP/1.0, the default behavior will be to close the connection. When the client has
+   * requested HTTP/1.1, the default behavior will be to keep the connection alive.
    * <p>
-   * The reason this is an important distinction is that an HTTP/1.0 client, unless it is explicitly asking to keep the connection open,
-   * will not reuse the connection. So if we do not close it, we will have to wait until we reach the socket timeout before closing the
-   * socket. In the meantime the HTTP/1.0 client will keep opening new connections. This leads to very poor performance for these clients,
-   * and there are still HTTP/1.0 benchmark tools around.
+   * The reason this is an important distinction is that an HTTP/1.0 client, unless it is explicitly asking to keep the
+   * connection open, will not reuse the connection. So if we do not close it, we will have to wait until we reach the
+   * socket timeout before closing the socket. In the meantime the HTTP/1.0 client will keep opening new connections.
+   * This leads to very poor performance for these clients, and there are still HTTP/1.0 benchmark tools around.
    *
    * @param request  the http request
    * @param response the http response

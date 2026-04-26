@@ -37,8 +37,8 @@ import org.lattejava.http.server.Instrumenter;
 import org.lattejava.http.server.io.Throughput;
 
 /**
- * A thread that manages the accept process for a single server socket. Once a connection is accepted, the socket is passed to a virtual
- * thread for processing.
+ * A thread that manages the accept process for a single server socket. Once a connection is accepted, the socket is
+ * passed to a virtual thread for processing.
  *
  * @author Brian Pontarelli
  */

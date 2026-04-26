@@ -32,8 +32,8 @@ import org.lattejava.http.server.internal.HTTPBuffers;
 import org.lattejava.http.util.HTTPTools;
 
 /**
- * The primary output stream for the HTTP server (currently supporting version 1.1). This handles delegating to compression and chunking
- * output streams, depending on the response headers the application set.
+ * The primary output stream for the HTTP server (currently supporting version 1.1). This handles delegating to
+ * compression and chunking output streams, depending on the response headers the application set.
  *
  * @author Brian Pontarelli
  */
@@ -83,8 +83,8 @@ public class HTTPOutputStream extends OutputStream {
   }
 
   /**
-   * Calls the {@link ServerToSocketOutputStream#forceFlush()} method to write all buffered bytes to the socket. This also writes the
-   * preamble to the buffer or to the socket if it hasn't been written yet.
+   * Calls the {@link ServerToSocketOutputStream#forceFlush()} method to write all buffered bytes to the socket. This
+   * also writes the preamble to the buffer or to the socket if it hasn't been written yet.
    *
    * @throws IOException If the socket throws.
    */
@@ -95,8 +95,8 @@ public class HTTPOutputStream extends OutputStream {
   }
 
   /**
-   * @return True if at least one byte was written back to the client. False if the response has not been generated or is sitting in the
-   *     response buffer.
+   * @return True if at least one byte was written back to the client. False if the response has not been generated or
+   *     is sitting in the response buffer.
    */
   public boolean isCommitted() {
     return wroteOneByteToClient;
@@ -116,9 +116,9 @@ public class HTTPOutputStream extends OutputStream {
   }
 
   /**
-   * Enables or disables body-byte suppression for this response. When enabled, the preamble is still written normally (identical to a GET
-   * response), but any subsequent {@link #write} calls become no-ops and the chunked/gzip/deflate delegates are not installed. Intended for
-   * HEAD request handling.
+   * Enables or disables body-byte suppression for this response. When enabled, the preamble is still written normally
+   * (identical to a GET response), but any subsequent {@link #write} calls become no-ops and the chunked/gzip/deflate
+   * delegates are not installed. Intended for HEAD request handling.
    *
    * @param suppressBody true to drop all body output.
    */
@@ -144,8 +144,8 @@ public class HTTPOutputStream extends OutputStream {
   }
 
   /**
-   * @return true if compression has been requested, and it appears as though we will compress because the requested content encoding is
-   *     supported.
+   * @return true if compression has been requested, and it appears as though we will compress because the requested
+   *     content encoding is supported.
    */
   public boolean willCompress() {
     if (compress) {
@@ -199,9 +199,9 @@ public class HTTPOutputStream extends OutputStream {
   }
 
   /**
-   * Initialize the actual OutputStream latent so that we can call setCompress more than once. The GZIPOutputStream writes bytes to the
-   * OutputStream during construction which means we cannot build it more than once. This is why we must wait until we know for certain we
-   * are going to write bytes to construct the compressing OutputStream.
+   * Initialize the actual OutputStream latent so that we can call setCompress more than once. The GZIPOutputStream
+   * writes bytes to the OutputStream during construction which means we cannot build it more than once. This is why we
+   * must wait until we know for certain we are going to write bytes to construct the compressing OutputStream.
    */
   private void commit(boolean closing) throws IOException {
     if (committed) {
@@ -363,7 +363,8 @@ public class HTTPOutputStream extends OutputStream {
     }
 
     /**
-     * Resets the ServerToSocketOutputStream by resetting the buffer location to 0. This only applies if the response buffer is in use.
+     * Resets the ServerToSocketOutputStream by resetting the buffer location to 0. This only applies if the response
+     * buffer is in use.
      */
     public void reset() {
       bufferIndex = 0;

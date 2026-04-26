@@ -19,8 +19,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A logger that accumulates the log messages into an ArrayList that can later be output to a file or output to the console. Great for
- * testing when sysout logging would be way too spammy.
+ * A logger that accumulates the log messages into an ArrayList that can later be output to a file or output to the
+ * console. Great for testing when sysout logging would be way too spammy.
  *
  * @author Brian Pontarelli
  */

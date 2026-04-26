@@ -19,8 +19,8 @@ import org.lattejava.http.io.FastByteArrayOutputStream;
 import org.lattejava.http.server.HTTPServerConfiguration;
 
 /**
- * A class that lazily creates and caches the buffers for a single worker thread. This is only used by the worker thread, so no
- * synchronization is required.
+ * A class that lazily creates and caches the buffers for a single worker thread. This is only used by the worker
+ * thread, so no synchronization is required.
  *
  * @author Brian Pontarelli
  */
@@ -49,8 +49,8 @@ public class HTTPBuffers {
 
   /**
    * @return An output stream that can be used for chunking responses. This uses the configuration's
-   *     {@link HTTPServerConfiguration#getMaxResponseChunkSize()} value plus 64 bytes of padding for the header and footer.  This is lazily
-   *     created.
+   *     {@link HTTPServerConfiguration#getMaxResponseChunkSize()} value plus 64 bytes of padding for the header and
+   *     footer.  This is lazily created.
    */
   public FastByteArrayOutputStream chuckedOutputStream() {
     if (chunkOutputStream == null) {
@@ -74,17 +74,17 @@ public class HTTPBuffers {
 
   /**
    * @return A byte array used to read the request preamble and body. This uses the configuration's
-   *     {@link HTTPServerConfiguration#getRequestBufferSize()} value for the size. It is created in the constructor since it is always
-   *     needed.
+   *     {@link HTTPServerConfiguration#getRequestBufferSize()} value for the size. It is created in the constructor
+   *     since it is always needed.
    */
   public byte[] requestBuffer() {
     return requestBuffer;
   }
 
   /**
-   * @return A byte array used to buffer the response such that the server can replace the response with an error response if an error
-   *     occurs during processing, but after the preamble and body has already been partially written. May be null if the response buffer
-   *     has been disabled.
+   * @return A byte array used to buffer the response such that the server can replace the response with an error
+   *     response if an error occurs during processing, but after the preamble and body has already been partially
+   *     written. May be null if the response buffer has been disabled.
    */
   public byte[] responseBuffer() {
     return responseBuffer;

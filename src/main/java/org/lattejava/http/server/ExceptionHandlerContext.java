@@ -48,12 +48,13 @@ public class ExceptionHandlerContext {
   }
 
   /**
-   * This may be useful if you wish to know additional context of the exception such as the URI of the current HTTP request.
+   * This may be useful if you wish to know additional context of the exception such as the URI of the current HTTP
+   * request.
    * <p>
    * Modifications to this object will have no effect on current or futures requests.
    *
-   * @return the current HTTP request, or null if this exception was taking prior to constructing the HTTP request. This is unlikely but
-   *     please account for this value being null.
+   * @return the current HTTP request, or null if this exception was taking prior to constructing the HTTP request. This
+   *     is unlikely but please account for this value being null.
    */
   public HTTPRequest getRequest() {
     return request;
@@ -67,8 +68,8 @@ public class ExceptionHandlerContext {
   }
 
   /**
-   * Suggest a status code for the HTTP response. This value will be used unless the response has already been committed meaning bytes have
-   * already been written to the client and the HTTP server is not able to modify the response code.
+   * Suggest a status code for the HTTP response. This value will be used unless the response has already been committed
+   * meaning bytes have already been written to the client and the HTTP server is not able to modify the response code.
    *
    * @param statusCode the desired status code to set on the HTTP response.
    */

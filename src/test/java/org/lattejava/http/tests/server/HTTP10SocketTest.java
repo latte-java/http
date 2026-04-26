@@ -31,13 +31,13 @@ public class HTTP10SocketTest extends BaseSocketTest {
 
     // No Connection header, default should be close on the response
     withRequest("""
-            GET / HTTP/1.0\r
-            Host: cyberdyne-systems.com\r
-            Content-Type: plain/text\r
-            Content-Length: {contentLength}\r
-            \r
-            {body}"""
-               ).expectResponse("""
+        GET / HTTP/1.0\r
+        Host: cyberdyne-systems.com\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        \r
+        {body}"""
+    ).expectResponse("""
         HTTP/1.1 200 \r
         connection: close\r
         content-length: 0\r
@@ -46,14 +46,14 @@ public class HTTP10SocketTest extends BaseSocketTest {
 
     // Ask for close, expect close
     withRequest("""
-            GET / HTTP/1.0\r
-            Host: cyberdyne-systems.com\r
-            Content-Type: plain/text\r
-            Content-Length: {contentLength}\r
-            Connection: close\r
-            \r
-            {body}"""
-               ).expectResponse("""
+        GET / HTTP/1.0\r
+        Host: cyberdyne-systems.com\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        Connection: close\r
+        \r
+        {body}"""
+    ).expectResponse("""
         HTTP/1.1 200 \r
         connection: close\r
         content-length: 0\r
@@ -62,14 +62,14 @@ public class HTTP10SocketTest extends BaseSocketTest {
 
     // Ask for keep-alive, expect keep-alive
     withRequest("""
-            GET / HTTP/1.0\r
-            Host: cyberdyne-systems.com\r
-            Content-Type: plain/text\r
-            Content-Length: {contentLength}\r
-            Connection: keep-alive\r
-            \r
-            {body}"""
-               ).expectResponse("""
+        GET / HTTP/1.0\r
+        Host: cyberdyne-systems.com\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        Connection: keep-alive\r
+        \r
+        {body}"""
+    ).expectResponse("""
         HTTP/1.1 200 \r
         connection: keep-alive\r
         content-length: 0\r
@@ -95,14 +95,14 @@ public class HTTP10SocketTest extends BaseSocketTest {
     //          sufficiently backwards-compatible to be safely processed by any
     //          implementation of the same major version
     withRequest("""
-            GET / HTTP/1.0\r
-            Host: cyberdyne-systems.com\r
-            Connection: close\r
-            Content-Type: plain/text\r
-            Content-Length: {contentLength}\r
-            \r
-            {body}"""
-               ).expectResponse("""
+        GET / HTTP/1.0\r
+        Host: cyberdyne-systems.com\r
+        Connection: close\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        \r
+        {body}"""
+    ).expectResponse("""
         HTTP/1.1 200 \r
         connection: close\r
         content-length: 0\r

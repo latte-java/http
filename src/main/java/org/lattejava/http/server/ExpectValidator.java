@@ -16,15 +16,16 @@
 package org.lattejava.http.server;
 
 /**
- * A validator that is used when the server receives a header of {@code Expect: 100-continue} during the initial request.
+ * A validator that is used when the server receives a header of {@code Expect: 100-continue} during the initial
+ * request.
  *
  * @author Brian Pontarelli
  */
 @FunctionalInterface
 public interface ExpectValidator {
   /**
-   * Performs the validation of the request headers and puts a valid response code into the response. This should generally be a {@code 100}
-   * or an error of some type.
+   * Performs the validation of the request headers and puts a valid response code into the response. This should
+   * generally be a {@code 100} or an error of some type.
    * <p>
    * All headers in the response will be ignored and the OutputStream should not be used.
    *

@@ -290,15 +290,15 @@ public class Cookie implements Buildable<Cookie> {
       return false;
     }
     return httpOnly == cookie.httpOnly &&
-           secure == cookie.secure &&
-           Objects.equals(attributes, cookie.attributes) &&
-           Objects.equals(domain, cookie.domain) &&
-           Objects.equals(expires, cookie.expires) &&
-           Objects.equals(maxAge, cookie.maxAge) &&
-           Objects.equals(name, cookie.name) &&
-           Objects.equals(path, cookie.path) &&
-           sameSite == cookie.sameSite &&
-           Objects.equals(value, cookie.value);
+        secure == cookie.secure &&
+        Objects.equals(attributes, cookie.attributes) &&
+        Objects.equals(domain, cookie.domain) &&
+        Objects.equals(expires, cookie.expires) &&
+        Objects.equals(maxAge, cookie.maxAge) &&
+        Objects.equals(name, cookie.name) &&
+        Objects.equals(path, cookie.path) &&
+        sameSite == cookie.sameSite &&
+        Objects.equals(value, cookie.value);
   }
 
   public String getAttribute(String name) {

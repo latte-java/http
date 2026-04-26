@@ -699,10 +699,11 @@ public class CoreTest extends BaseTest {
   }
 
   /**
-   * This test uses Restify in order to leverage the URLConnection implementation of the JDK. That implementation is not smart enough to
-   * realize that a socket in the connection pool that was using Keep-Alives with the server is potentially dead. Since we are shutting down
-   * the server and doing another request, this ensures that the server itself is sending a socket close signal back to the URLConnection
-   * and removing the socket form the connection pool.
+   * This test uses Restify in order to leverage the URLConnection implementation of the JDK. That implementation is not
+   * smart enough to realize that a socket in the connection pool that was using Keep-Alives with the server is
+   * potentially dead. Since we are shutting down the server and doing another request, this ensures that the server
+   * itself is sending a socket close signal back to the URLConnection and removing the socket form the connection
+   * pool.
    */
   @Test(dataProvider = "schemes")
   public void serverClosesSockets(String scheme) {
@@ -1245,9 +1246,10 @@ public class CoreTest extends BaseTest {
   }
 
   /**
-   * A GET handler that declares a Content-Length but writes no body bytes should produce a response with Content-Length: 0. The server
-   * defensively overrides the handler's claim so that the client does not hang waiting for bytes that never come. This is the intentional
-   * counterpart to the HEAD "CDN escape hatch" case in HeadTest, where the handler-set Content-Length IS preserved.
+   * A GET handler that declares a Content-Length but writes no body bytes should produce a response with
+   * Content-Length: 0. The server defensively overrides the handler's claim so that the client does not hang waiting
+   * for bytes that never come. This is the intentional counterpart to the HEAD "CDN escape hatch" case in HeadTest,
+   * where the handler-set Content-Length IS preserved.
    */
   @Test(dataProvider = "schemes")
   public void get_handlerSetsContentLength_butWritesNothing_serverOverridesToZero(String scheme) throws Exception {

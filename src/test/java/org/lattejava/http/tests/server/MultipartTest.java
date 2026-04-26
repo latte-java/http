@@ -104,7 +104,7 @@ public class MultipartTest extends BaseTest {
                      .header(Headers.ContentType, "multipart/form-data; boundary=----WebKitFormBoundaryTWfMVJErBoLURJIe")
                      .POST(BodyPublishers.ofString(Body)).build(),
           _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                );
+      );
 
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), ExpectedResponse);
@@ -117,12 +117,12 @@ public class MultipartTest extends BaseTest {
     withScheme(scheme)
         .withFileSize(10 * 1024 * 1024) // 10 Mb
         .withConfiguration(config -> config.withMultipartConfiguration(
-                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
-                                            // Max file size is 2Mb
-                                            .withMaxFileSize(2 * 1024 * 1024)
-                                            // Max request size is 15 Mb
-                                            .withMaxRequestSize(15 * 1024 * 1024))
-                          )
+            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
+                                        // Max file size is 2Mb
+                                        .withMaxFileSize(2 * 1024 * 1024)
+                                        // Max request size is 15 Mb
+                                        .withMaxRequestSize(15 * 1024 * 1024))
+        )
         .expectResponse("""
             HTTP/1.1 413 \r
             connection: close\r
@@ -138,8 +138,8 @@ public class MultipartTest extends BaseTest {
     withScheme(scheme)
         .withFileCount(5)
         .withConfiguration(config -> config.withMultipartConfiguration(
-                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow))
-                          )
+            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow))
+        )
         .expectResponse("""
             HTTP/1.1 200 \r
             connection: keep-alive\r
@@ -156,8 +156,8 @@ public class MultipartTest extends BaseTest {
     withScheme(scheme)
         .withFileCount(5)
         .withConfiguration(config -> config.withMultipartConfiguration(
-                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Ignore))
-                          )
+            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Ignore))
+        )
         // Ignored means that we will not see any files in the request handler
         .expectedFileCount(0)
         .expectResponse("""
@@ -175,8 +175,8 @@ public class MultipartTest extends BaseTest {
     // File uploads rejected
     withScheme(scheme)
         .withConfiguration(config -> config.withMultipartConfiguration(
-                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Reject))
-                          )
+            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Reject))
+        )
         // 5 * 1 MB = 5 Megabytes
         .withFileCount(5)
         .withFileSize(1024 * 1024)
@@ -199,12 +199,12 @@ public class MultipartTest extends BaseTest {
         .withFileSize(1024 * 1024)   // 1 Mb
         .withFileCount(15)           // 15 files
         .withConfiguration(config -> config.withMultipartConfiguration(
-                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
-                                            // Max file size is 2 Megabytes
-                                            .withMaxFileSize(2 * 1024 * 1024)
-                                            // Max request size is 3 Mb
-                                            .withMaxRequestSize(3 * 1024 * 1024))
-                          )
+            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
+                                        // Max file size is 2 Megabytes
+                                        .withMaxFileSize(2 * 1024 * 1024)
+                                        // Max request size is 3 Mb
+                                        .withMaxRequestSize(3 * 1024 * 1024))
+        )
         .expectResponse("""
             HTTP/1.1 413 \r
             connection: close\r
@@ -232,7 +232,7 @@ public class MultipartTest extends BaseTest {
                                                                            .withMaxRequestSize(5L * 1024 * 1024 * 1024))
                                            // Max request size is 3 Megabytes
                                            .withMaxRequestBodySize(Map.of("*", 3 * 1024 * 1024))
-                          )
+        )
         .expectResponse("""
             HTTP/1.1 413 \r
             connection: close\r

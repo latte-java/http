@@ -16,7 +16,8 @@
 package org.lattejava.http.server.io;
 
 /**
- * Thrown when the server has attempted to drain the InputStream and the configured maximum number of bytes to drain have been exceeded.
+ * Thrown when the server has attempted to drain the InputStream and the configured maximum number of bytes to drain
+ * have been exceeded.
  *
  * @author Daniel DeGroff
  */

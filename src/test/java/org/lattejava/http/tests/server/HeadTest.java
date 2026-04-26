@@ -28,8 +28,8 @@ import org.lattejava.http.server.HTTPServer;
 import org.testng.annotations.Test;
 
 /**
- * Tests automatic HEAD request handling at the wire level. Uses raw sockets because the JDK HttpClient will not read body bytes for HEAD
- * responses (per RFC), making it impossible to verify that the server did not write any.
+ * Tests automatic HEAD request handling at the wire level. Uses raw sockets because the JDK HttpClient will not read
+ * body bytes for HEAD responses (per RFC), making it impossible to verify that the server did not write any.
  *
  * @author Brian Pontarelli
  */
@@ -45,10 +45,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -69,10 +69,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD /page HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /page HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -90,10 +90,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -108,10 +108,10 @@ public class HeadTest extends BaseSocketTest {
     HTTPHandler handler = (req, res) -> res.setStatus(200);
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -131,11 +131,11 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            Accept-Encoding: gzip\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        Accept-Encoding: gzip\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -161,10 +161,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD /asset.bin HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /asset.bin HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -180,10 +180,10 @@ public class HeadTest extends BaseSocketTest {
     HTTPHandler handler = (req, res) -> res.setStatus(204);
 
     withRequest("""
-            HEAD /empty HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 204 \r
@@ -197,10 +197,10 @@ public class HeadTest extends BaseSocketTest {
     HTTPHandler handler = (req, res) -> res.setStatus(Status.NotModified);
 
     withRequest("""
-            HEAD /etag HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /etag HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 304 \r
@@ -217,10 +217,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD /empty HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 204 \r
@@ -237,10 +237,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD /empty HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 204 \r
@@ -257,10 +257,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD /empty HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 204 \r
@@ -277,10 +277,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD /etag HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /etag HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 304 \r
@@ -298,10 +298,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -321,10 +321,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -344,10 +344,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -366,10 +366,10 @@ public class HeadTest extends BaseSocketTest {
     };
 
     withRequest("""
-            HEAD / HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 200 \r
@@ -384,10 +384,10 @@ public class HeadTest extends BaseSocketTest {
     HTTPHandler handler = (req, res) -> res.sendRedirect("https://example.com/new");
 
     withRequest("""
-            HEAD /old HTTP/1.1\r
-            Host: cyberdyne-systems.com\r
-            \r
-            """)
+        HEAD /old HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
         .withHandler(handler)
         .expectResponse("""
             HTTP/1.1 302 \r

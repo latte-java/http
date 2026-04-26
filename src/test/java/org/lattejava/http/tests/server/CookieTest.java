@@ -377,7 +377,7 @@ public class CookieTest extends BaseTest {
         var response = client.send(
             HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.Cookie, "request-2=request-value-2").header(Headers.ContentType, "application/json").GET().build(),
             _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                  );
+        );
 
         List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
         assertEquals(response.statusCode(), 200);
@@ -408,7 +408,7 @@ public class CookieTest extends BaseTest {
         var response = client.send(
             HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.ContentType, "application/json").GET().build(),
             _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                  );
+        );
 
         List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
         assertEquals(response.statusCode(), 200);

@@ -47,8 +47,8 @@ public interface Instrumenter {
   void chunkedResponse();
 
   /**
-   * Called when a connection is closed due to an issue or a timeout. This should not count connections closed in expected conditions such
-   * as a keep-alive timeout.
+   * Called when a connection is closed due to an issue or a timeout. This should not count connections closed in
+   * expected conditions such as a keep-alive timeout.
    */
   void connectionClosed();
 
@@ -60,8 +60,8 @@ public interface Instrumenter {
   void readFromClient(long bytes);
 
   /**
-   * Called when the server listener is started. If you have a single listener, you will have one server started. If you have two listeners,
-   * one for HTTP and one for HTTPS, you will have two servers started.
+   * Called when the server listener is started. If you have a single listener, you will have one server started. If you
+   * have two listeners, one for HTTP and one for HTTPS, you will have two servers started.
    */
   void serverStarted();
 

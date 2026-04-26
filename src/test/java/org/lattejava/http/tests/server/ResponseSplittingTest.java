@@ -28,10 +28,10 @@ import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
 /**
- * Verifies that {@link HTTPTools#writeResponsePreamble} rejects CR, LF, and NUL in every attacker-influenceable response surface, which
- * would otherwise allow HTTP response splitting (see docs/security/audit-2026-04-20.md Vuln 4). Validation is concentrated at the
- * preamble-write choke point rather than the setters so that direct mutation of the internal header map (via {@code getHeadersMap()}) or a
- * Cookie's public fields cannot bypass it.
+ * Verifies that {@link HTTPTools#writeResponsePreamble} rejects CR, LF, and NUL in every attacker-influenceable
+ * response surface, which would otherwise allow HTTP response splitting (see docs/security/audit-2026-04-20.md Vuln 4).
+ * Validation is concentrated at the preamble-write choke point rather than the setters so that direct mutation of the
+ * internal header map (via {@code getHeadersMap()}) or a Cookie's public fields cannot bypass it.
  *
  * @author Brian Pontarelli
  */

@@ -22,8 +22,8 @@ import org.lattejava.http.HTTPValues.*;
 import org.lattejava.http.util.HTTPTools.*;
 
 /**
- * An HTTP response that the server sends back to a client. The handler that processes the HTTP request can fill out this object and the
- * HTTP server will send it back to the client.
+ * An HTTP response that the server sends back to a client. The handler that processes the HTTP request can fill out
+ * this object and the HTTP server will send it back to the client.
  *
  * @author Brian Pontarelli
  */
@@ -49,11 +49,11 @@ public class HTTPResponse {
   }
 
   /**
-   * Add a response header. Calling this method multiple times with the same name will result in multiple headers being written to the HTTP
-   * response.
+   * Add a response header. Calling this method multiple times with the same name will result in multiple headers being
+   * written to the HTTP response.
    * <p>
-   * Optionally call {@link #setHeader(String, String)} if you wish to only write a single header by name, overwriting any previously
-   * written headers.
+   * Optionally call {@link #setHeader(String, String)} if you wish to only write a single header by name, overwriting
+   * any previously written headers.
    * <p>
    * If either parameter are null, the header will not be added to the response.
    *
@@ -73,8 +73,9 @@ public class HTTPResponse {
   }
 
   /**
-   * Closes the HTTP response to ensure that the client is notified that the server is finished responding. This closes the Writer or the
-   * OutputStream if they are available. The Writer is preferred if it exists so that it is properly flushed.
+   * Closes the HTTP response to ensure that the client is notified that the server is finished responding. This closes
+   * the Writer or the OutputStream if they are available. The Writer is preferred if it exists so that it is properly
+   * flushed.
    */
   public void close() throws IOException {
     if (writer != null) {
@@ -103,7 +104,8 @@ public class HTTPResponse {
   }
 
   /**
-   * Determines the character set by parsing the {@code Content-Type} header (if it exists) to pull out the {@code charset} parameter.
+   * Determines the character set by parsing the {@code Content-Type} header (if it exists) to pull out the
+   * {@code charset} parameter.
    *
    * @return The Charset or UTF-8 if it wasn't specified in the {@code Content-Type} header.
    */
@@ -207,7 +209,8 @@ public class HTTPResponse {
   }
 
   /**
-   * @return True if the response has been committed, meaning at least one byte was written back to the client. False otherwise.
+   * @return True if the response has been committed, meaning at least one byte was written back to the client. False
+   *     otherwise.
    */
   public boolean isCommitted() {
     return outputStream.isCommitted();
@@ -221,8 +224,8 @@ public class HTTPResponse {
   }
 
   /**
-   * Provides runtime configuration for HTTP response compression. This can be called as many times as you wish prior to the first byte
-   * being written to the HTTP OutputStream.
+   * Provides runtime configuration for HTTP response compression. This can be called as many times as you wish prior to
+   * the first byte being written to the HTTP OutputStream.
    * <p>
    * An {@link IllegalStateException} will be thrown if you call this method after writing to the OutputStream.
    *
@@ -248,7 +251,8 @@ public class HTTPResponse {
   }
 
   /**
-   * Hard resets this response if it hasn't been committed yet. If the response has been committed back to the client, this throws up.
+   * Hard resets this response if it hasn't been committed yet. If the response has been committed back to the client,
+   * this throws up.
    */
   public void reset() {
     if (outputStream.isCommitted()) {

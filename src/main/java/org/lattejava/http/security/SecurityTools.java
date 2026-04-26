@@ -127,8 +127,8 @@ public final class SecurityTools {
   }
 
   /**
-   * This creates an in-memory keystore containing the certificate and private key and initializes the SSLContext with the key material it
-   * contains.
+   * This creates an in-memory keystore containing the certificate and private key and initializes the SSLContext with
+   * the key material it contains.
    *
    * @param certificate A Certificate object.
    * @param privateKey  A PrivateKey object.
@@ -149,10 +149,11 @@ public final class SecurityTools {
   }
 
   /**
-   * This creates an in-memory keystore containing the certificate chain and private key and initializes the SSLContext with the key
-   * material it contains.
+   * This creates an in-memory keystore containing the certificate chain and private key and initializes the SSLContext
+   * with the key material it contains.
    *
-   * @param certificateChain The chain of certificates to include in the TLS negotiation. Should be ordered by end-entity first.
+   * @param certificateChain The chain of certificates to include in the TLS negotiation. Should be ordered by
+   *                         end-entity first.
    * @param privateKey       The PrivateKey corresponding to the end-entity certificate in the chain.
    * @return A SSLContext configured with the Certificate and Private Key.
    */

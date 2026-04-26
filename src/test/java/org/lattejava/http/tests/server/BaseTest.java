@@ -63,14 +63,14 @@ import static org.testng.Assert.fail;
  */
 public abstract class BaseTest {
   /**
-   * This timeout is used for the HttpClient during each test. If you are in a debugger, you will need to change this timeout to be much
-   * larger, otherwise, the client might truncate the request to the server.
+   * This timeout is used for the HttpClient during each test. If you are in a debugger, you will need to change this
+   * timeout to be much larger, otherwise, the client might truncate the request to the server.
    */
   public static final Duration ClientTimeout = Duration.ofSeconds(30);
 
   /**
-   * This timeout is used for the HTTPServer during each test. If you are in a debugger, you will need to change this timeout to be much
-   * larger, otherwise, the server will toss out the request.
+   * This timeout is used for the HTTPServer during each test. If you are in a debugger, you will need to change this
+   * timeout to be much larger, otherwise, the server will toss out the request.
    */
   public static final Duration ServerTimeout = Duration.ofSeconds(30);
 
@@ -358,14 +358,15 @@ public abstract class BaseTest {
   }
 
   /**
-   * This is a "faster" wait to assert on an HTTP response using only the socket w/out necessarily having to wait for the socket keep-alive
+   * This is a "faster" wait to assert on an HTTP response using only the socket w/out necessarily having to wait for
+   * the socket keep-alive timeout.
+   * <p>
+   * We start by assuming the number of bytes to read will be equal to the expected response. If that is not the case,
+   * then we try to read the remaining bytes from the socket knowing that we will block until we reach the socket
    * timeout.
    * <p>
-   * We start by assuming the number of bytes to read will be equal to the expected response. If that is not the case, then we try to read
-   * the remaining bytes from the socket knowing that we will block until we reach the socket timeout.
-   * <p>
-   * This way we can provide an accurate assertion on the actual response body vs the expected but as long as the test passes, we do not
-   * have to wait for the socket timeout.
+   * This way we can provide an accurate assertion on the actual response body vs the expected but as long as the test
+   * passes, we do not have to wait for the socket timeout.
    *
    * @param socket           the socket used to read the HTTP response
    * @param expectedResponse the expected HTTP response

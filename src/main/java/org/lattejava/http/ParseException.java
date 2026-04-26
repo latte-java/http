@@ -16,7 +16,8 @@
 package org.lattejava.http;
 
 /**
- * An exception that is thrown when an HTTP message fails to parse correctly due to an invalid character or similar issue.
+ * An exception that is thrown when an HTTP message fails to parse correctly due to an invalid character or similar
+ * issue.
  *
  * @author Brian Pontarelli
  */

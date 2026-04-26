@@ -23,16 +23,19 @@ package org.lattejava.http.server;
 @FunctionalInterface
 public interface HTTPHandler {
   /**
-   * Handles the processing of a request and filling out the response. If this method returns normally, it is assumed that the HTTP response
-   * is complete and the headers match the body (or lack thereof) so that the client can process the response properly.
+   * Handles the processing of a request and filling out the response. If this method returns normally, it is assumed
+   * that the HTTP response is complete and the headers match the body (or lack thereof) so that the client can process
+   * the response properly.
    * <p>
-   * If the handler wishes to close the connection, it should either include the header {@code Connection: close} or throw an exception. If
-   * an exception is thrown, the HTTPServer will determine if the response is malformed (i.e. truncated), in which case the connection will
-   * be closed automatically, or if the response can be changed to a {@code 500} response.
+   * If the handler wishes to close the connection, it should either include the header {@code Connection: close} or
+   * throw an exception. If an exception is thrown, the HTTPServer will determine if the response is malformed (i.e.
+   * truncated), in which case the connection will be closed automatically, or if the response can be changed to a
+   * {@code 500} response.
    *
    * @param request  The request from the client.
    * @param response The response sent back to the client.
-   * @throws Exception If the processing failed and the response should be truncated or replaced. The connection will always be closed.
+   * @throws Exception If the processing failed and the response should be truncated or replaced. The connection will
+   *                   always be closed.
    */
   void handle(HTTPRequest request, HTTPResponse response) throws Exception;
 }

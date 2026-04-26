@@ -132,7 +132,7 @@ public class CompressionTest extends BaseTest {
                      .POST(BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(requestPayload)))
                      .build(),
           _ -> BodySubscribers.ofInputStream()
-                                );
+      );
 
       assertEquals(response.statusCode(), 200);
       String expectedResponseEncoding = null;
@@ -289,7 +289,7 @@ public class CompressionTest extends BaseTest {
                      .POST(bodyPublisher)
                      .build(),
           _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                );
+      );
 
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), "");
@@ -381,7 +381,7 @@ public class CompressionTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).GET().build(),
           _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                );
+      );
 
       assertNull(response.headers().firstValue(Headers.ContentEncoding).orElse(null));
       assertEquals(response.statusCode(), 200);
@@ -434,7 +434,7 @@ public class CompressionTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder().header(Headers.AcceptEncoding, "br").uri(uri).GET().build(),
           _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                );
+      );
 
       assertNull(response.headers().firstValue(Headers.ContentEncoding).orElse(null));
       assertEquals(response.statusCode(), 200);
@@ -465,7 +465,7 @@ public class CompressionTest extends BaseTest {
                      .POST(bodyPublisher)
                      .build(),
           _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
-                                );
+      );
 
       // Expect a 415 w/ an empty body response
       assertEquals(response.statusCode(), 415);

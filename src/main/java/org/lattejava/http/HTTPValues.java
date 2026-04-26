@@ -105,7 +105,8 @@ public final class HTTPValues {
   }
 
   /**
-   * Named cookie attributes (in the specs). This includes upper and lower versions since some implementations are not case-sensitive.
+   * Named cookie attributes (in the specs). This includes upper and lower versions since some implementations are not
+   * case-sensitive.
    */
   public static final class CookieAttributes {
     public static final String Domain = "Domain";
@@ -166,47 +167,51 @@ public final class HTTPValues {
     public static final String AcceptLanguageLower = "accept-language";
 
     /**
-     * The Access-Control-Allow-Credentials header indicates whether the response to request can be exposed when the omit credentials flag
-     * is unset. When part of the response to a preflight request it indicates that the actual request can include user credentials.
+     * The Access-Control-Allow-Credentials header indicates whether the response to request can be exposed when the
+     * omit credentials flag is unset. When part of the response to a preflight request it indicates that the actual
+     * request can include user credentials.
      */
     public static final String AccessControlAllowCredentials = "Access-Control-Allow-Credentials";
 
     /**
-     * The Access-Control-Allow-Headers header indicates, as part of the response to a preflight request, which header field names can be
-     * used during the actual request.
+     * The Access-Control-Allow-Headers header indicates, as part of the response to a preflight request, which header
+     * field names can be used during the actual request.
      */
     public static final String AccessControlAllowHeaders = "Access-Control-Allow-Headers";
 
     /**
-     * The Access-Control-Allow-Methods header indicates, as part of the response to a preflight request, which methods can be used during
-     * the actual request.
+     * The Access-Control-Allow-Methods header indicates, as part of the response to a preflight request, which methods
+     * can be used during the actual request.
      */
     public static final String AccessControlAllowMethods = "Access-Control-Allow-Methods";
 
     /**
-     * The Access-Control-Allow-Origin header indicates whether a resource can be shared based by returning the value of the Origin request
-     * header in the response.
+     * The Access-Control-Allow-Origin header indicates whether a resource can be shared based by returning the value of
+     * the Origin request header in the response.
      */
     public static final String AccessControlAllowOrigin = "Access-Control-Allow-Origin";
 
     /**
-     * The Access-Control-Expose-Headers header indicates which headers are safe to expose to the API of a CORS API specification
+     * The Access-Control-Expose-Headers header indicates which headers are safe to expose to the API of a CORS API
+     * specification
      */
     public static final String AccessControlExposeHeaders = "Access-Control-Expose-Headers";
 
     /**
-     * The Access-Control-Max-Age header indicates how long the results of a preflight request can be cached in a preflight result cache.
+     * The Access-Control-Max-Age header indicates how long the results of a preflight request can be cached in a
+     * preflight result cache.
      */
     public static final String AccessControlMaxAge = "Access-Control-Max-Age";
 
     /**
-     * The Access-Control-Request-Headers header indicates which headers will be used in the actual request as part of the preflight
-     * request.
+     * The Access-Control-Request-Headers header indicates which headers will be used in the actual request as part of
+     * the preflight request.
      */
     public static final String AccessControlRequestHeaders = "Access-Control-Request-Headers";
 
     /**
-     * The Access-Control-Request-Method header indicates which method will be used in the actual request as part of the preflight request.
+     * The Access-Control-Request-Method header indicates which method will be used in the actual request as part of the
+     * preflight request.
      */
     public static final String AccessControlRequestMethod = "Access-Control-Request-Method";
 
