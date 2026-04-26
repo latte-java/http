@@ -2,7 +2,7 @@
 .savant
 out
 build
-load-tests/lib
-load-tests/results/
-load-tests/tomcat/web/WEB-INF/lib
+benchmarks/lib
+benchmarks/results/
+benchmarks/tomcat/web/WEB-INF/lib
 .worktrees

@@ -196,12 +196,12 @@ _Java: openjdk version "21.0.10" 2026-01-20._
 
 To reproduce:
 ```bash
-cd load-tests
-./run-benchmarks.sh --tool wrk --scenarios hello,high-concurrency
+cd benchmarks
+./run-benchmarks.sh --scenarios hello,high-concurrency
 ./update-readme.sh
 ```
 
-See [load-tests/README.md](load-tests/README.md) for full usage and options.
+See [benchmarks/README.md](benchmarks/README.md) for full usage and options.
 
 ## Todos and Roadmap
 
