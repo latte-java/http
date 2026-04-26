@@ -35,5 +35,5 @@ fi
 
 for i in {1..5} ; do
   echo "${i}"
-  ~/dev/java/current21/bin/java ${suspend} -cp "${CLASSPATH}" org.lattejava.http.benchmark.SocketHammer &
+  java ${suspend} -cp "${CLASSPATH}" org.lattejava.http.benchmark.SocketHammer &
 done

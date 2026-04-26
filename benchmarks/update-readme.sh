@@ -51,7 +51,7 @@ OS_VERSION="$(jq -r '.system.osVersion // ""' "${LATEST}")"
 # Server display name mapping
 server_display_name() {
   case "$1" in
-    self)            echo "java-http" ;;
+    self)            echo "latte-java http" ;;
     jdk-httpserver)  echo "JDK HttpServer" ;;
     jetty)           echo "Jetty" ;;
     netty)           echo "Netty" ;;

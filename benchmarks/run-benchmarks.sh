@@ -136,7 +136,7 @@ trap stop_timer EXIT
 
 SUITE_START="${SECONDS}"
 SUITE_START_TIME="$(date '+%H:%M:%S')"
-echo "=== java-http Benchmark Suite (started ${SUITE_START_TIME}) ==="
+echo "=== latte-java http Benchmark Suite (started ${SUITE_START_TIME}) ==="
 echo ""
 
 # --- System metadata ---

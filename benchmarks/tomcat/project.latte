@@ -48,7 +48,7 @@ target(name: "clean", description: "Cleans the build directory") {
 }
 
 target(name: "compile", description: "Compiles the Java source files") {
-  java.compileMain()
+  java.compile()
 }
 
 target(name: "jar", description: "Builds the project JARs", dependsOn: ["compile"]) {

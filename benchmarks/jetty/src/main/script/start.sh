@@ -42,4 +42,4 @@ if [[ $# -ge 1 && $1 == "--suspend" ]]; then
 fi
 
 ulimit -S -n 32768
-${JAVA_HOME}/bin/java ${suspend} -cp "${CLASSPATH}" org.lattejava.http.benchmark.JettyLoadServer
+java ${suspend} -cp "${CLASSPATH}" org.lattejava.http.benchmark.JettyLoadServer
