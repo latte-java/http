@@ -45,7 +45,6 @@ TIMESTAMP="$(jq -r '.timestamp' "${LATEST}")"
 SYSTEM_DESC="$(jq -r '[.system.os, .system.arch, (.system.cpuCores | tostring) + " cores", .system.cpuModel] | join(", ")' "${LATEST}")"
 RAM_GB="$(jq -r '.system.ramGB' "${LATEST}")"
 JAVA_VERSION="$(jq -r '.system.javaVersion' "${LATEST}")"
-TOOL_NAME="$(jq -r '.tools.selected // .tool.name // "wrk"' "${LATEST}")"
 MACHINE_MODEL="$(jq -r '.system.machineModel // "unknown"' "${LATEST}")"
 OS_VERSION="$(jq -r '.system.osVersion // ""' "${LATEST}")"
 
@@ -73,11 +72,7 @@ if jq -e '.results[] | select(.scenario == "high-concurrency")' "${LATEST}" &>/d
   HAS_HIGH_CONCURRENCY=true
 fi
 
-# When both tools were used, prefer wrk results for the table (has percentiles)
 TOOL_FILTER="wrk"
-if ! jq -e ".results[] | select(.tool == \"wrk\")" "${LATEST}" &>/dev/null; then
-  TOOL_FILTER="lattejava"
-fi
 
 # Get java-http RPS as the normalization baseline
 SELF_RPS="$(jq -r ".results[] | select(.server == \"self\" and .scenario == \"${SCENARIO}\" and .tool == \"${TOOL_FILTER}\") | .metrics.rps" "${LATEST}" 2>/dev/null || echo "0")"
@@ -187,7 +182,7 @@ _Java: ${JAVA_VERSION}._
 To reproduce:
 \`\`\`bash
 cd benchmarks
-./run-benchmarks.sh --tool ${TOOL_NAME} --scenarios ${SCENARIO}$(if [[ "${HAS_HIGH_CONCURRENCY}" == "true" ]]; then echo ",high-concurrency"; fi)
+./run-benchmarks.sh --scenarios ${SCENARIO}$(if [[ "${HAS_HIGH_CONCURRENCY}" == "true" ]]; then echo ",high-concurrency"; fi)
 ./update-readme.sh
 \`\`\`
 

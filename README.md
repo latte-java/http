@@ -197,7 +197,7 @@ _Java: openjdk version "21.0.10" 2026-01-20._
 To reproduce:
 ```bash
 cd benchmarks
-./run-benchmarks.sh --tool wrk --scenarios hello,high-concurrency
+./run-benchmarks.sh --scenarios hello,high-concurrency
 ./update-readme.sh
 ```
 

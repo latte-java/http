@@ -1,4 +1,4 @@
-# Load Testing and Benchmarking Framework Spec
+# Benchmarking Framework Spec
 
 Originally extracted from the HTTP/2 design spec (`degroff/http2` branch, `docs/plans/2026-02-13-http2-design.md`, Section 15)
 and the implementation plan (`docs/plans/2026-02-13-http2-implementation.md`, Phases 6 and 8).
@@ -15,24 +15,17 @@ A self-contained, reproducible benchmark suite that:
 3. Auto-generates README performance table from the latest results
 4. Can be run locally via a single script
 
-## Benchmark Tools
-
-### wrk (primary)
+## Benchmark Tool
 
 C-based HTTP benchmark tool using kqueue (macOS) / epoll (Linux). Very fast — not the bottleneck. Provides latency percentiles (p50, p90, p99) via Lua `done()` callback that outputs JSON. Scenarios are defined as Lua files in `benchmarks/scenarios/`.
 
 Install: `brew install wrk` (macOS), `apt install wrk` (Linux).
 
-### lattejava-load-tests (secondary comparison)
-
-Java-based load generator using virtual threads and the JDK HttpClient (`~/dev/lattejava/lattejava-load-tests`). Provides a "real Java client" perspective. Achieves lower absolute RPS (~50-60K vs ~110K for wrk) due to Java client overhead. Sends a small request body with each GET request.
-
-Useful for cross-validating relative server rankings. The `--tool both` flag runs both tools against each server.
-
 ### Decisions
 
 - **Dropped Apache Bench**: Single-threaded, bottlenecks at ~30-50K req/s.
 - **Dropped h2load**: Originally planned for HTTP/2 benchmarks. Will reconsider when HTTP/2 lands.
+- **Dropped lattejava-load-tests**: Java-based load generator that ran in parallel with wrk. Lower absolute RPS than wrk and never produced different rankings, so the extra mode wasn't earning its complexity.
 - **Dropped GitHub Actions workflow**: GHA shared runners (2 vCPU, 7GB RAM) produce poor and noisy performance numbers. Not useful for benchmarking. Benchmarks should be run on dedicated hardware.
 
 ## Vendor Servers
@@ -45,7 +38,7 @@ All servers implement the same 5 endpoints on port 8080:
 | JDK HttpServer | `benchmarks/jdk-httpserver/` | `com.sun.net.httpserver.HttpServer` | Done |
 | Jetty | `benchmarks/jetty/` | Jetty 12.0.x embedded | Done |
 | Netty | `benchmarks/netty/` | Netty 4.1.x with HTTP codec | Done |
-| Apache Tomcat | `benchmarks/tomcat/` | Tomcat 8.5.x embedded | Done (kept at 8.5.x; upgrade to 10.x deferred to HTTP/2 work) |
+| Apache Tomcat | `benchmarks/tomcat/` | Tomcat 11.0.x embedded | Done |
 
 Endpoints:
 - `GET /` — No-op (reads body, returns empty 200)
@@ -55,8 +48,8 @@ Endpoints:
 - `POST /load` — Base64-encodes request body and returns it
 
 Each server follows the same pattern:
-- `build.savant` — Savant build config with proper dependency resolution (including `maven()` fetch for transitive deps)
-- `src/main/java/org/lattejava/http/load/` — Server implementation
+- `project.latte` — Latte build config with Maven Central in the standard fetch workflow for transitive deps
+- `src/main/java/org/lattejava/http/benchmark/` — Server implementation
 - `src/main/script/start.sh` — Startup script
 
 ## Benchmark Scenarios
@@ -68,15 +61,13 @@ Each server follows the same pattern:
 | `post-load` | POST | `/load` | 12 | 100 | POST with body, Base64 response |
 | `large-file` | GET | `/file?size=1048576` | 4 | 10 | 1MB response throughput |
 | `high-concurrency` | GET | `/` | 12 | 1000 | Connection pressure |
-| `mixed` | Mixed | Rotates all endpoints | 12 | 100 | Real-world mix (wrk only) |
-
-Note: The `mixed` scenario is skipped for lattejava-load-tests since it only supports a single URL per configuration.
+| `mixed` | Mixed | Rotates all endpoints | 12 | 100 | Real-world mix |
 
 ## Scripts
 
 ### run-benchmarks.sh
 
-Main orchestrator. Builds each server via Savant, starts it, runs benchmarks, stops it, aggregates JSON results.
+Main orchestrator. Builds each server via Latte, starts it, runs benchmarks, stops it, aggregates JSON results.
 
 ```
 ./run-benchmarks.sh [OPTIONS]
@@ -84,7 +75,6 @@ Main orchestrator. Builds each server via Savant, starts it, runs benchmarks, st
 Options:
   --servers <list>     Comma-separated server list (default: all)
   --scenarios <list>   Comma-separated scenario list (default: all)
-  --tool <name>        Benchmark tool: wrk, lattejava, or both (default: wrk)
   --label <name>       Label for the results file
   --output <dir>       Output directory (default: benchmarks/results/)
   --duration <time>    Duration per scenario (default: 30s)
@@ -118,7 +108,6 @@ Results are `.gitignore`d — they are machine-specific and not committed to the
     "description": "Local benchmark"
   },
   "tools": {
-    "selected": "wrk",
     "wrkVersion": "wrk 4.2.0 [kqueue] ..."
   },
   "results": [
@@ -174,7 +163,7 @@ benchmarks/
   jdk-httpserver/                  # JDK built-in HttpServer
   jetty/                           # Eclipse Jetty 12.0.x
   netty/                           # Netty 4.1.x
-  tomcat/                          # Apache Tomcat 8.5.x
+  tomcat/                          # Apache Tomcat 11.0.x
 ```
 
 ## Performance Optimization Investigation
@@ -191,5 +180,5 @@ Areas to investigate:
 
 ## Future Work
 
-- **HTTP/2 benchmarks**: Add h2load scenarios when HTTP/2 lands on the `degroff/http2` branch. Upgrade Tomcat to 10.x for HTTP/2 support.
+- **HTTP/2 benchmarks**: Add h2load scenarios when HTTP/2 lands on the `degroff/http2` branch.
 - **Performance optimization**: Profile and optimize java-http based on benchmark data.
