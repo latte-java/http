@@ -15,8 +15,7 @@
  */
 package org.lattejava.http.log;
 
-import java.util.ArrayList;
-import java.util.List;
+import module java.base;
 
 /**
  * A logger that accumulates the log messages into an ArrayList that can later be output to a file or output to the

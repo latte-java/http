@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.tests.server;
 
-import org.testng.annotations.Test;
+import module org.testng;
 
 /**
  * Tests the HTTP server by writing directly to the server and reading using sockets to test lower level semantics.

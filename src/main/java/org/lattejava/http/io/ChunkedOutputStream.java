@@ -15,10 +15,8 @@
  */
 package org.lattejava.http.io;
 
-import java.io.IOException;
-import java.io.OutputStream;
-
-import org.lattejava.http.HTTPValues.ControlBytes;
+import module java.base;
+import module org.lattejava.http;
 
 /**
  * An OutputStream that writes back a chunked response.
@@ -46,7 +44,7 @@ public class ChunkedOutputStream extends OutputStream {
   public void close() throws IOException {
     if (!closed) {
       flush();
-      delegate.write(ControlBytes.ChunkedTerminator);
+      delegate.write(HTTPValues.ControlBytes.ChunkedTerminator);
       delegate.flush();
       delegate.close();
     }
@@ -64,7 +62,7 @@ public class ChunkedOutputStream extends OutputStream {
       String header = Integer.toHexString(bufferIndex) + "\r\n";
       chunkOutputStream.write(header.getBytes());
       chunkOutputStream.write(buffer, 0, bufferIndex);
-      chunkOutputStream.write(ControlBytes.CRLF);
+      chunkOutputStream.write(HTTPValues.ControlBytes.CRLF);
       delegate.write(chunkOutputStream.bytes(), 0, chunkOutputStream.size());
       chunkOutputStream.reset();
       bufferIndex = 0;

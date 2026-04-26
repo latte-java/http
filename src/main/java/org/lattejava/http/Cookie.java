@@ -15,32 +15,24 @@
  */
 package org.lattejava.http;
 
-import java.time.ZonedDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-
-import org.lattejava.http.HTTPValues.CookieAttributes;
-import org.lattejava.http.util.DateTools;
+import module java.base;
+import module org.lattejava.http;
 
 @SuppressWarnings("unused")
 public class Cookie implements Buildable<Cookie> {
-  public static final String DomainPrefix = "; " + CookieAttributes.Domain + "=";
+  public static final String DomainPrefix = "; " + HTTPValues.CookieAttributes.Domain + "=";
 
-  public static final String ExpiresPrefix = "; " + CookieAttributes.Expires + "=";
+  public static final String ExpiresPrefix = "; " + HTTPValues.CookieAttributes.Expires + "=";
 
-  public static final String HTTPOnlyPrefix = "; " + CookieAttributes.HttpOnly;
+  public static final String HTTPOnlyPrefix = "; " + HTTPValues.CookieAttributes.HttpOnly;
 
-  public static final String MaxAgePrefix = "; " + CookieAttributes.MaxAge + "=";
+  public static final String MaxAgePrefix = "; " + HTTPValues.CookieAttributes.MaxAge + "=";
 
-  public static final String PathPrefix = "; " + CookieAttributes.Path + "=";
+  public static final String PathPrefix = "; " + HTTPValues.CookieAttributes.Path + "=";
 
-  public static final String SameSitePrefix = "; " + CookieAttributes.SameSite + "=";
+  public static final String SameSitePrefix = "; " + HTTPValues.CookieAttributes.SameSite + "=";
 
-  public static final String SecurePrefix = "; " + CookieAttributes.Secure;
+  public static final String SecurePrefix = "; " + HTTPValues.CookieAttributes.Secure;
 
   public Map<String, String> attributes = new HashMap<>(0);
 

@@ -15,8 +15,7 @@
  */
 package org.lattejava.http.server.io;
 
-import java.io.IOException;
-import java.io.InputStream;
+import module java.base;
 
 /**
  * An InputStream that updates a Throughput as it is read from.

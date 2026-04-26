@@ -15,8 +15,7 @@
  */
 package org.lattejava.http.server.internal;
 
-import org.lattejava.http.io.FastByteArrayOutputStream;
-import org.lattejava.http.server.HTTPServerConfiguration;
+import module org.lattejava.http;
 
 /**
  * A class that lazily creates and caches the buffers for a single worker thread. This is only used by the worker

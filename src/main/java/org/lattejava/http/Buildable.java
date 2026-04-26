@@ -15,7 +15,7 @@
  */
 package org.lattejava.http;
 
-import java.util.function.Consumer;
+import module java.base;
 
 /**
  * A simple builder pattern interface that automatically adds a `with` method.

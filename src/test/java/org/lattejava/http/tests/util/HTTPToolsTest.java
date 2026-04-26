@@ -15,25 +15,15 @@
  */
 package org.lattejava.http.tests.util;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.net.URLEncoder;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
-import com.inversoft.json.ToString;
-import org.lattejava.http.HTTPMethod;
+import com.inversoft.json.*;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.server.HTTPRequest;
-import org.lattejava.http.server.HTTPServerConfiguration;
-import org.lattejava.http.server.io.HTTPInputStream;
-import org.lattejava.http.tests.server.BaseTest;
-import org.lattejava.http.util.HTTPTools;
-import org.lattejava.http.util.HTTPTools.HeaderValue;
-import org.testng.annotations.Test;
+import org.lattejava.http.tests.server.*;
 
-import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.*;
 
 /**
  * Tests the HTTPTools utility class.
@@ -143,43 +133,43 @@ public class HTTPToolsTest extends BaseTest {
 
   @Test
   public void parseHeaderValue() {
-    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso8859-1"), new HeaderValue("text/plain", Map.of("charset", "iso8859-1")));
-    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso-8859-1"), new HeaderValue("text/plain", Map.of("charset", "iso-8859-1")));
-    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso8859-1; boundary=FOOBAR"), new HeaderValue("text/plain", Map.of("boundary", "FOOBAR", "charset", "iso8859-1")));
-    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso-8859-1; boundary=FOOBAR"), new HeaderValue("text/plain", Map.of("boundary", "FOOBAR", "charset", "iso-8859-1")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=\"foo.jpg\""), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=UTF-8''foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=ignore.jpg; filename*=UTF-8''foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=UTF-8'en'foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=ignore.jpg; filename*=UTF-8'en'foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO-8859-1''foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO-8859-1'en'foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=ignore.jpg; filename*=ISO-8859-1'en'foo.jpg"), new HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso8859-1"), new HTTPTools.HeaderValue("text/plain", Map.of("charset", "iso8859-1")));
+    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso-8859-1"), new HTTPTools.HeaderValue("text/plain", Map.of("charset", "iso-8859-1")));
+    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso8859-1; boundary=FOOBAR"), new HTTPTools.HeaderValue("text/plain", Map.of("boundary", "FOOBAR", "charset", "iso8859-1")));
+    assertEquals(HTTPTools.parseHeaderValue("text/plain; charset=iso-8859-1; boundary=FOOBAR"), new HTTPTools.HeaderValue("text/plain", Map.of("boundary", "FOOBAR", "charset", "iso-8859-1")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=\"foo.jpg\""), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=UTF-8''foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=ignore.jpg; filename*=UTF-8''foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=UTF-8'en'foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=ignore.jpg; filename*=UTF-8'en'foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO-8859-1''foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO-8859-1'en'foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename=ignore.jpg; filename*=ISO-8859-1'en'foo.jpg"), new HTTPTools.HeaderValue("form-data", Map.of("filename", "foo.jpg")));
 
     String iso = "åpple";
     String utf = "😁";
 
     // Encoded
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO8859-1'en'" + URLEncoder.encode(iso, StandardCharsets.ISO_8859_1)), new HeaderValue("form-data", Map.of("filename", iso)));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO-8859-1'en'" + URLEncoder.encode(iso, StandardCharsets.ISO_8859_1)), new HeaderValue("form-data", Map.of("filename", iso)));
-    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=UTF-8'en'" + URLEncoder.encode(utf, StandardCharsets.UTF_8)), new HeaderValue("form-data", Map.of("filename", utf)));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO8859-1'en'" + URLEncoder.encode(iso, StandardCharsets.ISO_8859_1)), new HTTPTools.HeaderValue("form-data", Map.of("filename", iso)));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=ISO-8859-1'en'" + URLEncoder.encode(iso, StandardCharsets.ISO_8859_1)), new HTTPTools.HeaderValue("form-data", Map.of("filename", iso)));
+    assertEquals(HTTPTools.parseHeaderValue("form-data; filename*=UTF-8'en'" + URLEncoder.encode(utf, StandardCharsets.UTF_8)), new HTTPTools.HeaderValue("form-data", Map.of("filename", utf)));
 
     // Edge cases
-    assertEquals(HTTPTools.parseHeaderValue("value; list=a; b; another=param"), new HeaderValue("value", Map.of("another", "param", "b", "", "list", "a")));
-    assertEquals(HTTPTools.parseHeaderValue("value; list=a; b=; another=param"), new HeaderValue("value", Map.of("another", "param", "b", "", "list", "a")));
-    assertEquals(HTTPTools.parseHeaderValue("value; list=\"a;b\"; another=param"), new HeaderValue("value", Map.of("another", "param", "list", "a;b")));
-    assertEquals(HTTPTools.parseHeaderValue("value; list=\"a\";"), new HeaderValue("value", Map.of("list", "a")));
-    assertEquals(HTTPTools.parseHeaderValue("value; list*"), new HeaderValue("value", Map.of("list", "")));
-    assertEquals(HTTPTools.parseHeaderValue("value;"), new HeaderValue("value", Map.of()));
-    assertEquals(HTTPTools.parseHeaderValue("value; "), new HeaderValue("value", Map.of()));
-    assertEquals(HTTPTools.parseHeaderValue("value; f"), new HeaderValue("value", Map.of("f", "")));
-    assertEquals(HTTPTools.parseHeaderValue("value;  f"), new HeaderValue("value", Map.of("f", "")));
-    assertEquals(HTTPTools.parseHeaderValue("value; f="), new HeaderValue("value", Map.of("f", "")));
-    assertEquals(HTTPTools.parseHeaderValue("value;  f="), new HeaderValue("value", Map.of("f", "")));
-    assertEquals(HTTPTools.parseHeaderValue("value; f=f"), new HeaderValue("value", Map.of("f", "f")));
-    assertEquals(HTTPTools.parseHeaderValue("value; f =f"), new HeaderValue("value", Map.of("f ", "f")));
-    assertEquals(HTTPTools.parseHeaderValue("value; f= f"), new HeaderValue("value", Map.of("f", " f")));
+    assertEquals(HTTPTools.parseHeaderValue("value; list=a; b; another=param"), new HTTPTools.HeaderValue("value", Map.of("another", "param", "b", "", "list", "a")));
+    assertEquals(HTTPTools.parseHeaderValue("value; list=a; b=; another=param"), new HTTPTools.HeaderValue("value", Map.of("another", "param", "b", "", "list", "a")));
+    assertEquals(HTTPTools.parseHeaderValue("value; list=\"a;b\"; another=param"), new HTTPTools.HeaderValue("value", Map.of("another", "param", "list", "a;b")));
+    assertEquals(HTTPTools.parseHeaderValue("value; list=\"a\";"), new HTTPTools.HeaderValue("value", Map.of("list", "a")));
+    assertEquals(HTTPTools.parseHeaderValue("value; list*"), new HTTPTools.HeaderValue("value", Map.of("list", "")));
+    assertEquals(HTTPTools.parseHeaderValue("value;"), new HTTPTools.HeaderValue("value", Map.of()));
+    assertEquals(HTTPTools.parseHeaderValue("value; "), new HTTPTools.HeaderValue("value", Map.of()));
+    assertEquals(HTTPTools.parseHeaderValue("value; f"), new HTTPTools.HeaderValue("value", Map.of("f", "")));
+    assertEquals(HTTPTools.parseHeaderValue("value;  f"), new HTTPTools.HeaderValue("value", Map.of("f", "")));
+    assertEquals(HTTPTools.parseHeaderValue("value; f="), new HTTPTools.HeaderValue("value", Map.of("f", "")));
+    assertEquals(HTTPTools.parseHeaderValue("value;  f="), new HTTPTools.HeaderValue("value", Map.of("f", "")));
+    assertEquals(HTTPTools.parseHeaderValue("value; f=f"), new HTTPTools.HeaderValue("value", Map.of("f", "f")));
+    assertEquals(HTTPTools.parseHeaderValue("value; f =f"), new HTTPTools.HeaderValue("value", Map.of("f ", "f")));
+    assertEquals(HTTPTools.parseHeaderValue("value; f= f"), new HTTPTools.HeaderValue("value", Map.of("f", " f")));
   }
 
   @Test(dataProvider = "contentEncoding")

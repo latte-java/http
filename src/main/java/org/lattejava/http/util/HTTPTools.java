@@ -15,17 +15,11 @@
  */
 package org.lattejava.http.util;
 
-import java.io.*;
-import java.net.*;
-import java.nio.charset.*;
-import java.util.*;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.*;
-import org.lattejava.http.HTTPValues.*;
+import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.log.*;
-import org.lattejava.http.server.*;
-import org.lattejava.http.server.io.*;
 
 public final class HTTPTools {
   private static final boolean[] TOKEN_CHARS = buildTokenCharTable();
@@ -493,20 +487,20 @@ public final class HTTPTools {
         outputStream.write(':');
         outputStream.write(' ');
         outputStream.write(value.getBytes());
-        outputStream.write(ControlBytes.CRLF);
+        outputStream.write(HTTPValues.ControlBytes.CRLF);
       }
     }
 
     // Write the cookies
     for (var cookie : cookies) {
-      outputStream.write(HeaderBytes.SetCookie);
+      outputStream.write(HTTPValues.HeaderBytes.SetCookie);
       outputStream.write(':');
       outputStream.write(' ');
       outputStream.write(cookie.toResponseHeader().getBytes());
-      outputStream.write(ControlBytes.CRLF);
+      outputStream.write(HTTPValues.ControlBytes.CRLF);
     }
 
-    outputStream.write(ControlBytes.CRLF);
+    outputStream.write(HTTPValues.ControlBytes.CRLF);
   }
 
   private static boolean[] buildTokenCharTable() {
@@ -595,14 +589,14 @@ public final class HTTPTools {
    * @throws IOException If the stream threw an exception.
    */
   private static void writeStatusLine(HTTPResponse response, OutputStream out) throws IOException {
-    out.write(ProtocolBytes.HTTTP1_1);
+    out.write(HTTPValues.ProtocolBytes.HTTTP1_1);
     out.write(' ');
     out.write(Integer.toString(response.getStatus()).getBytes());
     out.write(' ');
     if (response.getStatusMessage() != null) {
       out.write(response.getStatusMessage().getBytes());
     }
-    out.write(ControlBytes.CRLF);
+    out.write(HTTPValues.ControlBytes.CRLF);
   }
 
   /**

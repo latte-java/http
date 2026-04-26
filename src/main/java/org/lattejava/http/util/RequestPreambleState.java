@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.util;
 
-import static org.lattejava.http.util.HTTPTools.makeParseException;
+import static org.lattejava.http.util.HTTPTools.*;
 
 /**
  * Finite state machine parser for an HTTP 1.1 request preamble. This is the start-line and headers.

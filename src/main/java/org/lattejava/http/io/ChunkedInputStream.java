@@ -15,12 +15,10 @@
  */
 package org.lattejava.http.io;
 
-import java.io.*;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.*;
-import org.lattejava.http.util.*;
-
-import static org.lattejava.http.util.HTTPTools.*;
+import org.lattejava.http.ParseException;
 
 /**
  * A filter InputStream that handles the chunked body while passing the body bytes down to the delegate stream.
@@ -202,7 +200,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkExtensionName;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
     ChunkExtensionName {
@@ -218,7 +216,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkExtensionName;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
     ChunkExtensionValueSep {
@@ -232,7 +230,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkExtensionValue;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
     ChunkExtensionValue {
@@ -246,7 +244,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkExtensionValue;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
     ChunkExtensionCR {
@@ -255,7 +253,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkExtensionLF;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
     ChunkExtensionLF {
@@ -274,7 +272,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkSize;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
 
@@ -284,7 +282,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkSizeLF;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
 
@@ -310,7 +308,7 @@ public class ChunkedInputStream extends InputStream {
           return Chunk;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
 
@@ -321,7 +319,7 @@ public class ChunkedInputStream extends InputStream {
           return length == 0 ? Complete : ChunkLF;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
 
@@ -334,7 +332,7 @@ public class ChunkedInputStream extends InputStream {
           return ChunkSize;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
 
@@ -361,7 +359,7 @@ public class ChunkedInputStream extends InputStream {
           return TrailerLF;
         }
 
-        throw makeParseException(ch, this);
+        throw HTTPTools.makeParseException(ch, this);
       }
     },
     TrailerLF {

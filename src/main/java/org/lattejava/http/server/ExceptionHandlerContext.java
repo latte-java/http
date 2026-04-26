@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.server;
 
-import org.lattejava.http.log.Logger;
+import module org.lattejava.http;
 
 /**
  * Provide context to the exception handler.

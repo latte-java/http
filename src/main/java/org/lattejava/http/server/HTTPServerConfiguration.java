@@ -15,12 +15,8 @@
  */
 package org.lattejava.http.server;
 
-import java.nio.file.*;
-import java.time.*;
-import java.util.*;
-
-import org.lattejava.http.io.*;
-import org.lattejava.http.log.*;
+import module java.base;
+import module org.lattejava.http;
 
 /**
  * The HTTP Server configuration.

@@ -15,50 +15,12 @@
  */
 package org.lattejava.http;
 
-import java.nio.charset.Charset;
-import java.nio.file.Path;
+import module java.base;
 
 /**
  * This class provides file info for multipart requests.
  *
  * @author Brian Pontarelli
  */
-public class FileInfo {
-  public final String contentType;
-
-  public final Path file;
-
-  public final String fileName;
-
-  public final String name;
-
-  private final Charset encoding;
-
-  public FileInfo(Path file, String fileName, String name, String contentType, Charset encoding) {
-    this.file = file;
-    this.fileName = fileName;
-    this.name = name;
-    this.contentType = contentType;
-    this.encoding = encoding;
-  }
-
-  public String getContentType() {
-    return contentType;
-  }
-
-  public Charset getEncoding() {
-    return encoding;
-  }
-
-  public Path getFile() {
-    return file;
-  }
-
-  public String getFileName() {
-    return fileName;
-  }
-
-  public String getName() {
-    return name;
-  }
+public record FileInfo(Path file, String fileName, String name, String contentType, Charset encoding) {
 }

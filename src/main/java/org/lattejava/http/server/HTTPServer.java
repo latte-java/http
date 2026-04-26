@@ -15,13 +15,10 @@
  */
 package org.lattejava.http.server;
 
-import java.io.Closeable;
-import java.util.ArrayList;
-import java.util.List;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.log.Logger;
-import org.lattejava.http.server.internal.HTTPServerThread;
-import org.lattejava.http.util.HTTPTools;
+import org.lattejava.http.server.internal.*;
 
 /**
  * The server bro!

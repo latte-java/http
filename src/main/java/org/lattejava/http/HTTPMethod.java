@@ -15,38 +15,31 @@
  */
 package org.lattejava.http;
 
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-
-import org.lattejava.http.HTTPValues.Methods;
+import module java.base;
 
 /**
  * @author Brian Pontarelli
  */
 public class HTTPMethod {
-  public static final HTTPMethod CONNECT = new HTTPMethod(Methods.CONNECT);
+  public static final HTTPMethod CONNECT = new HTTPMethod(HTTPValues.Methods.CONNECT);
 
-  public static final HTTPMethod DELETE = new HTTPMethod(Methods.DELETE);
+  public static final HTTPMethod DELETE = new HTTPMethod(HTTPValues.Methods.DELETE);
 
-  public static final HTTPMethod GET = new HTTPMethod(Methods.GET);
+  public static final HTTPMethod GET = new HTTPMethod(HTTPValues.Methods.GET);
 
-  public static final HTTPMethod HEAD = new HTTPMethod(Methods.HEAD);
+  public static final HTTPMethod HEAD = new HTTPMethod(HTTPValues.Methods.HEAD);
 
-  public static final HTTPMethod OPTIONS = new HTTPMethod(Methods.OPTIONS);
+  public static final HTTPMethod OPTIONS = new HTTPMethod(HTTPValues.Methods.OPTIONS);
 
-  public static final HTTPMethod PATCH = new HTTPMethod(Methods.PATCH);
+  public static final HTTPMethod PATCH = new HTTPMethod(HTTPValues.Methods.PATCH);
 
-  public static final HTTPMethod POST = new HTTPMethod(Methods.POST);
+  public static final HTTPMethod POST = new HTTPMethod(HTTPValues.Methods.POST);
 
-  public static final HTTPMethod PUT = new HTTPMethod(Methods.PUT);
+  public static final HTTPMethod PUT = new HTTPMethod(HTTPValues.Methods.PUT);
 
-  public static final HTTPMethod TRACE = new HTTPMethod(Methods.TRACE);
+  public static final HTTPMethod TRACE = new HTTPMethod(HTTPValues.Methods.TRACE);
 
   public static Map<String, HTTPMethod> StandardMethods = new HashMap<>();
-
-  private final String name;
 
   static {
     StandardMethods.put(CONNECT.name(), CONNECT);
@@ -59,6 +52,8 @@ public class HTTPMethod {
     StandardMethods.put(PUT.name(), PUT);
     StandardMethods.put(TRACE.name(), TRACE);
   }
+
+  private final String name;
 
   private HTTPMethod(String name) {
     Objects.requireNonNull(name);
@@ -80,10 +75,9 @@ public class HTTPMethod {
     if (this == o) {
       return true;
     }
-    if (!(o instanceof HTTPMethod)) {
+    if (!(o instanceof HTTPMethod that)) {
       return false;
     }
-    HTTPMethod that = (HTTPMethod) o;
     return Objects.equals(name, that.name);
   }
 

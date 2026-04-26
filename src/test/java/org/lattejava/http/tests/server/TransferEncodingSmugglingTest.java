@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.tests.server;
 
-import org.testng.annotations.Test;
+import module org.testng;
 
 /**
  * Socket-level tests covering HTTP request smuggling defenses around Transfer-Encoding (see

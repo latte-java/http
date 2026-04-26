@@ -15,9 +15,7 @@
  */
 package org.lattejava.http.log;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.util.regex.Matcher;
+import module java.base;
 
 /**
  * A base class for loggers.

@@ -15,21 +15,12 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse.BodySubscribers;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 
-import org.lattejava.http.HTTPValues.ContentTypes;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.CountingInstrumenter;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
-import org.testng.annotations.Test;
-
-import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.*;
 
 /**
  * Tests the URL parameters and form data.
@@ -58,8 +49,8 @@ public class ParameterTest extends BaseTest {
       URI uri = makeURI(scheme, "?one=two&three=four");
       try (var client = makeClient(scheme, null)) {
         var response = client.send(
-            HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, ContentTypes.Form).POST(BodyPublishers.ofString("one=again&five=six&seven=eight")).build(),
-            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.ContentType, HTTPValues.ContentTypes.Form).POST(HttpRequest.BodyPublishers.ofString("one=again&five=six&seven=eight")).build(),
+            _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -86,7 +77,7 @@ public class ParameterTest extends BaseTest {
       URI uri = makeURI(scheme, "?one=two&three=four");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).GET().build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);

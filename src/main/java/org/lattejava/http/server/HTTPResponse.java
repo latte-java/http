@@ -18,9 +18,6 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
-import org.lattejava.http.HTTPValues.*;
-import org.lattejava.http.util.HTTPTools.*;
-
 /**
  * An HTTP response that the server sends back to a client. The handler that processes the HTTP request can fill out
  * this object and the HTTP server will send it back to the client.
@@ -113,8 +110,8 @@ public class HTTPResponse {
     Charset charset = StandardCharsets.UTF_8;
     String contentType = getContentType();
     if (contentType != null) {
-      HeaderValue headerValue = HTTPTools.parseHeaderValue(contentType);
-      String charsetName = headerValue.parameters().get(ContentTypes.CharsetParameter);
+      HTTPTools.HeaderValue headerValue = HTTPTools.parseHeaderValue(contentType);
+      String charsetName = headerValue.parameters().get(HTTPValues.ContentTypes.CharsetParameter);
       if (charsetName != null) {
         charset = Charset.forName(charsetName);
       }
@@ -124,23 +121,23 @@ public class HTTPResponse {
   }
 
   public Long getContentLength() {
-    if (containsHeader(Headers.ContentLength)) {
-      return Long.parseLong(getHeader(Headers.ContentLength));
+    if (containsHeader(HTTPValues.Headers.ContentLength)) {
+      return Long.parseLong(getHeader(HTTPValues.Headers.ContentLength));
     }
 
     return null;
   }
 
   public void setContentLength(long length) {
-    setHeader(Headers.ContentLength, Long.toString(length));
+    setHeader(HTTPValues.Headers.ContentLength, Long.toString(length));
   }
 
   public String getContentType() {
-    return getHeader(Headers.ContentType);
+    return getHeader(HTTPValues.Headers.ContentType);
   }
 
   public void setContentType(String contentType) {
-    setHeader(Headers.ContentType, contentType);
+    setHeader(HTTPValues.Headers.ContentType, contentType);
   }
 
   public List<Cookie> getCookies() {
@@ -180,7 +177,7 @@ public class HTTPResponse {
   }
 
   public String getRedirect() {
-    return getHeader(Headers.Location);
+    return getHeader(HTTPValues.Headers.Location);
   }
 
   public int getStatus() {
@@ -274,7 +271,7 @@ public class HTTPResponse {
    * @param uri The URI to redirect to.
    */
   public void sendRedirect(String uri) {
-    sendRedirect(uri, Status.MovedTemporarily);
+    sendRedirect(uri, HTTPValues.Status.MovedTemporarily);
   }
 
   /**
@@ -288,7 +285,7 @@ public class HTTPResponse {
       throw new IllegalArgumentException("Status code must be between 300 and 399.");
     }
 
-    setHeader(Headers.Location, uri);
+    setHeader(HTTPValues.Headers.Location, uri);
     this.status = status;
   }
 

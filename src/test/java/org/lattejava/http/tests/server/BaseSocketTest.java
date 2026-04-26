@@ -15,14 +15,10 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
-
-import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.*;
 
 /**
  * A base class to provide some helpers for socket based tests. A socket test doesn't use an HTTP client, but instead

@@ -15,23 +15,10 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.net.CookieManager;
-import java.net.HttpCookie;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse.BodySubscribers;
-import java.nio.charset.StandardCharsets;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.util.List;
-
-import org.lattejava.http.Cookie;
-import org.lattejava.http.Cookie.SameSite;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.CountingInstrumenter;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
-import org.testng.annotations.Test;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 
 import static org.testng.Assert.*;
 
@@ -44,7 +31,7 @@ public class CookieTest extends BaseTest {
     HTTPHandler handler = (req, res) -> {
       assertNull(req.getCookie("injected"));
 
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
       res.getOutputStream().close();
     };
@@ -58,7 +45,7 @@ public class CookieTest extends BaseTest {
                                          .GET()
                                          .build();
 
-        var response = client.send(request, _ -> BodySubscribers.discarding());
+        var response = client.send(request, _ -> HttpResponse.BodySubscribers.discarding());
         assertEquals(response.statusCode(), 200);
 
         List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
@@ -364,7 +351,7 @@ public class CookieTest extends BaseTest {
       assertEquals(req.getCookie("request").value, "request-value");
       assertEquals(req.getCookie("request-2").value, "request-value-2");
 
-      res.addCookie(new Cookie("response", "response-value").with(c -> c.setSameSite(SameSite.Lax)));
+      res.addCookie(new Cookie("response", "response-value").with(c -> c.setSameSite(Cookie.SameSite.Lax)));
       res.addCookie(new Cookie("response-2", "response-value-2").with(c -> c.setMaxAge(42L)));
       res.setStatus(200);
     };
@@ -375,8 +362,8 @@ public class CookieTest extends BaseTest {
       CookieManager cookieHandler = new CookieManager();
       try (var client = makeClient(scheme, cookieHandler)) {
         var response = client.send(
-            HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.Cookie, "request-2=request-value-2").header(Headers.ContentType, "application/json").GET().build(),
-            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.Cookie, "request=request-value").header(HTTPValues.Headers.Cookie, "request-2=request-value-2").header(HTTPValues.Headers.ContentType, "application/json").GET().build(),
+            _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
@@ -396,7 +383,7 @@ public class CookieTest extends BaseTest {
       assertEquals(req.getPath(), "/api/system/version");
       assertEquals(req.getCookie("request").value, "request-value");
 
-      res.addCookie(new Cookie("response", "response-value").with(c -> c.setSameSite(SameSite.Lax)));
+      res.addCookie(new Cookie("response", "response-value").with(c -> c.setSameSite(Cookie.SameSite.Lax)));
       res.setStatus(200);
     };
 
@@ -406,8 +393,8 @@ public class CookieTest extends BaseTest {
       CookieManager cookieHandler = new CookieManager();
       try (var client = makeClient(scheme, cookieHandler)) {
         var response = client.send(
-            HttpRequest.newBuilder().uri(uri).header(Headers.Cookie, "request=request-value").header(Headers.ContentType, "application/json").GET().build(),
-            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.Cookie, "request=request-value").header(HTTPValues.Headers.ContentType, "application/json").GET().build(),
+            _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);

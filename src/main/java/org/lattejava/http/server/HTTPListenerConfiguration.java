@@ -15,18 +15,9 @@
  */
 package org.lattejava.http.server;
 
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.InterfaceAddress;
-import java.net.NetworkInterface;
-import java.security.GeneralSecurityException;
-import java.security.PrivateKey;
+import module java.base;
+import module org.lattejava.http;
 import java.security.cert.Certificate;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Objects;
-
-import org.lattejava.http.security.SecurityTools;
 
 /**
  * A listener configuration that is used to construct the HTTP server and bind various listeners.

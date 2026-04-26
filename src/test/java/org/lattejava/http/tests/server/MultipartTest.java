@@ -15,33 +15,13 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.Socket;
-import java.net.SocketException;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse.BodySubscribers;
-import java.nio.charset.StandardCharsets;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 import java.nio.file.Files;
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
 
-import org.lattejava.http.FileInfo;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.io.MultipartConfiguration;
-import org.lattejava.http.io.MultipartFileUploadPolicy;
-import org.lattejava.http.server.CountingInstrumenter;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
-import org.lattejava.http.server.HTTPServerConfiguration;
-import org.testng.annotations.Test;
-
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNull;
+import static org.testng.Assert.*;
 
 /**
  * Tests the HTTP server with multipart/form-data requests.
@@ -72,14 +52,14 @@ public class MultipartTest extends BaseTest {
       assertEquals(form.get("foo"), List.of("bar"));
 
       List<FileInfo> files = req.getFiles();
-      assertEquals(files.getFirst().getContentType(), "text/plain");
-      assertEquals(files.getFirst().getEncoding(), StandardCharsets.ISO_8859_1);
-      assertEquals(files.getFirst().getName(), "file");
-      assertEquals(Files.readString(files.getFirst().getFile()), "filecontents");
+      assertEquals(files.getFirst().contentType(), "text/plain");
+      assertEquals(files.getFirst().encoding(), StandardCharsets.ISO_8859_1);
+      assertEquals(files.getFirst().name(), "file");
+      assertEquals(Files.readString(files.getFirst().file()), "filecontents");
 
-      Files.delete(files.getFirst().getFile());
+      Files.delete(files.getFirst().file());
 
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setHeader("Content-Length", "16");
       res.setStatus(200);
 
@@ -101,9 +81,9 @@ public class MultipartTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder()
                      .uri(uri)
-                     .header(Headers.ContentType, "multipart/form-data; boundary=----WebKitFormBoundaryTWfMVJErBoLURJIe")
-                     .POST(BodyPublishers.ofString(Body)).build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+                     .header(HTTPValues.Headers.ContentType, "multipart/form-data; boundary=----WebKitFormBoundaryTWfMVJErBoLURJIe")
+                     .POST(HttpRequest.BodyPublishers.ofString(Body)).build(),
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);
@@ -293,14 +273,14 @@ public class MultipartTest extends BaseTest {
         List<FileInfo> files = req.getFiles();
         assertEquals(files.size(), expectedFileCount);
         for (FileInfo file : files) {
-          assertEquals(file.getContentType(), "text/plain");
-          assertEquals(file.getEncoding(), StandardCharsets.ISO_8859_1);
-          assertEquals(file.getName(), "file");
-          assertEquals(Files.readString(file.getFile()), "X".repeat(fileSize));
-          Files.delete(file.getFile());
+          assertEquals(file.contentType(), "text/plain");
+          assertEquals(file.encoding(), StandardCharsets.ISO_8859_1);
+          assertEquals(file.name(), "file");
+          assertEquals(Files.readString(file.file()), "X".repeat(fileSize));
+          Files.delete(file.file());
         }
 
-        res.setHeader(Headers.ContentType, "application/json");
+        res.setHeader(HTTPValues.Headers.ContentType, "application/json");
         res.setHeader("Content-Length", "16");
         res.setStatus(200);
 

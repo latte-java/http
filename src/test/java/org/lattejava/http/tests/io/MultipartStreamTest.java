@@ -15,16 +15,14 @@
  */
 package org.lattejava.http.tests.io;
 
-import java.io.*;
-import java.nio.file.*;
-import java.util.*;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
+import java.nio.file.Files;
 
-import org.lattejava.http.*;
-import org.lattejava.http.io.*;
-import org.testng.annotations.*;
+import org.lattejava.http.ParseException;
 
 import static org.testng.Assert.*;
-import static org.testng.FileAssert.fail;
 
 /**
  * @author Brian Pontarelli
@@ -102,12 +100,12 @@ public class MultipartStreamTest {
     stream.process(parameters, files);
 
     assertEquals(files.size(), 1);
-    assertEquals(files.getFirst().contentType, "application/octet-stream");
-    assertEquals(Files.readString(files.getFirst().file), "filecontents");
-    assertEquals(files.getFirst().fileName, "foo.jpg");
-    assertEquals(files.getFirst().name, "foo");
+    assertEquals(files.getFirst().contentType(), "application/octet-stream");
+    assertEquals(Files.readString(files.getFirst().file()), "filecontents");
+    assertEquals(files.getFirst().fileName(), "foo.jpg");
+    assertEquals(files.getFirst().name(), "foo");
 
-    Files.delete(files.getFirst().file);
+    Files.delete(files.getFirst().file());
   }
 
   @Test
@@ -130,12 +128,12 @@ public class MultipartStreamTest {
     assertEquals(parameters.get("foo"), List.of("bar"));
 
     assertEquals(files.size(), 1);
-    assertEquals(files.getFirst().contentType, "application/octet-stream");
-    assertEquals(Files.readString(files.getFirst().file), "filecontents");
-    assertEquals(files.getFirst().fileName, "foo.jpg");
-    assertEquals(files.getFirst().name, "file");
+    assertEquals(files.getFirst().contentType(), "application/octet-stream");
+    assertEquals(Files.readString(files.getFirst().file()), "filecontents");
+    assertEquals(files.getFirst().fileName(), "foo.jpg");
+    assertEquals(files.getFirst().name(), "file");
 
-    Files.delete(files.getFirst().file);
+    Files.delete(files.getFirst().file());
   }
 
   @Test
@@ -200,12 +198,12 @@ public class MultipartStreamTest {
     assertEquals(parameters.get("foo"), List.of("bar"));
 
     assertEquals(files.size(), 1);
-    assertEquals(files.getFirst().contentType, "application/octet-stream");
-    assertEquals(Files.readString(files.getFirst().file), "filecontents");
-    assertEquals(files.getFirst().fileName, "foo.jpg");
-    assertEquals(files.getFirst().name, "file");
+    assertEquals(files.getFirst().contentType(), "application/octet-stream");
+    assertEquals(Files.readString(files.getFirst().file()), "filecontents");
+    assertEquals(files.getFirst().fileName(), "foo.jpg");
+    assertEquals(files.getFirst().name(), "file");
 
-    Files.delete(files.getFirst().file);
+    Files.delete(files.getFirst().file());
   }
 
   /**
@@ -236,10 +234,10 @@ public class MultipartStreamTest {
 
     assertEquals(parameters.get("foo"), List.of("bar"));
     assertEquals(files.size(), 1);
-    assertEquals(Files.readString(files.getFirst().file), "filecontents");
-    assertEquals(files.getFirst().fileName, "foo.jpg");
-    assertEquals(files.getFirst().name, "file");
-    Files.delete(files.getFirst().file);
+    assertEquals(Files.readString(files.getFirst().file()), "filecontents");
+    assertEquals(files.getFirst().fileName(), "foo.jpg");
+    assertEquals(files.getFirst().name(), "file");
+    Files.delete(files.getFirst().file());
   }
 
   @Test

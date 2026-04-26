@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.tests.server;
 
-import org.testng.annotations.Test;
+import org.testng.annotations.*;
 
 /**
  * Socket-level tests verifying that bare CR or LF bytes embedded in a header value are rejected as 400 rather than
@@ -52,7 +52,8 @@ public class BareLineFeedHeaderTest extends BaseSocketTest {
     withRequest("""
         POST / HTTP/1.1\r
         Host: cyberdyne-systems.com\r
-        Content-Length: 0\nTransfer-Encoding: chunked\r
+        Content-Length: 0
+        Transfer-Encoding: chunked\r
         \r
         """
     ).expectResponse("""
@@ -70,7 +71,8 @@ public class BareLineFeedHeaderTest extends BaseSocketTest {
     withRequest("""
         GET / HTTP/1.1\r
         Host: cyberdyne-systems.com\r
-        X-Custom: value\nInjected: yes\r
+        X-Custom: value
+        Injected: yes\r
         Content-Length: 0\r
         \r
         """
@@ -90,7 +92,8 @@ public class BareLineFeedHeaderTest extends BaseSocketTest {
     withRequest("""
         POST / HTTP/1.1\r
         Host: cyberdyne-systems.com\r
-        Transfer-Encoding: chunked\nX: Y\r
+        Transfer-Encoding: chunked
+        X: Y\r
         \r
         """
     ).expectResponse("""

@@ -15,10 +15,8 @@
  */
 package org.lattejava.http.io;
 
-import java.io.IOException;
-import java.io.InputStream;
-
-import org.lattejava.http.server.Instrumenter;
+import module java.base;
+import module org.lattejava.http;
 
 /**
  * An input stream that allows a portion of bytes read into a buffer to be pushed back to be read again.

@@ -15,20 +15,12 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 
-import org.lattejava.http.HTTPMethod;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPRequest;
-import org.lattejava.http.server.HTTPServer;
-import org.testng.annotations.Test;
-
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.*;
 
 /**
  * Tests the public contract for automatic HEAD handling on HTTPRequest and via a full HTTP request.
@@ -36,37 +28,6 @@ import static org.testng.Assert.assertTrue;
  * @author Brian Pontarelli
  */
 public class HeadRequestContractTest extends BaseTest {
-  @Test
-  public void isHeadRequest_falseByDefault() {
-    HTTPRequest request = new HTTPRequest();
-    assertFalse(request.isHeadRequest(), "A freshly created HTTPRequest must not report itself as HEAD.");
-  }
-
-  @Test
-  public void isHeadRequest_trueAfterHEADThenGETRewrite() {
-    HTTPRequest request = new HTTPRequest();
-    request.setMethod(HTTPMethod.HEAD);
-    request.setMethod(HTTPMethod.GET);
-
-    assertTrue(request.isHeadRequest(), "After a HEAD->GET rewrite isHeadRequest() must remain true.");
-    assertEquals(request.getMethod(), HTTPMethod.GET, "getMethod() must return the effective method (GET).");
-  }
-
-  @Test
-  public void isHeadRequest_falseForPlainGET() {
-    HTTPRequest request = new HTTPRequest();
-    request.setMethod(HTTPMethod.GET);
-    assertFalse(request.isHeadRequest(), "A plain GET must never report as HEAD.");
-  }
-
-  @Test
-  public void isHeadRequest_falseForOtherMethodsRewrittenToGET() {
-    HTTPRequest request = new HTTPRequest();
-    request.setMethod(HTTPMethod.POST);
-    request.setMethod(HTTPMethod.GET);
-    assertFalse(request.isHeadRequest(), "A non-HEAD method cannot become HEAD through a later setMethod call.");
-  }
-
   @Test
   public void endToEnd_handlerSeesGETMethodButIsHeadRequestTrue() throws Exception {
     HTTPHandler handler = (req, res) -> {
@@ -92,5 +53,36 @@ public class HeadRequestContractTest extends BaseTest {
       assertEquals(response.headers().firstValue("X-Was-Head").orElseThrow(), "true",
           "Handler must observe isHeadRequest() == true because originalMethod captured HEAD.");
     }
+  }
+
+  @Test
+  public void isHeadRequest_falseByDefault() {
+    HTTPRequest request = new HTTPRequest();
+    assertFalse(request.isHeadRequest(), "A freshly created HTTPRequest must not report itself as HEAD.");
+  }
+
+  @Test
+  public void isHeadRequest_falseForOtherMethodsRewrittenToGET() {
+    HTTPRequest request = new HTTPRequest();
+    request.setMethod(HTTPMethod.POST);
+    request.setMethod(HTTPMethod.GET);
+    assertFalse(request.isHeadRequest(), "A non-HEAD method cannot become HEAD through a later setMethod call.");
+  }
+
+  @Test
+  public void isHeadRequest_falseForPlainGET() {
+    HTTPRequest request = new HTTPRequest();
+    request.setMethod(HTTPMethod.GET);
+    assertFalse(request.isHeadRequest(), "A plain GET must never report as HEAD.");
+  }
+
+  @Test
+  public void isHeadRequest_trueAfterHEADThenGETRewrite() {
+    HTTPRequest request = new HTTPRequest();
+    request.setMethod(HTTPMethod.HEAD);
+    request.setMethod(HTTPMethod.GET);
+
+    assertTrue(request.isHeadRequest(), "After a HEAD->GET rewrite isHeadRequest() must remain true.");
+    assertEquals(request.getMethod(), HTTPMethod.GET, "getMethod() must return the effective method (GET).");
   }
 }

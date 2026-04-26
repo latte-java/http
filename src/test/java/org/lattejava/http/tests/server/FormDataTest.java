@@ -15,27 +15,11 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.Socket;
-import java.net.SocketException;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.function.Consumer;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
-import org.lattejava.http.HTTPValues.ContentTypes;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
-import org.lattejava.http.server.HTTPServerConfiguration;
-import org.testng.annotations.Test;
-
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNull;
+import static org.testng.Assert.*;
 
 /**
  * Tests the HTTP server with application/x-www-form-urlencoded requests.
@@ -62,7 +46,7 @@ public class FormDataTest extends BaseTest {
         // Account for the equals size and a separator of & except for the first value
         // - This should mean we have just exactly the right size of configuration for this request body
         // Config is [180,223]
-        .withConfiguration(config -> config.withMaxRequestBodySize(Map.of(ContentTypes.Form, (4096 * 10) + (4096 * 32) + (4096 * 2) - 1)))
+        .withConfiguration(config -> config.withMaxRequestBodySize(Map.of(HTTPValues.ContentTypes.Form, (4096 * 10) + (4096 * 32) + (4096 * 2) - 1)))
         .expectResponse("""
             HTTP/1.1 200 \r
             connection: keep-alive\r
@@ -79,7 +63,7 @@ public class FormDataTest extends BaseTest {
         .withBodyParameterSize(128)
         // 4k * 33 > 128k
         // - Use a UC Content-Type to make sure it still works
-        .withConfiguration(config -> config.withMaxRequestBodySize(Map.of(ContentTypes.Form.toUpperCase(Locale.ROOT), 128 * 1024)))
+        .withConfiguration(config -> config.withMaxRequestBodySize(Map.of(HTTPValues.ContentTypes.Form.toUpperCase(Locale.ROOT), 128 * 1024)))
         .expectResponse("""
             HTTP/1.1 413 \r
             connection: close\r
@@ -94,7 +78,7 @@ public class FormDataTest extends BaseTest {
         .withBodyParameterCount(42 * 1024)
         .withBodyParameterSize(128)
         // Disable the limit
-        .withConfiguration(config -> config.withMaxRequestBodySize(Map.of(ContentTypes.Form, -1)))
+        .withConfiguration(config -> config.withMaxRequestBodySize(Map.of(HTTPValues.ContentTypes.Form, -1)))
         .expectResponse("""
             HTTP/1.1 200 \r
             connection: keep-alive\r
@@ -228,7 +212,7 @@ public class FormDataTest extends BaseTest {
           assertEquals(form.get("param" + String.format("%05d", i)), List.of(value));
         }
 
-        res.setHeader(Headers.ContentType, "application/json");
+        res.setHeader(HTTPValues.Headers.ContentType, "application/json");
         res.setHeader("Content-Length", "16");
         res.setStatus(200);
 

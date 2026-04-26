@@ -15,8 +15,7 @@
  */
 package org.lattejava.http.io;
 
-import java.io.IOException;
-import java.io.InputStream;
+import module java.base;
 
 /**
  * A filter InputStream that reads a fixed length body.

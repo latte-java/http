@@ -15,14 +15,8 @@
  */
 package org.lattejava.http.io;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Paths;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-
-import org.lattejava.http.FileInfo;
+import module java.base;
+import module org.lattejava.http;
 
 /**
  * An HTTP input stream processor that can handle a <code>Content-Type: multipart/form-data</code>.

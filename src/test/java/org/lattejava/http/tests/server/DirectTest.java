@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.net.Socket;
+import module java.base;
 
 /**
  * @author Brian Pontarelli

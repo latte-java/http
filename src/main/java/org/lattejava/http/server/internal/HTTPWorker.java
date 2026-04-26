@@ -15,41 +15,11 @@
  */
 package org.lattejava.http.server.internal;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.Socket;
-import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.nio.file.Files;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.HTTPMethod;
-import org.lattejava.http.HTTPProcessingException;
-import org.lattejava.http.HTTPValues;
-import org.lattejava.http.HTTPValues.Connections;
-import org.lattejava.http.HTTPValues.ContentEncodings;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.HTTPValues.Protocols;
-import org.lattejava.http.HTTPValues.TransferEncodings;
 import org.lattejava.http.ParseException;
-import org.lattejava.http.io.MultipartConfiguration;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.log.Logger;
-import org.lattejava.http.server.ExceptionHandlerContext;
-import org.lattejava.http.server.HTTPContext;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPListenerConfiguration;
-import org.lattejava.http.server.HTTPRequest;
-import org.lattejava.http.server.HTTPResponse;
-import org.lattejava.http.server.HTTPServerConfiguration;
-import org.lattejava.http.server.Instrumenter;
-import org.lattejava.http.server.io.ConnectionClosedException;
-import org.lattejava.http.server.io.HTTPInputStream;
-import org.lattejava.http.server.io.HTTPOutputStream;
-import org.lattejava.http.server.io.Throughput;
-import org.lattejava.http.server.io.ThroughputInputStream;
-import org.lattejava.http.server.io.ThroughputOutputStream;
-import org.lattejava.http.server.io.TooManyBytesToDrainException;
-import org.lattejava.http.util.HTTPTools;
 
 /**
  * An HTTP worker that is a delegate Runnable to an {@link HTTPHandler}.
@@ -157,7 +127,7 @@ public class HTTPWorker implements Runnable {
 
         // Set the Connection response header as soon as possible
         // - This needs to occur after we have parsed the pre-amble so we can read the request headers
-        response.setHeader(Headers.Connection, request.isKeepAlive() ? Connections.KeepAlive : Connections.Close);
+        response.setHeader(HTTPValues.Headers.Connection, request.isKeepAlive() ? HTTPValues.Connections.KeepAlive : HTTPValues.Connections.Close);
 
         // Ensure the preamble is valid
         Integer status = validatePreamble(request);
@@ -174,7 +144,7 @@ public class HTTPWorker implements Runnable {
         }
 
         // Handle the Expect: 100-continue request header.
-        String expect = request.getHeader(Headers.Expect);
+        String expect = request.getHeader(HTTPValues.Headers.Expect);
         if (expect != null && expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
           state = State.Write;
 
@@ -216,7 +186,7 @@ public class HTTPWorker implements Runnable {
         // Do this before we write the response preamble. The normal Keep-Alive check below will handle closing the socket.
         if (handledRequests >= configuration.getMaxRequestsPerConnection()) {
           logger.trace("[{}] Maximum requests per connection has been reached. Turn off Keep-Alive.", Thread.currentThread().threadId());
-          response.setHeader(Headers.Connection, Connections.Close);
+          response.setHeader(HTTPValues.Headers.Connection, HTTPValues.Connections.Close);
         }
 
         response.close();
@@ -320,7 +290,7 @@ public class HTTPWorker implements Runnable {
 
         // Note that reset() clears the Connection response header.
         response.reset();
-        response.setHeader(Headers.Connection, Connections.Close);
+        response.setHeader(HTTPValues.Headers.Connection, HTTPValues.Connections.Close);
         response.setStatus(status);
         response.setContentLength(0L);
         response.close();
@@ -376,10 +346,10 @@ public class HTTPWorker implements Runnable {
    * @return true if the socket should be kept alive.
    */
   private boolean keepSocketAlive(HTTPRequest request, HTTPResponse response) {
-    var connectionHeader = response.getHeader(Headers.Connection);
-    return request.getProtocol().equals(Protocols.HTTTP1_1)
-        ? !Connections.Close.equalsIgnoreCase(connectionHeader)
-        : Connections.KeepAlive.equalsIgnoreCase(connectionHeader);
+    var connectionHeader = response.getHeader(HTTPValues.Headers.Connection);
+    return request.getProtocol().equals(HTTPValues.Protocols.HTTTP1_1)
+        ? !HTTPValues.Connections.Close.equalsIgnoreCase(connectionHeader)
+        : HTTPValues.Connections.KeepAlive.equalsIgnoreCase(connectionHeader);
   }
 
   private Integer validatePreamble(HTTPRequest request) {
@@ -395,7 +365,7 @@ public class HTTPWorker implements Runnable {
     // Only HTTP/ protocol is supported.
     if (!protocol.startsWith("HTTP/")) {
       if (debugEnabled) {
-        logger.debug("Invalid request. Invalid protocol [{}]. Supported versions [{}].", protocol, Protocols.HTTTP1_1);
+        logger.debug("Invalid request. Invalid protocol [{}]. Supported versions [{}].", protocol, HTTPValues.Protocols.HTTTP1_1);
       }
 
       return Status.BadRequest;
@@ -404,7 +374,7 @@ public class HTTPWorker implements Runnable {
     // Minor versions less than 1 are allowed per spec. For example, HTTP/1.0 should be allowed and is considered to be compatible enough.
     if (!protocol.equals("HTTP/1.0") && !protocol.equals("HTTP/1.1")) {
       if (debugEnabled) {
-        logger.debug("Invalid request. Unsupported HTTP version [{}]. Supported versions [{}].", protocol, Protocols.HTTTP1_1);
+        logger.debug("Invalid request. Unsupported HTTP version [{}]. Supported versions [{}].", protocol, HTTPValues.Protocols.HTTTP1_1);
       }
 
       return Status.HTTPVersionNotSupported;
@@ -417,7 +387,7 @@ public class HTTPWorker implements Runnable {
       return Status.BadRequest;
     }
 
-    var hostHeaders = request.getHeaders(Headers.Host);
+    var hostHeaders = request.getHeaders(HTTPValues.Headers.Host);
     if (hostHeaders.size() != 1) {
       if (debugEnabled) {
         logger.debug("Invalid request. Duplicate Host headers. [{}]", String.join(", ", hostHeaders));
@@ -431,7 +401,7 @@ public class HTTPWorker implements Runnable {
     // classic request-smuggling primitive. Specifically we reject: multiple Transfer-Encoding headers, TE values that aren't exactly
     // "chunked" after trimming (e.g. "identity", "chunked, identity", "xchunked", "chunked " with trailing whitespace), and the CL+TE
     // coexistence that a front-end proxy might resolve differently than we do.
-    var transferEncodingHeaders = request.getHeaders(Headers.TransferEncoding);
+    var transferEncodingHeaders = request.getHeaders(HTTPValues.Headers.TransferEncoding);
     if (transferEncodingHeaders != null && !transferEncodingHeaders.isEmpty()) {
       if (transferEncodingHeaders.size() != 1) {
         if (debugEnabled) {
@@ -442,7 +412,7 @@ public class HTTPWorker implements Runnable {
       }
 
       String rawTransferEncoding = transferEncodingHeaders.getFirst();
-      if (!TransferEncodings.Chunked.equalsIgnoreCase(rawTransferEncoding.trim())) {
+      if (!HTTPValues.TransferEncodings.Chunked.equalsIgnoreCase(rawTransferEncoding.trim())) {
         if (debugEnabled) {
           logger.debug("Invalid request. Unsupported Transfer-Encoding. [{}]", rawTransferEncoding);
         }
@@ -450,9 +420,9 @@ public class HTTPWorker implements Runnable {
         return Status.BadRequest;
       }
 
-      if (request.getHeader(Headers.ContentLength) != null) {
+      if (request.getHeader(HTTPValues.Headers.ContentLength) != null) {
         if (debugEnabled) {
-          logger.debug("Invalid request. Both Transfer-Encoding and Content-Length present. [{}] [{}]", rawTransferEncoding, request.getHeader(Headers.ContentLength));
+          logger.debug("Invalid request. Both Transfer-Encoding and Content-Length present. [{}] [{}]", rawTransferEncoding, request.getHeader(HTTPValues.Headers.ContentLength));
         }
 
         return Status.BadRequest;
@@ -460,11 +430,11 @@ public class HTTPWorker implements Runnable {
 
       // Normalize the stored value so downstream code (HTTPRequest.isChunked, ChunkedInputStream routing) sees an exact match regardless
       // of incidental whitespace or case in the original header.
-      if (!TransferEncodings.Chunked.equals(rawTransferEncoding)) {
-        request.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
+      if (!HTTPValues.TransferEncodings.Chunked.equals(rawTransferEncoding)) {
+        request.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
       }
     } else {
-      var requestedContentLengthHeaders = request.getHeaders(Headers.ContentLength);
+      var requestedContentLengthHeaders = request.getHeaders(HTTPValues.Headers.ContentLength);
       if (requestedContentLengthHeaders != null) {
         if (requestedContentLengthHeaders.size() != 1) {
           if (debugEnabled) {
@@ -491,10 +461,10 @@ public class HTTPWorker implements Runnable {
     // - If we see anything else we should fail, we will be unable to handle the request.
     var contentEncodings = request.getContentEncodings();
     for (var encoding : contentEncodings) {
-      if (!encoding.equalsIgnoreCase(ContentEncodings.Gzip) && !encoding.equalsIgnoreCase(ContentEncodings.Deflate)) {
+      if (!encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip) && !encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
         // Note that while we do not expect multiple Content-Encoding headers, the last one will be used. For good measure,
         // use the last one in the debug message as well.
-        var contentEncodingHeader = request.getHeaders(Headers.ContentEncoding).getLast();
+        var contentEncodingHeader = request.getHeaders(HTTPValues.Headers.ContentEncoding).getLast();
         logger.debug("Invalid request. The Content-Type header contains an un-supported value. [{}]", contentEncodingHeader);
         return Status.UnsupportedMediaType;
       }
@@ -503,16 +473,16 @@ public class HTTPWorker implements Runnable {
     return null;
   }
 
+  private enum CloseSocketReason {
+    Expected,
+    Unexpected
+  }
+
   public enum State {
     Read,
     Process,
     Write,
     KeepAlive
-  }
-
-  private enum CloseSocketReason {
-    Expected,
-    Unexpected
   }
 
   private static class Status {

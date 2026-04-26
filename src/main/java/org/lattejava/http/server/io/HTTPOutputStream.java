@@ -15,21 +15,10 @@
  */
 package org.lattejava.http.server.io;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.List;
-import java.util.zip.DeflaterOutputStream;
-import java.util.zip.GZIPOutputStream;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.HTTPValues.ContentEncodings;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.HTTPValues.TransferEncodings;
-import org.lattejava.http.io.ChunkedOutputStream;
-import org.lattejava.http.server.HTTPResponse;
-import org.lattejava.http.server.HTTPServerConfiguration;
-import org.lattejava.http.server.Instrumenter;
-import org.lattejava.http.server.internal.HTTPBuffers;
-import org.lattejava.http.util.HTTPTools;
+import org.lattejava.http.server.internal.*;
 
 /**
  * The primary output stream for the HTTP server (currently supporting version 1.1). This handles delegating to
@@ -115,6 +104,19 @@ public class HTTPOutputStream extends OutputStream {
     this.compress = compress;
   }
 
+  public void reset() {
+    if (wroteOneByteToClient) {
+      throw new IllegalStateException("The HTTPOutputStream can't be reset after it has been committed, meaning at least one byte was written back to the client.");
+    }
+
+    bodySuppressed = false;
+    serverToSocket.reset();
+    committed = false;
+    compress = false;
+    delegate = serverToSocket;
+    // suppressBody is intentionally preserved across reset() so that HEAD error responses (triggered via response.reset() in closeSocketOnError) continue to suppress the body. HTTPOutputStream is constructed fresh per connection iteration in HTTPWorker, so there is no cross-request bleed.
+  }
+
   /**
    * Enables or disables body-byte suppression for this response. When enabled, the preamble is still written normally
    * (identical to a GET response), but any subsequent {@link #write} calls become no-ops and the chunked/gzip/deflate
@@ -130,19 +132,6 @@ public class HTTPOutputStream extends OutputStream {
     this.suppressBody = suppressBody;
   }
 
-  public void reset() {
-    if (wroteOneByteToClient) {
-      throw new IllegalStateException("The HTTPOutputStream can't be reset after it has been committed, meaning at least one byte was written back to the client.");
-    }
-
-    bodySuppressed = false;
-    serverToSocket.reset();
-    committed = false;
-    compress = false;
-    delegate = serverToSocket;
-    // suppressBody is intentionally preserved across reset() so that HEAD error responses (triggered via response.reset() in closeSocketOnError) continue to suppress the body. HTTPOutputStream is constructed fresh per connection iteration in HTTPWorker, so there is no cross-request bleed.
-  }
-
   /**
    * @return true if compression has been requested, and it appears as though we will compress because the requested
    *     content encoding is supported.
@@ -150,9 +139,9 @@ public class HTTPOutputStream extends OutputStream {
   public boolean willCompress() {
     if (compress) {
       for (String encoding : acceptEncodings) {
-        if (encoding.equalsIgnoreCase(ContentEncodings.Gzip)) {
+        if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip)) {
           return true;
-        } else if (encoding.equalsIgnoreCase(ContentEncodings.Deflate)) {
+        } else if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
           return true;
         }
       }
@@ -222,13 +211,13 @@ public class HTTPOutputStream extends OutputStream {
 
     if (noBodyStatus) {
       // 204/304 must not carry Content-Length, Transfer-Encoding, or a body (RFC 9110 §15.3.5 / §15.4.5 / RFC 7230 §3.3.2).
-      response.removeHeader(Headers.ContentLength);
-      response.removeHeader(Headers.TransferEncoding);
+      response.removeHeader(HTTPValues.Headers.ContentLength);
+      response.removeHeader(HTTPValues.Headers.TransferEncoding);
     } else {
       // RFC 7230 §3.3.3: a sender must not send Content-Length in a message that also has Transfer-Encoding. TE wins.
-      boolean handlerSetTransferEncoding = response.getHeader(Headers.TransferEncoding) != null;
+      boolean handlerSetTransferEncoding = response.getHeader(HTTPValues.Headers.TransferEncoding) != null;
       if (handlerSetTransferEncoding) {
-        response.removeHeader(Headers.ContentLength);
+        response.removeHeader(HTTPValues.Headers.ContentLength);
       }
 
       if (closing) {
@@ -243,7 +232,7 @@ public class HTTPOutputStream extends OutputStream {
           // GET defensive override: the handler declared framing but produced no bytes. Strip any Transfer-Encoding (no chunks were sent)
           // and force Content-Length: 0 so the client does not wait for a body.
           if (handlerSetTransferEncoding) {
-            response.removeHeader(Headers.TransferEncoding);
+            response.removeHeader(HTTPValues.Headers.TransferEncoding);
           }
           response.setContentLength(0L);
         }
@@ -251,16 +240,16 @@ public class HTTPOutputStream extends OutputStream {
         // Handler is writing bytes.
         if (compress) {
           for (String encoding : acceptEncodings) {
-            if (encoding.equalsIgnoreCase(ContentEncodings.Gzip)) {
-              response.setHeader(Headers.ContentEncoding, ContentEncodings.Gzip);
-              response.setHeader(Headers.Vary, Headers.AcceptEncoding);
-              response.removeHeader(Headers.ContentLength);
+            if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip)) {
+              response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Gzip);
+              response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
+              response.removeHeader(HTTPValues.Headers.ContentLength);
               gzip = true;
               break;
-            } else if (encoding.equalsIgnoreCase(ContentEncodings.Deflate)) {
-              response.setHeader(Headers.ContentEncoding, ContentEncodings.Deflate);
-              response.setHeader(Headers.Vary, Headers.AcceptEncoding);
-              response.removeHeader(Headers.ContentLength);
+            } else if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
+              response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Deflate);
+              response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
+              response.removeHeader(HTTPValues.Headers.ContentLength);
               deflate = true;
               break;
             }
@@ -271,7 +260,7 @@ public class HTTPOutputStream extends OutputStream {
           // Handler asked for chunked framing explicitly. Wrap the delegate so the bytes are actually chunk-framed on the wire.
           chunked = true;
         } else if (response.getContentLength() == null) {
-          response.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
+          response.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
           chunked = true;
         }
       }
@@ -296,8 +285,8 @@ public class HTTPOutputStream extends OutputStream {
     if (gzip) {
       try {
         delegate = new GZIPOutputStream(delegate, true);
-        response.setHeader(Headers.ContentEncoding, ContentEncodings.Gzip);
-        response.setHeader(Headers.Vary, Headers.AcceptEncoding);
+        response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Gzip);
+        response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
       } catch (IOException e) {
         throw new RuntimeException(e);
       }

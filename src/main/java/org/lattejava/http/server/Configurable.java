@@ -15,12 +15,8 @@
  */
 package org.lattejava.http.server;
 
-import java.nio.file.*;
-import java.time.*;
-import java.util.*;
-
-import org.lattejava.http.io.*;
-import org.lattejava.http.log.*;
+import module java.base;
+import module org.lattejava.http;
 
 /**
  * An interface that identifies something that is configurable. Mainly, this allows the HTTPServer to be configured or

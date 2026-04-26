@@ -17,10 +17,6 @@ package org.lattejava.http.server;
 
 import module java.base;
 import module org.lattejava.http;
-import java.util.Locale.*;
-
-import org.lattejava.http.HTTPValues.*;
-import org.lattejava.http.util.HTTPTools.*;
 
 /**
  * An HTTP request that is received by the HTTP server. This contains all the relevant information from the request,
@@ -242,7 +238,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     // Assuming request.getScheme() is not the problem, and it is related to the proxy configuration.
     String scheme = getScheme().toLowerCase(Locale.ROOT);
     if (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https")) {
-      throw new IllegalArgumentException("The request scheme is invalid. Only http or https are valid schemes. The X-Forwarded-Proto header has a value of [" + getHeader(Headers.XForwardedProto) + "], this is likely an issue in your proxy configuration.");
+      throw new IllegalArgumentException("The request scheme is invalid. Only http or https are valid schemes. The X-Forwarded-Proto header has a value of [" + getHeader(HTTPValues.Headers.XForwardedProto) + "], this is likely an issue in your proxy configuration.");
     }
 
     String serverName = getHost().toLowerCase(Locale.ROOT);
@@ -345,10 +341,11 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   /**
    * Processes the HTTP request body completely if the {@code Content-Type} header is equal to
-   * {@link ContentTypes#Form}. If this method is called multiple times, the body is only processed the first time. This
-   * is not thread-safe, so you need to ensure you protect against multiple threads calling this method concurrently.
+   * {@link HTTPValues.ContentTypes#Form}. If this method is called multiple times, the body is only processed the first
+   * time. This is not thread-safe, so you need to ensure you protect against multiple threads calling this method
+   * concurrently.
    * <p>
-   * If the {@code Content-Type} is not {@link ContentTypes#Form}, this will always return an empty Map.
+   * If the {@code Content-Type} is not {@link HTTPValues.ContentTypes#Form}, this will always return an empty Map.
    * <p>
    * If the InputStream is not ready or complete, this will block until all the bytes are read from the client.
    *
@@ -359,7 +356,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
       formData = new HashMap<>();
 
       String contentType = getContentType();
-      if (contentType != null && contentType.equalsIgnoreCase(ContentTypes.Form)) {
+      if (contentType != null && contentType.equalsIgnoreCase(HTTPValues.ContentTypes.Form)) {
         byte[] body = getBodyBytes();
         HTTPTools.parseEncodedData(body, 0, body.length, getCharacterEncoding(), formData);
       } else if (isMultipart()) {
@@ -393,7 +390,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public String getHost() {
-    String xHost = getHeader(Headers.XForwardedHost);
+    String xHost = getHeader(HTTPValues.Headers.XForwardedHost);
     if (xHost == null) {
       return host;
     }
@@ -416,7 +413,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public String getIPAddress() {
-    String xIPAddress = getHeader(Headers.XForwardedFor);
+    String xIPAddress = getHeader(HTTPValues.Headers.XForwardedFor);
     if (xIPAddress == null || xIPAddress.trim().isEmpty()) {
       return ipAddress;
     }
@@ -544,7 +541,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public int getPort() {
-    String xPort = getHeader(Headers.XForwardedPort);
+    String xPort = getHeader(HTTPValues.Headers.XForwardedPort);
     return xPort == null ? port : Integer.parseInt(xPort);
   }
 
@@ -581,7 +578,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public String getScheme() {
-    String xScheme = getHeader(Headers.XForwardedProto);
+    String xScheme = getHeader(HTTPValues.Headers.XForwardedProto);
     return xScheme == null ? scheme : xScheme;
   }
 
@@ -590,7 +587,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public String getTransferEncoding() {
-    return getHeader(Headers.TransferEncoding);
+    return getHeader(HTTPValues.Headers.TransferEncoding);
   }
 
   public String getURLParameter(String name) {
@@ -625,7 +622,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public boolean isChunked() {
-    return TransferEncodings.Chunked.equalsIgnoreCase(getTransferEncoding());
+    return HTTPValues.TransferEncodings.Chunked.equalsIgnoreCase(getTransferEncoding());
   }
 
   /**
@@ -648,15 +645,15 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @return True if the Connection header is missing or not `Close`.
    */
   public boolean isKeepAlive() {
-    var connection = getHeader(Headers.Connection);
+    var connection = getHeader(HTTPValues.Headers.Connection);
     // Attempt backwards compatibility with HTTP 1.0. In practice, I doubt we'll see many HTTP 1.0 clients in the wild. However, some
     // load testing frameworks still use HTTP 1.0. To ensure performance doesn't suck when using those tools, we need to close sockets correctly.
     // - HTTP 1.0 requires the client to ask explicitly for keep-alive.
-    if (Protocols.HTTTP1_0.equals(protocol)) {
-      return connection != null && connection.equalsIgnoreCase(Connections.KeepAlive);
+    if (HTTPValues.Protocols.HTTTP1_0.equals(protocol)) {
+      return connection != null && connection.equalsIgnoreCase(HTTPValues.Connections.KeepAlive);
     }
 
-    return connection == null || !connection.equalsIgnoreCase(Connections.Close);
+    return connection == null || !connection.equalsIgnoreCase(HTTPValues.Connections.Close);
   }
 
   public boolean isMultipart() {
@@ -739,7 +736,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   private void decodeHeader(String name, String value) {
     switch (name) {
-      case Headers.AcceptEncodingLower:
+      case HTTPValues.Headers.AcceptEncodingLower:
         SortedSet<WeightedString> weightedStrings = new TreeSet<>();
         String[] parts = value.split(",");
         int index = 0;
@@ -749,7 +746,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
             continue;
           }
 
-          HeaderValue parsed = HTTPTools.parseHeaderValue(part);
+          HTTPTools.HeaderValue parsed = HTTPTools.parseHeaderValue(part);
           String weightText = parsed.parameters().get("q");
           double weight = 1;
           if (weightText != null) {
@@ -768,19 +765,19 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
                            .toList()
         );
         break;
-      case Headers.AcceptLanguageLower:
+      case HTTPValues.Headers.AcceptLanguageLower:
         try {
-          addLocales(LanguageRange.parse(value) // Default to English
-                                  .stream()
-                                  .sorted(Comparator.comparing(LanguageRange::getWeight).reversed())
-                                  .map(LanguageRange::getRange)
-                                  .map(Locale::forLanguageTag)
-                                  .collect(Collectors.toList()));
+          addLocales(Locale.LanguageRange.parse(value) // Default to English
+                                         .stream()
+                                         .sorted(Comparator.comparing(Locale.LanguageRange::getWeight).reversed())
+                                         .map(Locale.LanguageRange::getRange)
+                                         .map(Locale::forLanguageTag)
+                                         .collect(Collectors.toList()));
         } catch (Exception e) {
           // Ignore the exception and keep the value null
         }
         break;
-      case Headers.ContentEncodingLower:
+      case HTTPValues.Headers.ContentEncodingLower:
         String[] encodings = value.split(",");
         List<String> contentEncodings = new ArrayList<>(1);
         for (String encoding : encodings) {
@@ -790,8 +787,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
           }
 
           // The HTTP/1.1 standard recommends that the servers supporting gzip also recognize x-gzip as an alias for compatibility.
-          if (encoding.equalsIgnoreCase(ContentEncodings.XGzip)) {
-            encoding = ContentEncodings.Gzip;
+          if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.XGzip)) {
+            encoding = HTTPValues.ContentEncodings.Gzip;
           }
 
           contentEncodings.add(encoding);
@@ -799,25 +796,25 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
         setContentEncodings(contentEncodings);
         break;
-      case Headers.ContentTypeLower:
+      case HTTPValues.Headers.ContentTypeLower:
         this.encoding = null;
         this.multipart = false;
 
-        HeaderValue headerValue = HTTPTools.parseHeaderValue(value);
+        HTTPTools.HeaderValue headerValue = HTTPTools.parseHeaderValue(value);
         this.contentType = headerValue.value();
 
-        if (headerValue.value().startsWith(ContentTypes.MultipartPrefix)) {
+        if (headerValue.value().startsWith(HTTPValues.ContentTypes.MultipartPrefix)) {
           this.multipart = true;
-          this.multipartBoundary = headerValue.parameters().get(ContentTypes.BoundaryParameter);
+          this.multipartBoundary = headerValue.parameters().get(HTTPValues.ContentTypes.BoundaryParameter);
         }
 
-        String charset = headerValue.parameters().get(ContentTypes.CharsetParameter);
+        String charset = headerValue.parameters().get(HTTPValues.ContentTypes.CharsetParameter);
         if (charset != null) {
           this.encoding = Charset.forName(charset);
         }
 
         break;
-      case Headers.ContentLengthLower:
+      case HTTPValues.Headers.ContentLengthLower:
         if (value == null || value.isBlank()) {
           contentLength = null;
         } else {
@@ -828,10 +825,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
           }
         }
         break;
-      case Headers.CookieLower:
+      case HTTPValues.Headers.CookieLower:
         addCookies(Cookie.fromRequestHeader(value));
         break;
-      case Headers.HostLower:
+      case HTTPValues.Headers.HostLower:
         int colon = value.indexOf(':');
         if (colon > 0) {
           this.host = value.substring(0, colon);
@@ -870,12 +867,12 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     // See if we can infer a better choice for the port than the current serverPort.
 
     // If we already have an X-Forwarded-Port header, nothing to do here.
-    if (getHeader(Headers.XForwardedPort) != null) {
+    if (getHeader(HTTPValues.Headers.XForwardedPort) != null) {
       return serverPort;
     }
 
     // If we don't have a host header, nothing to do here.
-    String xHost = getHeader(Headers.XForwardedHost);
+    String xHost = getHeader(HTTPValues.Headers.XForwardedHost);
     if (xHost == null) {
       return serverPort;
     }
@@ -894,7 +891,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
     // If we don't have an X-Forwarded-Proto header, or it is not https, nothing to do here.
     // - We must have the X-Forwarded-Proto: https in order to assume 443
-    if (!"https".equals(getHeader(Headers.XForwardedProto))) {
+    if (!"https".equals(getHeader(HTTPValues.Headers.XForwardedProto))) {
       return serverPort;
     }
 

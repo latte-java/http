@@ -15,16 +15,10 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.IOException;
-import java.net.URL;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Comparator;
-
-import org.lattejava.http.server.HTTPContext;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
 
 import static org.testng.Assert.*;
 

@@ -15,9 +15,7 @@
  */
 package org.lattejava.http.io;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.Arrays;
+import module java.base;
 
 /**
  * A simple fast byte array output stream. This does no checks and has no synchronization. It simply jams data in an

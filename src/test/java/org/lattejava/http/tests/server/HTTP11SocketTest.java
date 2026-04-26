@@ -15,13 +15,9 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.nio.charset.StandardCharsets;
-
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.HTTPValues.TransferEncodings;
-import org.lattejava.http.server.HTTPHandler;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
 /**
  * Tests the HTTP server by writing directly to the server and reading using sockets to test lower level semantics.
@@ -211,6 +207,238 @@ public class HTTP11SocketTest extends BaseSocketTest {
         content-length: 0\r
         \r
         """);
+  }
+
+  /**
+   * Defensive override: when the handler sets both Content-Length and Transfer-Encoding but writes no bytes, TE-wins
+   * strips the CL first, then the GET defensive path strips the unused TE and forces Content-Length: 0 so the client
+   * does not wait for either framing.
+   */
+  @Test
+  public void get_handlerSetsBothContentLengthAndTransferEncoding_noWrite_defensiveContentLengthZero() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
+      res.setContentLength(50L);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            content-length: 0\r
+            \r
+            """);
+  }
+
+  /**
+   * GET handler that sets both Content-Length and Transfer-Encoding: chunked, then writes bytes. TE wins: CL must be
+   * stripped, and the body must be chunk-framed on the wire.
+   */
+  @Test
+  public void get_handlerSetsBothContentLengthAndTransferEncoding_writes_contentLengthStripped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
+      res.setContentLength(8L);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+      res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            transfer-encoding: chunked\r
+            \r
+            8\r
+            abcdefgh\r
+            0\r
+            \r
+            """);
+  }
+
+  /**
+   * GET handler that sets Transfer-Encoding: chunked but writes nothing. The server must strip the unused TE header and
+   * force Content-Length: 0 (defensive override).
+   */
+  @Test
+  public void get_handlerSetsTransferEncodingChunked_noWrite_strippedForContentLengthZero() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+      // Writes nothing.
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            content-length: 0\r
+            \r
+            """);
+  }
+
+  /**
+   * GET handler that explicitly sets Transfer-Encoding: chunked and writes bytes. The server must wrap the output
+   * delegate in ChunkedOutputStream, so the bytes are chunk-framed on the wire — not emitted raw.
+   */
+  @Test
+  public void get_handlerSetsTransferEncodingChunked_writesBytes_serverChunksFrames() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+      res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            transfer-encoding: chunked\r
+            \r
+            8\r
+            abcdefgh\r
+            0\r
+            \r
+            """);
+  }
+
+  /**
+   * GET to a 204 handler that sets Content-Length: 50 and writes nothing. The header must be stripped.
+   */
+  @Test
+  public void get_status204_handlerSetsContentLength_stripped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(204);
+      res.setContentLength(50L);
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 204 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  /**
+   * GET to a 204 handler that writes bytes. The body must be suppressed, and neither content-length nor
+   * transfer-encoding should appear in the preamble (RFC 9110 §15.3.5).
+   */
+  @Test
+  public void get_status204_handlerWritesBytes_bodySuppressed() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(204);
+      res.getOutputStream().write("0123456789".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 204 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  /**
+   * GET to a 304 handler that sets Content-Length: 50 and writes nothing. The header must be stripped.
+   */
+  @Test
+  public void get_status304_handlerSetsContentLength_stripped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(304);
+      res.setContentLength(50L);
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 304 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  /**
+   * Status 304 must not carry Transfer-Encoding per RFC 9110 §15.4.5. If the handler tries to set one, the server
+   * strips it.
+   */
+  @Test
+  public void get_status304_handlerSetsTransferEncoding_stripped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(304);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+    };
+
+    withRequest("""
+        GET /etag HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 304 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  /**
+   * GET to a 304 handler that writes bytes. The body must be suppressed, and neither content-length nor
+   * transfer-encoding should appear in the preamble (RFC 9110 §15.4.5).
+   */
+  @Test
+  public void get_status304_handlerWritesBytes_bodySuppressed() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(304);
+      res.getOutputStream().write("cached content".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 304 \r
+            connection: keep-alive\r
+            \r
+            """);
   }
 
   /**
@@ -667,237 +895,5 @@ public class HTTP11SocketTest extends BaseSocketTest {
         content-length: 0\r
         \r
         """);
-  }
-
-  /**
-   * GET handler that explicitly sets Transfer-Encoding: chunked and writes bytes. The server must wrap the output
-   * delegate in ChunkedOutputStream, so the bytes are chunk-framed on the wire — not emitted raw.
-   */
-  @Test
-  public void get_handlerSetsTransferEncodingChunked_writesBytes_serverChunksFrames() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(200);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-      res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            transfer-encoding: chunked\r
-            \r
-            8\r
-            abcdefgh\r
-            0\r
-            \r
-            """);
-  }
-
-  /**
-   * GET handler that sets Transfer-Encoding: chunked but writes nothing. The server must strip the unused TE header and
-   * force Content-Length: 0 (defensive override).
-   */
-  @Test
-  public void get_handlerSetsTransferEncodingChunked_noWrite_strippedForContentLengthZero() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(200);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-      // Writes nothing.
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            content-length: 0\r
-            \r
-            """);
-  }
-
-  /**
-   * GET handler that sets both Content-Length and Transfer-Encoding: chunked, then writes bytes. TE wins: CL must be
-   * stripped, and the body must be chunk-framed on the wire.
-   */
-  @Test
-  public void get_handlerSetsBothContentLengthAndTransferEncoding_writes_contentLengthStripped() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(200);
-      res.setContentLength(8L);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-      res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            transfer-encoding: chunked\r
-            \r
-            8\r
-            abcdefgh\r
-            0\r
-            \r
-            """);
-  }
-
-  /**
-   * GET to a 204 handler that writes bytes. The body must be suppressed, and neither content-length nor
-   * transfer-encoding should appear in the preamble (RFC 9110 §15.3.5).
-   */
-  @Test
-  public void get_status204_handlerWritesBytes_bodySuppressed() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(204);
-      res.getOutputStream().write("0123456789".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 204 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  /**
-   * GET to a 304 handler that writes bytes. The body must be suppressed, and neither content-length nor
-   * transfer-encoding should appear in the preamble (RFC 9110 §15.4.5).
-   */
-  @Test
-  public void get_status304_handlerWritesBytes_bodySuppressed() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(304);
-      res.getOutputStream().write("cached content".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 304 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  /**
-   * GET to a 204 handler that sets Content-Length: 50 and writes nothing. The header must be stripped.
-   */
-  @Test
-  public void get_status204_handlerSetsContentLength_stripped() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(204);
-      res.setContentLength(50L);
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 204 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  /**
-   * GET to a 304 handler that sets Content-Length: 50 and writes nothing. The header must be stripped.
-   */
-  @Test
-  public void get_status304_handlerSetsContentLength_stripped() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(304);
-      res.setContentLength(50L);
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 304 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  /**
-   * Defensive override: when the handler sets both Content-Length and Transfer-Encoding but writes no bytes, TE-wins
-   * strips the CL first, then the GET defensive path strips the unused TE and forces Content-Length: 0 so the client
-   * does not wait for either framing.
-   */
-  @Test
-  public void get_handlerSetsBothContentLengthAndTransferEncoding_noWrite_defensiveContentLengthZero() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(200);
-      res.setContentLength(50L);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-    };
-
-    withRequest("""
-        GET / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            content-length: 0\r
-            \r
-            """);
-  }
-
-  /**
-   * Status 304 must not carry Transfer-Encoding per RFC 9110 §15.4.5. If the handler tries to set one, the server
-   * strips it.
-   */
-  @Test
-  public void get_status304_handlerSetsTransferEncoding_stripped() throws Exception {
-    HTTPHandler handler = (_, res) -> {
-      res.setStatus(304);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-    };
-
-    withRequest("""
-        GET /etag HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 304 \r
-            connection: keep-alive\r
-            \r
-            """);
   }
 }

@@ -15,20 +15,15 @@
  */
 package org.lattejava.http.tests.security;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse.BodySubscribers;
-import java.nio.charset.StandardCharsets;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 import java.nio.file.Files;
-import java.nio.file.Path;
 
-import org.lattejava.http.security.SecurityTools;
-import org.lattejava.http.tests.server.BaseTest;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
+import org.lattejava.http.tests.server.*;
 
-import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.*;
 
 /**
  * Tests parsing of certificate chains and keys.
@@ -54,7 +49,7 @@ public class SecurityToolsTest extends BaseTest {
                                        .uri(URI.create("https://lattejava.org"))
                                        .GET()
                                        .build();
-      var response = client.send(request, _ -> BodySubscribers.ofString(StandardCharsets.UTF_8));
+      var response = client.send(request, _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8));
       assertEquals(response.statusCode(), 200);
     }
   }

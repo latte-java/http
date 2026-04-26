@@ -15,46 +15,17 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.*;
-import java.math.BigInteger;
-import java.net.*;
-import java.net.http.HttpClient;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Paths;
-import java.security.*;
-import java.security.cert.*;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 import java.security.cert.Certificate;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.Map;
-import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.zip.DeflaterOutputStream;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.GZIPOutputStream;
-import java.util.zip.InflaterInputStream;
+import java.security.cert.X509Certificate;
 
-import org.lattejava.http.HTTPValues.Connections;
-import org.lattejava.http.HTTPValues.ContentEncodings;
-import org.lattejava.http.log.FileLogger;
-import org.lattejava.http.log.FileLoggerFactory;
-import org.lattejava.http.log.Level;
-import org.lattejava.http.log.LoggerFactory;
-import org.lattejava.http.security.SecurityTools;
-import org.lattejava.http.server.*;
-import org.testng.ITestListener;
-import org.testng.ITestResult;
-import org.testng.annotations.*;
-import sun.security.util.KnownOIDs;
-import sun.security.util.ObjectIdentifier;
+import sun.security.util.*;
 import sun.security.x509.*;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.fail;
+import static org.testng.Assert.*;
 
 /**
  * Base class for tests in order to provide data providers and other reusable code.
@@ -200,8 +171,8 @@ public abstract class BaseTest {
   @DataProvider
   public Object[][] connections() {
     return new Object[][]{
-        {Connections.Close},
-        {Connections.KeepAlive}
+        {HTTPValues.Connections.Close},
+        {HTTPValues.Connections.KeepAlive}
     };
   }
 
@@ -432,9 +403,9 @@ public abstract class BaseTest {
       var requestEncodings = contentEncoding.toLowerCase().trim().split(",");
       for (String part : requestEncodings) {
         String encoding = part.trim();
-        if (encoding.equals(ContentEncodings.Deflate)) {
+        if (encoding.equals(HTTPValues.ContentEncodings.Deflate)) {
           bytes = deflate(bytes);
-        } else if (encoding.equals(ContentEncodings.Gzip)) {
+        } else if (encoding.equals(HTTPValues.ContentEncodings.Gzip)) {
           bytes = gzip(bytes);
         }
       }

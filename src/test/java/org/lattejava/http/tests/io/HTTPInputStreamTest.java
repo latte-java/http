@@ -15,19 +15,14 @@
  */
 package org.lattejava.http.tests.io;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
-import org.lattejava.http.HTTPValues.Headers;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.server.HTTPRequest;
-import org.lattejava.http.server.HTTPServerConfiguration;
-import org.lattejava.http.server.io.HTTPInputStream;
-import org.lattejava.http.tests.server.BaseTest;
-import org.testng.annotations.Test;
+import org.lattejava.http.tests.server.*;
 
-import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.*;
 
 /**
  * @author Daniel DeGroff
@@ -58,8 +53,8 @@ public class HTTPInputStreamTest extends BaseTest {
     out.write(nextRequestBytes);
 
     HTTPRequest request = new HTTPRequest();
-    request.setHeader(Headers.ContentEncoding, contentEncoding);
-    request.setHeader(Headers.TransferEncoding, "chunked");
+    request.setHeader(HTTPValues.Headers.ContentEncoding, contentEncoding);
+    request.setHeader(HTTPValues.Headers.TransferEncoding, "chunked");
 
     byte[] bytes = out.toByteArray();
     assertReadWithPushback(bytes, content, contentLength, nextRequestBytes, request);
@@ -91,8 +86,8 @@ public class HTTPInputStreamTest extends BaseTest {
     out.write(nextRequestBytes);
 
     HTTPRequest request = new HTTPRequest();
-    request.setHeader(Headers.ContentEncoding, contentEncoding);
-    request.setHeader(Headers.ContentLength, compressedLength + "");
+    request.setHeader(HTTPValues.Headers.ContentEncoding, contentEncoding);
+    request.setHeader(HTTPValues.Headers.ContentLength, compressedLength + "");
 
     byte[] bytes = out.toByteArray();
     assertReadWithPushback(bytes, content, contentLength, nextRequestBytes, request);

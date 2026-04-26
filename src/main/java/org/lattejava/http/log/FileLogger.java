@@ -15,11 +15,7 @@
  */
 package org.lattejava.http.log;
 
-import java.io.IOException;
-import java.io.Writer;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import module java.base;
 
 /**
  * A simple logger that spits out messages to System.out.

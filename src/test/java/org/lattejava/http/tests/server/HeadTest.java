@@ -15,17 +15,9 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.OutputStream;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.HTTPValues.Status;
-import org.lattejava.http.HTTPValues.TransferEncodings;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
-import org.testng.annotations.Test;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
 /**
  * Tests automatic HEAD request handling at the wire level. Uses raw sockets because the JDK HttpClient will not read
@@ -35,17 +27,18 @@ import org.testng.annotations.Test;
  */
 public class HeadTest extends BaseSocketTest {
   @Test
-  public void head_getOnlyHandler_writesNoBody() throws Exception {
+  public void head_cdnEscapeHatch_contentLengthSetNoBytesWritten() throws Exception {
     HTTPHandler handler = (req, res) -> {
-      byte[] body = "Hello World".getBytes(StandardCharsets.UTF_8);
       res.setStatus(200);
-      res.setContentLength(body.length);
-      res.setContentType("text/plain");
-      res.getOutputStream().write(body);
+      res.setContentType("application/octet-stream");
+      if (req.isHeadRequest()) {
+        res.setContentLength(104857600L); // 100 MiB
+      }
+      // Full body generation would go here for GET; not exercised in this test.
     };
 
     withRequest("""
-        HEAD / HTTP/1.1\r
+        HEAD /asset.bin HTTP/1.1\r
         Host: cyberdyne-systems.com\r
         \r
         """)
@@ -53,77 +46,15 @@ public class HeadTest extends BaseSocketTest {
         .expectResponse("""
             HTTP/1.1 200 \r
             connection: keep-alive\r
-            content-length: 11\r
-            content-type: text/plain\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_handlerSetsContentLength_andWritesBody_bodyDropped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      byte[] body = "abcdefgh".getBytes(StandardCharsets.UTF_8);
-      res.setStatus(200);
-      res.setContentLength(body.length);
-      res.getOutputStream().write(body);
-    };
-
-    withRequest("""
-        HEAD /page HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            content-length: 8\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_handlerWritesWithoutContentLength_chunkedHeaderPresent_noChunksOnWire() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      res.setStatus(200);
-      res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        HEAD / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            transfer-encoding: chunked\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_handlerWritesNothing_contentLengthZero() throws Exception {
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
-
-    withRequest("""
-        HEAD / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            content-length: 0\r
+            content-type: application/octet-stream\r
+            content-length: 104857600\r
             \r
             """);
   }
 
   @Test
   public void head_compressionEnabled_headersPresent_noBody() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
       res.setCompress(true);
       res.setContentType("text/plain");
@@ -149,152 +80,13 @@ public class HeadTest extends BaseSocketTest {
   }
 
   @Test
-  public void head_cdnEscapeHatch_contentLengthSetNoBytesWritten() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+  public void head_getOnlyHandler_writesNoBody() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      byte[] body = "Hello World".getBytes(StandardCharsets.UTF_8);
       res.setStatus(200);
-      res.setContentType("application/octet-stream");
-      if (req.isHeadRequest()) {
-        res.setContentLength(104857600L); // 100 MiB
-        return;
-      }
-      // Full body generation would go here for GET; not exercised in this test.
-    };
-
-    withRequest("""
-        HEAD /asset.bin HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            content-type: application/octet-stream\r
-            content-length: 104857600\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_statusNoContent_noContentLengthNoTransferEncoding() throws Exception {
-    HTTPHandler handler = (req, res) -> res.setStatus(204);
-
-    withRequest("""
-        HEAD /empty HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 204 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_statusNotModified_noContentLengthNoTransferEncoding() throws Exception {
-    HTTPHandler handler = (req, res) -> res.setStatus(Status.NotModified);
-
-    withRequest("""
-        HEAD /etag HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 304 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_statusNoContent_handlerSetsContentLength_stripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      res.setStatus(204);
-      res.setContentLength(50L);
-    };
-
-    withRequest("""
-        HEAD /empty HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 204 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_statusNoContent_handlerSetsTransferEncoding_stripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      res.setStatus(204);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-    };
-
-    withRequest("""
-        HEAD /empty HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 204 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_statusNoContent_handlerWritesBytes_bodyDropped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      res.setStatus(204);
-      res.getOutputStream().write("hello world".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        HEAD /empty HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 204 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_statusNotModified_handlerWritesBytes_bodyDropped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      res.setStatus(304);
-      res.getOutputStream().write("cached content".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        HEAD /etag HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 304 \r
-            connection: keep-alive\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_handlerSetsTransferEncodingChunked_noWrite_preserved() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      res.setStatus(200);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-      // Writes nothing — CDN-style handler signals chunked framing but lets HEAD suppress the body.
+      res.setContentLength(body.length);
+      res.setContentType("text/plain");
+      res.getOutputStream().write(body);
     };
 
     withRequest("""
@@ -306,40 +98,18 @@ public class HeadTest extends BaseSocketTest {
         .expectResponse("""
             HTTP/1.1 200 \r
             connection: keep-alive\r
-            transfer-encoding: chunked\r
-            \r
-            """);
-  }
-
-  @Test
-  public void head_handlerSetsBothContentLengthAndTransferEncoding_writesBytes_contentLengthStripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
-      res.setStatus(200);
-      res.setContentLength(10L);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
-      res.getOutputStream().write("0123456789".getBytes(StandardCharsets.UTF_8));
-    };
-
-    withRequest("""
-        HEAD / HTTP/1.1\r
-        Host: cyberdyne-systems.com\r
-        \r
-        """)
-        .withHandler(handler)
-        .expectResponse("""
-            HTTP/1.1 200 \r
-            connection: keep-alive\r
-            transfer-encoding: chunked\r
+            content-length: 11\r
+            content-type: text/plain\r
             \r
             """);
   }
 
   @Test
   public void head_handlerSetsBothContentLengthAndTransferEncoding_noWrite_contentLengthStripped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
       res.setContentLength(10L);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
       // Writes nothing.
     };
 
@@ -358,10 +128,117 @@ public class HeadTest extends BaseSocketTest {
   }
 
   @Test
-  public void head_handlerSetsTransferEncodingChunked_writesBytes_bodyDropped() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+  public void head_handlerSetsBothContentLengthAndTransferEncoding_writesBytes_contentLengthStripped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
-      res.setHeader(Headers.TransferEncoding, TransferEncodings.Chunked);
+      res.setContentLength(10L);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+      res.getOutputStream().write("0123456789".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            transfer-encoding: chunked\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_handlerSetsContentLength_andWritesBody_bodyDropped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      byte[] body = "abcdefgh".getBytes(StandardCharsets.UTF_8);
+      res.setStatus(200);
+      res.setContentLength(body.length);
+      res.getOutputStream().write(body);
+    };
+
+    withRequest("""
+        HEAD /page HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            content-length: 8\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_handlerSetsTransferEncodingChunked_noWrite_preserved() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+      // Writes nothing — CDN-style handler signals chunked framing but lets HEAD suppress the body.
+    };
+
+    withRequest("""
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            transfer-encoding: chunked\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_handlerSetsTransferEncodingChunked_writesBytes_bodyDropped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+      res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            transfer-encoding: chunked\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_handlerWritesNothing_contentLengthZero() throws Exception {
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
+
+    withRequest("""
+        HEAD / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 200 \r
+            connection: keep-alive\r
+            content-length: 0\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_handlerWritesWithoutContentLength_chunkedHeaderPresent_noChunksOnWire() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
       res.getOutputStream().write("abcdefgh".getBytes(StandardCharsets.UTF_8));
     };
 
@@ -381,7 +258,7 @@ public class HeadTest extends BaseSocketTest {
 
   @Test
   public void head_redirect_locationSent_noBody() throws Exception {
-    HTTPHandler handler = (req, res) -> res.sendRedirect("https://example.com/new");
+    HTTPHandler handler = (_, res) -> res.sendRedirect("https://example.com/new");
 
     withRequest("""
         HEAD /old HTTP/1.1\r
@@ -399,8 +276,122 @@ public class HeadTest extends BaseSocketTest {
   }
 
   @Test
+  public void head_statusNoContent_handlerSetsContentLength_stripped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(204);
+      res.setContentLength(50L);
+    };
+
+    withRequest("""
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 204 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_statusNoContent_handlerSetsTransferEncoding_stripped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(204);
+      res.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+    };
+
+    withRequest("""
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 204 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_statusNoContent_handlerWritesBytes_bodyDropped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(204);
+      res.getOutputStream().write("hello world".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 204 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_statusNoContent_noContentLengthNoTransferEncoding() throws Exception {
+    HTTPHandler handler = (_, res) -> res.setStatus(204);
+
+    withRequest("""
+        HEAD /empty HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 204 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_statusNotModified_handlerWritesBytes_bodyDropped() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(304);
+      res.getOutputStream().write("cached content".getBytes(StandardCharsets.UTF_8));
+    };
+
+    withRequest("""
+        HEAD /etag HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 304 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  @Test
+  public void head_statusNotModified_noContentLengthNoTransferEncoding() throws Exception {
+    HTTPHandler handler = (_, res) -> res.setStatus(HTTPValues.Status.NotModified);
+
+    withRequest("""
+        HEAD /etag HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        \r
+        """)
+        .withHandler(handler)
+        .expectResponse("""
+            HTTP/1.1 304 \r
+            connection: keep-alive\r
+            \r
+            """);
+  }
+
+  @Test
   public void head_thenGet_onSameConnection_bothSucceed() throws Exception {
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       byte[] body = "Hello".getBytes(StandardCharsets.UTF_8);
       res.setStatus(200);
       res.setContentLength(body.length);

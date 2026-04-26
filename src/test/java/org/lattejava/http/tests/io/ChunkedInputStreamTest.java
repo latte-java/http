@@ -15,13 +15,12 @@
  */
 package org.lattejava.http.tests.io;
 
-import java.io.*;
-import java.nio.charset.*;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
-import org.lattejava.http.io.*;
 import org.lattejava.http.io.PushbackInputStream;
 import org.lattejava.http.tests.util.*;
-import org.testng.annotations.*;
 
 import static org.testng.Assert.*;
 

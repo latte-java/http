@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.server.io;
 
-import org.lattejava.http.server.internal.HTTPWorker;
+import org.lattejava.http.server.internal.*;
 
 /**
  * This class allows the {@link HTTPWorker} to hook into other classes without passing around interfaces, loggers, and

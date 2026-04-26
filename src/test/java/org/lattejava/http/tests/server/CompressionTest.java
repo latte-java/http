@@ -15,33 +15,13 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.math.BigDecimal;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse.BodySubscribers;
-import java.nio.charset.StandardCharsets;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.text.DecimalFormat;
-import java.util.List;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.InflaterInputStream;
-
-import org.lattejava.http.HTTPValues.ContentEncodings;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.CountingInstrumenter;
-import org.lattejava.http.server.HTTPHandler;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
 
 import static org.testng.Assert.*;
-import static org.testng.AssertJUnit.fail;
 
 /**
  * Tests the HTTP server handles compression properly.
@@ -68,7 +48,7 @@ public class CompressionTest extends BaseTest {
       String body = new String(req.getInputStream().readAllBytes());
       assertEquals(body, "Hello world!");
 
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       // Technically, this is ignored anytime compression is used, but we are testing if folks don't set it here
@@ -91,9 +71,9 @@ public class CompressionTest extends BaseTest {
       var requestEncodings = contentEncoding.toLowerCase().trim().split(",");
       for (String part : requestEncodings) {
         String encoding = part.trim();
-        if (encoding.equals(ContentEncodings.Deflate)) {
+        if (encoding.equals(HTTPValues.ContentEncodings.Deflate)) {
           payload = deflate(payload);
-        } else if (encoding.equals(ContentEncodings.Gzip) || encoding.equals(ContentEncodings.XGzip)) {
+        } else if (encoding.equals(HTTPValues.ContentEncodings.Gzip) || encoding.equals(HTTPValues.ContentEncodings.XGzip)) {
           payload = gzip(payload);
         }
       }
@@ -103,9 +83,9 @@ public class CompressionTest extends BaseTest {
       // Sanity check on round trip compress/decompress
       for (int i = requestEncodings.length - 1; i >= 0; i--) {
         String encoding = requestEncodings[i].trim();
-        if (encoding.equals(ContentEncodings.Deflate)) {
+        if (encoding.equals(HTTPValues.ContentEncodings.Deflate)) {
           uncompressedBody = inflate(uncompressedBody);
-        } else if (encoding.equals(ContentEncodings.Gzip) || encoding.equals(ContentEncodings.XGzip)) {
+        } else if (encoding.equals(HTTPValues.ContentEncodings.Gzip) || encoding.equals(HTTPValues.ContentEncodings.XGzip)) {
           uncompressedBody = ungzip(uncompressedBody);
         }
       }
@@ -123,15 +103,15 @@ public class CompressionTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder()
                      .uri(uri)
-                     .header(Headers.AcceptEncoding, acceptEncoding)
-                     .header(Headers.ContentEncoding, contentEncoding)
-                     .header(Headers.ContentType, "text/plain")
+                     .header(HTTPValues.Headers.AcceptEncoding, acceptEncoding)
+                     .header(HTTPValues.Headers.ContentEncoding, contentEncoding)
+                     .header(HTTPValues.Headers.ContentType, "text/plain")
                      // In general, using a BodyPublishers.ofInputStream causes the client to use chunked transfer encoding.
                      // - Manually set the header because the body is small, and it may not chunk it otherwise.
-                     .header(Headers.TransferEncoding, "chunked")
-                     .POST(BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(requestPayload)))
+                     .header(HTTPValues.Headers.TransferEncoding, "chunked")
+                     .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(requestPayload)))
                      .build(),
-          _ -> BodySubscribers.ofInputStream()
+          _ -> HttpResponse.BodySubscribers.ofInputStream()
       );
 
       assertEquals(response.statusCode(), 200);
@@ -149,10 +129,10 @@ public class CompressionTest extends BaseTest {
       if (expectedResponseEncoding.isEmpty()) {
         result = new String(responseInputStream.readAllBytes());
       } else {
-        assertEquals(response.headers().firstValue(Headers.ContentEncoding).orElse(null), expectedResponseEncoding);
-        if (expectedResponseEncoding.equals(ContentEncodings.Deflate)) {
+        assertEquals(response.headers().firstValue(HTTPValues.Headers.ContentEncoding).orElse(null), expectedResponseEncoding);
+        if (expectedResponseEncoding.equals(HTTPValues.ContentEncodings.Deflate)) {
           result = new String(new InflaterInputStream(responseInputStream).readAllBytes());
-        } else if (expectedResponseEncoding.equals(ContentEncodings.Gzip) || expectedResponseEncoding.equals(ContentEncodings.XGzip)) {
+        } else if (expectedResponseEncoding.equals(HTTPValues.ContentEncodings.Gzip) || expectedResponseEncoding.equals(HTTPValues.ContentEncodings.XGzip)) {
           result = new String(new GZIPInputStream(responseInputStream).readAllBytes(), StandardCharsets.UTF_8);
         }
       }
@@ -166,7 +146,7 @@ public class CompressionTest extends BaseTest {
     HTTPHandler handler = (_, res) -> {
       res.setCompress(true);
       res.setContentLength(1_000_000); // Ignored
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       try (InputStream is = Files.newInputStream(file)) {
@@ -181,12 +161,12 @@ public class CompressionTest extends BaseTest {
     try (var client = makeClient("http", null); var ignore = makeServer("http", handler).withCompressByDefault(false).start()) {
       URI uri = makeURI("http", "");
       var response = client.send(HttpRequest.newBuilder()
-                                            .header(Headers.AcceptEncoding, ContentEncodings.Gzip)
+                                            .header(HTTPValues.Headers.AcceptEncoding, HTTPValues.ContentEncodings.Gzip)
                                             .uri(uri)
                                             .GET()
                                             .build(),
-          _ -> BodySubscribers.ofInputStream());
-      assertEquals(response.headers().firstValue(Headers.ContentEncoding).orElse(null), ContentEncodings.Gzip);
+          _ -> HttpResponse.BodySubscribers.ofInputStream());
+      assertEquals(response.headers().firstValue(HTTPValues.Headers.ContentEncoding).orElse(null), HTTPValues.ContentEncodings.Gzip);
       assertEquals(response.statusCode(), 200);
       assertEquals(new String(new GZIPInputStream(response.body()).readAllBytes(), StandardCharsets.UTF_8), Files.readString(file));
     }
@@ -196,7 +176,7 @@ public class CompressionTest extends BaseTest {
   public void compressPerformance() throws Exception {
     HTTPHandler handler = (_, res) -> {
       // Use case, do not call response.setCompress(true)
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       try (InputStream is = Files.newInputStream(file)) {
@@ -216,14 +196,14 @@ public class CompressionTest extends BaseTest {
         long start = System.currentTimeMillis();
         for (int i = 0; i < counter; i++) {
           var response = compress
-              ? client.send(HttpRequest.newBuilder().header(Headers.AcceptEncoding, ContentEncodings.Gzip).uri(uri).GET().build(), _ -> BodySubscribers.ofInputStream())
-              : client.send(HttpRequest.newBuilder().header(Headers.AcceptEncoding, ContentEncodings.Gzip).uri(uri).GET().build(), _ -> BodySubscribers.ofString(StandardCharsets.UTF_8));
+              ? client.send(HttpRequest.newBuilder().header(HTTPValues.Headers.AcceptEncoding, HTTPValues.ContentEncodings.Gzip).uri(uri).GET().build(), _ -> HttpResponse.BodySubscribers.ofInputStream())
+              : client.send(HttpRequest.newBuilder().header(HTTPValues.Headers.AcceptEncoding, HTTPValues.ContentEncodings.Gzip).uri(uri).GET().build(), _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8));
 
           var result = compress
               ? new String(new GZIPInputStream((InputStream) response.body()).readAllBytes(), StandardCharsets.UTF_8)
               : response.body();
 
-          assertEquals(response.headers().firstValue(Headers.ContentEncoding).orElse(null), compress ? ContentEncodings.Gzip : null);
+          assertEquals(response.headers().firstValue(HTTPValues.Headers.ContentEncoding).orElse(null), compress ? HTTPValues.ContentEncodings.Gzip : null);
           assertEquals(response.statusCode(), 200);
           assertEquals(result, Files.readString(file));
         }
@@ -260,7 +240,7 @@ public class CompressionTest extends BaseTest {
       // We forced a Content-Length by telling the JDK client not to chunk, so it will be present.
       // - We can still correctly use the Content-Length because it is used by the FixedLengthInputStream which
       //   is below the decompression. See HTTPInputStream.initialize
-      var contentLength = req.getHeader(Headers.ContentLength);
+      var contentLength = req.getHeader(HTTPValues.Headers.ContentLength);
       assertEquals(contentLength, payload.length + "");
 
       // Because we are compressed, don't expect the final payload to be equal to the contentLength
@@ -270,12 +250,12 @@ public class CompressionTest extends BaseTest {
       String body = new String(readBytes);
       assertEquals(body, bodyString);
 
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
     };
 
     // This publisher should cause a fixed length request.
-    var bodyPublisher = BodyPublishers.ofByteArray(payload);
+    var bodyPublisher = HttpRequest.BodyPublishers.ofByteArray(payload);
 
     try (var client = makeClient(scheme, null);
          var ignore = makeServer(scheme, handler, null).start()) {
@@ -284,11 +264,11 @@ public class CompressionTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder()
                      .uri(uri)
-                     .header(Headers.ContentEncoding, "gzip")
-                     .header(Headers.ContentType, "text/plain")
+                     .header(HTTPValues.Headers.ContentEncoding, "gzip")
+                     .header(HTTPValues.Headers.ContentType, "text/plain")
                      .POST(bodyPublisher)
                      .build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);
@@ -358,7 +338,7 @@ public class CompressionTest extends BaseTest {
     //     Result: no compression
     HTTPHandler handler = (_, res) -> {
       res.setCompress(true);
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       // Technically, this is ignored anytime compression is used, but we are testing if folks don't set it here
@@ -380,10 +360,10 @@ public class CompressionTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).GET().build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
-      assertNull(response.headers().firstValue(Headers.ContentEncoding).orElse(null));
+      assertNull(response.headers().firstValue(HTTPValues.Headers.ContentEncoding).orElse(null));
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), Files.readString(file));
     }
@@ -403,7 +383,7 @@ public class CompressionTest extends BaseTest {
       res.setCompress(false);
       res.setCompress(true);
 
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       // Technically, this is ignored anytime compression is used, but we are testing if folks don't set it here
@@ -432,11 +412,11 @@ public class CompressionTest extends BaseTest {
     try (var client = makeClient(scheme, null); var ignore = makeServer(scheme, handler, instrumenter).start()) {
       URI uri = makeURI(scheme, "");
       var response = client.send(
-          HttpRequest.newBuilder().header(Headers.AcceptEncoding, "br").uri(uri).GET().build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          HttpRequest.newBuilder().header(HTTPValues.Headers.AcceptEncoding, "br").uri(uri).GET().build(),
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
-      assertNull(response.headers().firstValue(Headers.ContentEncoding).orElse(null));
+      assertNull(response.headers().firstValue(HTTPValues.Headers.ContentEncoding).orElse(null));
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), Files.readString(file));
     }
@@ -446,12 +426,12 @@ public class CompressionTest extends BaseTest {
   public void unsupportedContentType(String scheme) throws Exception {
     // Use case: Tell the server we encoded the request using 'br'
     HTTPHandler handler = (_, res) -> {
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
     };
 
     // The body isn't actually encoded, that is ok, we will validate that 'br' is not supported when we validate the preamble.
-    var bodyPublisher = BodyPublishers.ofInputStream(() -> new ByteArrayInputStream("Hello World".getBytes(StandardCharsets.UTF_8)));
+    var bodyPublisher = HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream("Hello World".getBytes(StandardCharsets.UTF_8)));
 
     try (var client = makeClient(scheme, null);
          var ignore = makeServer(scheme, handler, null).start()) {
@@ -460,11 +440,11 @@ public class CompressionTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder()
                      .uri(uri)
-                     .header(Headers.ContentEncoding, "br")
-                     .header(Headers.ContentType, "text/plain")
+                     .header(HTTPValues.Headers.ContentEncoding, "br")
+                     .header(HTTPValues.Headers.ContentType, "text/plain")
                      .POST(bodyPublisher)
                      .build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       // Expect a 415 w/ an empty body response

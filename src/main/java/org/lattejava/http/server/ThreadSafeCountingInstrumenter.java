@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.server;
 
-import java.util.concurrent.atomic.AtomicLong;
+import module java.base;
 
 /**
  * A thread safe counting instrumenter for the HTTPServer, that ensures accurate data but could impact performance.

@@ -15,24 +15,14 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.*;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse.BodySubscribers;
-import java.nio.charset.StandardCharsets;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
-import com.inversoft.net.ssl.SSLTools;
-import com.inversoft.rest.RESTClient;
-import com.inversoft.rest.TextResponseHandler;
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.CountingInstrumenter;
-import org.lattejava.http.server.HTTPHandler;
-import org.lattejava.http.server.HTTPServer;
-import org.testng.annotations.Test;
+import com.inversoft.net.ssl.*;
+import com.inversoft.rest.*;
 
 import static org.testng.Assert.*;
 
@@ -63,7 +53,7 @@ public class ChunkedTest extends BaseTest {
       }
 
       byte[] responseBytes = ExpectedResponse.getBytes(StandardCharsets.UTF_8);
-      res.setHeader(Headers.ContentType, "application/json");
+      res.setHeader(HTTPValues.Headers.ContentType, "application/json");
       res.setHeader("Content-Length", responseBytes.length + "");
       res.setStatus(200);
 
@@ -83,11 +73,11 @@ public class ChunkedTest extends BaseTest {
       for (int i = 0; i < 1_000; i++) {
         var response = client.send(HttpRequest.newBuilder()
                                               .uri(uri)
-                                              .header(Headers.ContentType, "text/plain")
-                                              .POST(BodyPublishers.ofInputStream(() ->
+                                              .header(HTTPValues.Headers.ContentType, "text/plain")
+                                              .POST(HttpRequest.BodyPublishers.ofInputStream(() ->
                                                   new ByteArrayInputStream(responseBodyBytes)))
                                               .build(),
-            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -113,7 +103,7 @@ public class ChunkedTest extends BaseTest {
       // By not reading the InputStream, the server will have to drain it before writing the response.
 
       byte[] responseBytes = ExpectedResponse.getBytes(StandardCharsets.UTF_8);
-      res.setHeader(Headers.ContentType, "application/json");
+      res.setHeader(HTTPValues.Headers.ContentType, "application/json");
       res.setHeader("Content-Length", responseBytes.length + "");
       res.setStatus(200);
 
@@ -138,13 +128,13 @@ public class ChunkedTest extends BaseTest {
       for (int i = 0; i < iterations; i++) {
         var response = client.send(HttpRequest.newBuilder()
                                               .uri(uri)
-                                              .header(Headers.ContentType, "text/plain")
+                                              .header(HTTPValues.Headers.ContentType, "text/plain")
                                               // Note that using a InputStream based publisher will caues the JDK to
                                               // enable Transfer-Encoding: chunked
-                                              .POST(BodyPublishers.ofInputStream(() ->
+                                              .POST(HttpRequest.BodyPublishers.ofInputStream(() ->
                                                   new ByteArrayInputStream(responseBodyBytes)))
                                               .build(),
-            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -160,7 +150,7 @@ public class ChunkedTest extends BaseTest {
   @Test(dataProvider = "schemes")
   public void chunkedResponse(String scheme) throws Exception {
     HTTPHandler handler = (_, res) -> {
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       try {
@@ -176,8 +166,8 @@ public class ChunkedTest extends BaseTest {
     try (var client = makeClient(scheme, null); var ignore = makeServer(scheme, handler, instrumenter).start()) {
       URI uri = makeURI(scheme, "");
       var response = client.send(
-          HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").GET().build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.ContentType, "application/json").GET().build(),
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);
@@ -194,8 +184,8 @@ public class ChunkedTest extends BaseTest {
         theRest=some other values
         """;
     HTTPHandler handler = (_, res) -> {
-      res.setHeader(Headers.ContentType, "text/html; charset=UTF-8");
-      res.setHeader(Headers.CacheControl, "no-cache");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/html; charset=UTF-8");
+      res.setHeader(HTTPValues.Headers.CacheControl, "no-cache");
       res.setStatus(200);
 
       try {
@@ -227,7 +217,7 @@ public class ChunkedTest extends BaseTest {
   public void chunkedResponseStreamingFile(String scheme) throws Exception {
     Path file = Paths.get("src/test/java/org/lattejava/http/tests/server/ChunkedTest.java");
     HTTPHandler handler = (_, res) -> {
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       try (InputStream is = Files.newInputStream(file)) {
@@ -243,8 +233,8 @@ public class ChunkedTest extends BaseTest {
     try (var client = makeClient(scheme, null); var ignore = makeServer(scheme, handler, instrumenter).start()) {
       URI uri = makeURI(scheme, "");
       var response = client.send(
-          HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").GET().build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.ContentType, "application/json").GET().build(),
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);
@@ -261,8 +251,8 @@ public class ChunkedTest extends BaseTest {
         theRest=some other values
         """;
     HTTPHandler handler = (_, res) -> {
-      res.setHeader(Headers.ContentType, "text/html; charset=UTF-8");
-      res.setHeader(Headers.CacheControl, "no-cache");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/html; charset=UTF-8");
+      res.setHeader(HTTPValues.Headers.CacheControl, "no-cache");
       res.setStatus(200);
 
       try {
@@ -278,7 +268,7 @@ public class ChunkedTest extends BaseTest {
       URI uri = makeURI(scheme, "");
       var response = client.send(
           HttpRequest.newBuilder().uri(uri).GET().build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
       assertEquals(response.statusCode(), 200);
       assertEquals(response.body(), html);
@@ -293,7 +283,7 @@ public class ChunkedTest extends BaseTest {
     byte[] responseBodyBytes = responseBody.getBytes(StandardCharsets.UTF_8);
 
     HTTPHandler handler = (_, res) -> {
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
 
       try {
@@ -317,7 +307,7 @@ public class ChunkedTest extends BaseTest {
       for (int i = 0; i < iterations; i++) {
         var response = client.send(
             HttpRequest.newBuilder().uri(uri).GET().build(),
-            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -385,7 +375,7 @@ public class ChunkedTest extends BaseTest {
       }
 
       byte[] responseBytes = ExpectedResponse.getBytes(StandardCharsets.UTF_8);
-      res.setHeader(Headers.ContentType, "application/json");
+      res.setHeader(HTTPValues.Headers.ContentType, "application/json");
       res.setHeader("Content-Length", responseBytes.length + "");
       res.setStatus(200);
 
@@ -403,11 +393,11 @@ public class ChunkedTest extends BaseTest {
       var response = client.send(
           HttpRequest.newBuilder()
                      .uri(uri)
-                     .header(Headers.ContentType, "application/json")
-                     .POST(BodyPublishers.ofInputStream(() ->
+                     .header(HTTPValues.Headers.ContentType, "application/json")
+                     .POST(HttpRequest.BodyPublishers.ofInputStream(() ->
                          new ByteArrayInputStream(RequestBody.getBytes())))
                      .build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 200);

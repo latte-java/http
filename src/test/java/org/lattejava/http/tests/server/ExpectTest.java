@@ -15,18 +15,10 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse.BodySubscribers;
-import java.nio.charset.StandardCharsets;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.*;
-import org.testng.annotations.Test;
+import module java.base;
+import module java.net.http;
+import module org.lattejava.http;
+import module org.testng;
 
 import static org.testng.Assert.*;
 
@@ -44,7 +36,7 @@ public class ExpectTest extends BaseTest {
   public void expect(String scheme) throws Exception {
     HTTPHandler handler = (req, res) -> {
       println("Handling");
-      assertEquals(req.getHeader(Headers.ContentType), "application/json"); // Mixed case
+      assertEquals(req.getHeader(HTTPValues.Headers.ContentType), "application/json"); // Mixed case
 
       try {
         println("Reading");
@@ -55,7 +47,7 @@ public class ExpectTest extends BaseTest {
       }
 
       println("Done");
-      res.setHeader(Headers.ContentType, "text/plain");
+      res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setHeader("Content-Length", "16");
       res.setStatus(200);
 
@@ -90,8 +82,8 @@ public class ExpectTest extends BaseTest {
       try (HTTPServer ignore = makeServer(scheme, handler, instrumenter, expectValidator).start(); var client = makeClient(scheme, null)) {
         URI uri = makeURI(scheme, "");
         var response = client.send(
-            HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").expectContinue(true).POST(BodyPublishers.ofString(RequestBody)).build(),
-            _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+            HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.ContentType, "application/json").expectContinue(true).POST(HttpRequest.BodyPublishers.ofString(RequestBody)).build(),
+            _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
         );
 
         assertEquals(response.statusCode(), 200);
@@ -116,8 +108,8 @@ public class ExpectTest extends BaseTest {
     try (HTTPServer ignore = makeServer(scheme, handler, instrumenter, validator).start(); var client = makeClient(scheme, null)) {
       URI uri = makeURI(scheme, "");
       var response = client.send(
-          HttpRequest.newBuilder().uri(uri).header(Headers.ContentType, "application/json").expectContinue(true).POST(BodyPublishers.ofString(RequestBody)).build(),
-          _ -> BodySubscribers.ofString(StandardCharsets.UTF_8)
+          HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.ContentType, "application/json").expectContinue(true).POST(HttpRequest.BodyPublishers.ofString(RequestBody)).build(),
+          _ -> HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
       );
 
       assertEquals(response.statusCode(), 417);

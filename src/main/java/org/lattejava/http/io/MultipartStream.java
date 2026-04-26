@@ -15,15 +15,10 @@
  */
 package org.lattejava.http.io;
 
-import java.io.*;
-import java.nio.charset.*;
-import java.nio.file.*;
-import java.util.*;
+import module java.base;
+import module org.lattejava.http;
 
-import org.lattejava.http.*;
-import org.lattejava.http.HTTPValues.*;
-import org.lattejava.http.util.*;
-import org.lattejava.http.util.HTTPTools.*;
+import org.lattejava.http.ParseException;
 
 /**
  * Handles the multipart body encoding and file uploads.
@@ -54,7 +49,7 @@ public class MultipartStream {
   private int partialBoundary;
 
   /**
-   * Constructs a {@code MultipartStream} with a file manager, and a multipart  configuration.
+   * Constructs a {@code MultipartStream} with a file manager, and a multipart configuration.
    * <p>
    * Note that the buffer must be at least big enough to contain the boundary string, plus 4 characters for CR/LF and
    * double dash, plus at least one byte of data.  Too small a buffer size setting will degrade performance.
@@ -87,7 +82,7 @@ public class MultipartStream {
     this.boundaryLength = boundary.length + 2; // Initially we only analyze the boundary plus the dashes
 
     // Set up the full boundary
-    System.arraycopy(ControlBytes.MultipartBoundaryPrefix, 0, this.boundary, 0, 4);
+    System.arraycopy(HTTPValues.ControlBytes.MultipartBoundaryPrefix, 0, this.boundary, 0, 4);
     System.arraycopy(boundary, 0, this.boundary, 4, boundary.length);
 
     current = 0;
@@ -121,7 +116,7 @@ public class MultipartStream {
     boundaryLength = boundary.length;
 
     // Loop
-    Map<String, HeaderValue> headers = new HashMap<>();
+    Map<String, HTTPTools.HeaderValue> headers = new HashMap<>();
     while (hasMore) {
       readHeaders(headers);
       readPart(headers, parameters, files);
@@ -237,7 +232,7 @@ public class MultipartStream {
    * @throws IOException    If any I/O operation failed.
    * @throws ParseException If the input is not a proper multipart body and could not be processed.
    */
-  private void readHeaders(Map<String, HeaderValue> headers) throws IOException, ParseException {
+  private void readHeaders(Map<String, HTTPTools.HeaderValue> headers) throws IOException, ParseException {
     var state = RequestPreambleState.HeaderName;
     var build = new StringBuilder();
     String headerName = null;
@@ -272,23 +267,23 @@ public class MultipartStream {
    * @throws IOException    If any I/O operation failed.
    * @throws ParseException If the input is not a proper multipart body and could not be processed.
    */
-  private void readPart(Map<String, HeaderValue> headers, Map<String, List<String>> parameters, List<FileInfo> files)
+  private void readPart(Map<String, HTTPTools.HeaderValue> headers, Map<String, List<String>> parameters, List<FileInfo> files)
       throws IOException, ParseException {
-    HeaderValue disposition = headers.get(Headers.ContentDispositionLower);
+    HTTPTools.HeaderValue disposition = headers.get(HTTPValues.Headers.ContentDispositionLower);
     if (disposition == null) {
       throw new ParseException("Invalid multipart body. A part is missing a [Content-Disposition] header.");
     }
 
-    String name = disposition.parameters().get(DispositionParameters.name);
+    String name = disposition.parameters().get(HTTPValues.DispositionParameters.name);
     if (name == null) {
       throw new ParseException("Invalid multipart body. A part is missing a name parameter in the [Content-Disposition] header.");
     }
 
-    String filename = disposition.parameters().get(DispositionParameters.filename);
+    String filename = disposition.parameters().get(HTTPValues.DispositionParameters.filename);
     boolean isFile = filename != null;
-    HeaderValue contentType = headers.get(Headers.ContentTypeLower);
+    HTTPTools.HeaderValue contentType = headers.get(HTTPValues.Headers.ContentTypeLower);
     String contentTypeString = contentType != null ? contentType.value() : "application/octet-stream";
-    String encodingString = contentType != null ? contentType.parameters().get(ContentTypes.CharsetParameter) : null;
+    String encodingString = contentType != null ? contentType.parameters().get(HTTPValues.ContentTypes.CharsetParameter) : null;
     Charset encoding = encodingString != null ? Charset.forName(encodingString) : StandardCharsets.UTF_8;
 
     PartProcessor processor;
@@ -333,7 +328,7 @@ public class MultipartStream {
           files.add(processor.toFileInfo());
         }
       } else {
-        parameters.computeIfAbsent(name, key -> new LinkedList<>()).add(processor.toValue());
+        parameters.computeIfAbsent(name, _ -> new LinkedList<>()).add(processor.toValue());
       }
     }
   }

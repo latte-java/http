@@ -15,7 +15,7 @@
  */
 package org.lattejava.http.io;
 
-import java.util.Objects;
+import module java.base;
 
 /**
  * Provides configuration to control the behavior of the {@link MultipartStream} parser, specifically around file

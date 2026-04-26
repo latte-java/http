@@ -15,17 +15,11 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.io.ByteArrayOutputStream;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
-import org.lattejava.http.Cookie;
-import org.lattejava.http.server.HTTPResponse;
-import org.lattejava.http.util.HTTPTools;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
-
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import static org.testng.Assert.*;
 
 /**
  * Verifies that {@link HTTPTools#writeResponsePreamble} rejects CR, LF, and NUL in every attacker-influenceable
@@ -37,6 +31,18 @@ import static org.testng.Assert.fail;
  */
 @Test
 public class ResponseSplittingTest {
+  @DataProvider(name = "badHeaderNames")
+  public static Object[][] badHeaderNames() {
+    return new Object[][]{
+        {"X-Evil\r\nInjected"},
+        {"X-Evil: value\r\n"},
+        {"has space"},
+        {"has:colon"},
+        {"has\ttab"},
+        {"non-ascii-\u00e9"},
+    };
+  }
+
   @DataProvider(name = "splitValues")
   public static Object[][] splitValues() {
     return new Object[][]{
@@ -47,18 +53,6 @@ public class ResponseSplittingTest {
         {"\r"},
         {"\n"},
         {"\0"},
-    };
-  }
-
-  @DataProvider(name = "badHeaderNames")
-  public static Object[][] badHeaderNames() {
-    return new Object[][]{
-        {"X-Evil\r\nInjected"},
-        {"X-Evil: value\r\n"},
-        {"has space"},
-        {"has:colon"},
-        {"has\ttab"},
-        {"non-ascii-\u00e9"},
     };
   }
 

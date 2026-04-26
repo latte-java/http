@@ -15,8 +15,7 @@
  */
 package org.lattejava.http.server.io;
 
-import java.io.IOException;
-import java.io.OutputStream;
+import module java.base;
 
 /**
  * Intercepts each OutputStream method and sends the number of bytes to the Throughput object.

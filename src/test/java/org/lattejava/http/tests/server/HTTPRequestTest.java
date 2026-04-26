@@ -15,15 +15,9 @@
  */
 package org.lattejava.http.tests.server;
 
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
-
-import org.lattejava.http.HTTPValues.Headers;
-import org.lattejava.http.server.HTTPRequest;
-import org.testng.Assert;
-import org.testng.annotations.Test;
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
 
 import static org.testng.Assert.*;
 
@@ -36,7 +30,7 @@ public class HTTPRequestTest {
   @Test
   public void acceptEncoding() {
     HTTPRequest request = new HTTPRequest();
-    request.addHeader(Headers.AcceptEncoding, "foo, bar  , baz");
+    request.addHeader(HTTPValues.Headers.AcceptEncoding, "foo, bar  , baz");
     assertEquals(request.getAcceptEncodings(), List.of("foo", "bar", "baz"));
   }
 
@@ -259,20 +253,20 @@ public class HTTPRequestTest {
 
   private void assertGetHost(String header, @SuppressWarnings("SameParameterValue") String expected) {
     HTTPRequest request = new HTTPRequest();
-    request.setHeader(Headers.XForwardedHost, header);
+    request.setHeader(HTTPValues.Headers.XForwardedHost, header);
     assertEquals(request.getHost(), expected);
   }
 
   private void assertGetIPAddress(String header, @SuppressWarnings("SameParameterValue") String expected) {
     HTTPRequest request = new HTTPRequest();
-    request.setHeader(Headers.XForwardedFor, header);
+    request.setHeader(HTTPValues.Headers.XForwardedFor, header);
     assertEquals(request.getIPAddress(), expected);
   }
 
   private void assertURLs(String scheme, String source, String host, int port, String baseURL) {
     HTTPRequest request = new HTTPRequest();
     request.setScheme(scheme);
-    request.addHeader(Headers.HostLower, source);
+    request.addHeader(HTTPValues.Headers.HostLower, source);
     assertEquals(request.getHost(), host);
     assertEquals(request.getPort(), port);
     assertEquals(request.getBaseURL(), baseURL);
