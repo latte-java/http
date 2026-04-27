@@ -37,7 +37,7 @@ public class MultipartConfiguration {
 
   private String temporaryFileLocation = System.getProperty("java.io.tmpdir");
 
-  private String temporaryFilenamePrefix = "java-http";
+  private String temporaryFilenamePrefix = "latte-http";
 
   private String temporaryFilenameSuffix = "file-upload";
 
