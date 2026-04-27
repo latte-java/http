@@ -35,7 +35,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null && pwd)"
 
 # Defaults
 ALL_SERVERS="self jdk-httpserver jetty netty tomcat"
-ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed realistic"
+ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers"
 SERVERS="${ALL_SERVERS}"
 SCENARIOS="${ALL_SCENARIOS}"
 LABEL=""
@@ -195,7 +195,7 @@ scenario_config() {
     large-file)       echo "4 10 /file?size=1048576" ;;
     high-concurrency) echo "12 1000 /" ;;
     mixed)            echo "12 100 /" ;;
-    realistic)        echo "12 100 /" ;;
+    browser-headers)  echo "12 100 /" ;;
     *)                echo ""; return 1 ;;
   esac
 }

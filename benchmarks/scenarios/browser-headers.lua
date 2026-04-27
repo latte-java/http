@@ -1,4 +1,4 @@
--- realistic.lua
+-- browser-headers.lua
 -- Browser-like request behind a proxy: GET /
 -- Exercises Accept-Encoding parsing (q-value sort), Accept-Language locale parsing,
 -- and X-Forwarded-* comma splitting on every request.

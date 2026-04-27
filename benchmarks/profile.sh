@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 
 #
-# Copyright (c) 2026, FusionAuth, All Rights Reserved
+# Copyright (c) 2026, The Latte Project
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
+# Licensed under the MIT License. See LICENSE in the project root for full license text.
 #
 # Profile the self benchmark server with JFR (JDK Flight Recorder).
 #
@@ -19,7 +15,7 @@ set -euo pipefail
 
 ulimit -S -n 32768
 
-SCENARIO="${1:-realistic}"
+SCENARIO="${1:-browser-headers}"
 DURATION_SECS=30
 WARMUP_SECS=5
 WRK_DURATION_SECS=$(( DURATION_SECS + WARMUP_SECS + 5 ))
@@ -44,7 +40,7 @@ case "${SCENARIO}" in
   large-file)       THREADS=4;   CONNS=10;   ENDPOINT="/file?size=1048576" ;;
   high-concurrency) THREADS=12;  CONNS=1000; ENDPOINT="/" ;;
   mixed)            THREADS=12;  CONNS=100;  ENDPOINT="/" ;;
-  realistic)        THREADS=12;  CONNS=100;  ENDPOINT="/" ;;
+  browser-headers)  THREADS=12;  CONNS=100;  ENDPOINT="/" ;;
   *)                echo "ERROR: Unknown scenario [${SCENARIO}]" >&2; exit 1 ;;
 esac
 
