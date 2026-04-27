@@ -13,6 +13,16 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
+
+// Read the http version from the parent project.latte so the dependency is declared in one place. {integration} resolves to whatever was
+// last published locally via `latte int` from the repo root.
+def parentLatteText = new File("../../project.latte").text
+def versionMatcher = parentLatteText =~ /name:\s*"http"[^)]*version:\s*"([^"]+)"/
+if (!versionMatcher.find()) {
+  fail("Could not extract http version from ../../project.latte")
+}
+def httpVersion = versionMatcher.group(1)
+
 project(group: "org.lattejava", name: "self", version: "0.1.0", licenses: ["Apache-2.0"]) {
   workflow {
     standard()
@@ -20,7 +30,7 @@ project(group: "org.lattejava", name: "self", version: "0.1.0", licenses: ["Apac
 
   dependencies {
     group(name: "compile") {
-      dependency(id: "org.lattejava:http:0.1.4")
+      dependency(id: "org.lattejava:http:${httpVersion}-{integration}")
     }
   }
 
