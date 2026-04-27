@@ -69,3 +69,7 @@ HTTPS tests require a `/etc/hosts` entry: `127.0.0.1 local.lattejava.org`
 ## Java Module System
 
 The project uses `module-info.java`. All public packages are exported — no internal packages are exposed to consumers. The `server/internal/` package exists but is not exported.
+
+## License headers
+
+Two license regimes coexist: files derived from [java-http](https://github.com/FusionAuth/java-http) keep the Apache-2.0 header and original `@author`; brand-new files use the MIT header `Copyright (c) 2026, The Latte Project`. Do not rewrite an Apache-2.0 header to MIT on an inherited file — check `git log` if you're unsure which regime applies.

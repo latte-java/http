@@ -30,6 +30,11 @@ import module org.lattejava.http;
  */
 @SuppressWarnings("unused")
 public class HTTPRequest implements Buildable<HTTPRequest> {
+  // Cached so each Accept-Language header parse doesn't allocate a fresh Comparator. Sorts language ranges by their q-value (weight)
+  // descending. Double.compare(b, a) avoids both auto-boxing and the .reversed() wrapper we'd get from Comparator.comparingDouble().
+  private static final Comparator<Locale.LanguageRange> LANGUAGE_RANGE_BY_WEIGHT_DESC =
+      (a, b) -> Double.compare(b.getWeight(), a.getWeight());
+
   private final List<String> acceptEncodings = new LinkedList<>();
 
   private final Map<String, Object> attributes = new HashMap<>();
@@ -110,6 +115,120 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     this.scheme = scheme;
     this.port = port;
     this.ipAddress = ipAddress;
+  }
+
+  /**
+   * Parse an Accept-Encoding header value into the list of encodings ordered by RFC 9110 priority — q-value descending, original-position
+   * ascending for ties. Walks the input with indexOf() instead of {@link String#split(String)} + {@link java.util.TreeSet} + a stream
+   * pipeline. The previous implementation showed up at ~17% of CPU and was the top single-source allocator in JFR profiling. Browsers send
+   * 1–4 entries with no q-values in the common case; for that path the insertion sort is O(N) over already-sorted weights.
+   *
+   * @param value the raw header value, e.g. {@code "gzip, deflate, br;q=0.5"}
+   * @return the encodings in priority order, never null
+   */
+  private static List<String> parseAcceptEncoding(String value) {
+    int cap = 4;
+    String[] encodings = new String[cap];
+    double[] weights = new double[cap];
+    int count = 0;
+    int len = value.length();
+    int from = 0;
+
+    while (from < len) {
+      int comma = value.indexOf(',', from);
+      int segmentEnd = comma < 0 ? len : comma;
+
+      // Trim OWS (RFC 9110 §5.6.3 allows space and HTAB) from both ends of the segment.
+      int start = from;
+      while (start < segmentEnd && (value.charAt(start) == ' ' || value.charAt(start) == '\t')) {
+        start++;
+      }
+      int end = segmentEnd;
+      while (end > start && (value.charAt(end - 1) == ' ' || value.charAt(end - 1) == '\t')) {
+        end--;
+      }
+
+      if (start < end) {
+        // Locate the optional ';q=...' parameter. Other parameters (rare for Accept-Encoding) are skipped over.
+        int semi = value.indexOf(';', start);
+        if (semi < 0 || semi >= end) {
+          semi = -1;
+        }
+
+        double weight = 1.0;
+        int encEnd = end;
+        if (semi >= 0) {
+          encEnd = semi;
+          while (encEnd > start && (value.charAt(encEnd - 1) == ' ' || value.charAt(encEnd - 1) == '\t')) {
+            encEnd--;
+          }
+
+          int p = semi + 1;
+          while (p < end) {
+            while (p < end && (value.charAt(p) == ' ' || value.charAt(p) == '\t')) {
+              p++;
+            }
+            if (p + 1 < end && (value.charAt(p) == 'q' || value.charAt(p) == 'Q') && value.charAt(p + 1) == '=') {
+              int qStart = p + 2;
+              int qEnd = value.indexOf(';', qStart);
+              if (qEnd < 0 || qEnd > end) {
+                qEnd = end;
+              }
+              try {
+                weight = Double.parseDouble(value.substring(qStart, qEnd).trim());
+              } catch (NumberFormatException ignored) {
+                // Malformed q-value — leave weight at default 1.0.
+              }
+              break;
+            }
+            int next = value.indexOf(';', p);
+            if (next < 0 || next >= end) {
+              break;
+            }
+            p = next + 1;
+          }
+        }
+
+        if (count == cap) {
+          cap *= 2;
+          encodings = Arrays.copyOf(encodings, cap);
+          weights = Arrays.copyOf(weights, cap);
+        }
+        encodings[count] = value.substring(start, encEnd);
+        weights[count] = weight;
+        count++;
+      }
+
+      if (comma < 0) {
+        break;
+      }
+      from = comma + 1;
+    }
+
+    if (count == 0) {
+      return List.of();
+    }
+
+    // Insertion sort: weight DESC, original index ASC. Stable on equal weights because we only swap on strict less-than. O(N) on the common
+    // browser case where every weight is 1.0 and the input is already in priority order.
+    for (int i = 1; i < count; i++) {
+      String e = encodings[i];
+      double w = weights[i];
+      int j = i - 1;
+      while (j >= 0 && weights[j] < w) {
+        encodings[j + 1] = encodings[j];
+        weights[j + 1] = weights[j];
+        j--;
+      }
+      encodings[j + 1] = e;
+      weights[j + 1] = w;
+    }
+
+    List<String> result = new ArrayList<>(count);
+    for (int i = 0; i < count; i++) {
+      result.add(encodings[i]);
+    }
+    return result;
   }
 
   public void addAcceptEncoding(String encoding) {
@@ -762,42 +881,25 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   private void decodeHeader(String name, String value) {
     switch (name) {
       case HTTPValues.Headers.AcceptEncodingLower:
-        SortedSet<WeightedString> weightedStrings = new TreeSet<>();
-        String[] parts = value.split(",");
-        int index = 0;
-        for (String part : parts) {
-          part = part.trim();
-          if (part.isEmpty()) {
-            continue;
-          }
-
-          HTTPTools.HeaderValue parsed = HTTPTools.parseHeaderValue(part);
-          String weightText = parsed.parameters().get("q");
-          double weight = 1;
-          if (weightText != null) {
-            weight = Double.parseDouble(weightText);
-          }
-
-          WeightedString ws = new WeightedString(parsed.value(), weight, index);
-          weightedStrings.add(ws);
-          index++;
-        }
-
-        // Transfer the Strings in weighted-position order
-        setAcceptEncodings(
-            weightedStrings.stream()
-                           .map(WeightedString::value)
-                           .toList()
-        );
+        setAcceptEncodings(parseAcceptEncoding(value));
         break;
       case HTTPValues.Headers.AcceptLanguageLower:
         try {
-          addLocales(Locale.LanguageRange.parse(value) // Default to English
-                                         .stream()
-                                         .sorted(Comparator.comparing(Locale.LanguageRange::getWeight).reversed())
-                                         .map(Locale.LanguageRange::getRange)
-                                         .map(Locale::forLanguageTag)
-                                         .collect(Collectors.toList()));
+          List<Locale.LanguageRange> parsed = Locale.LanguageRange.parse(value);
+          if (parsed.isEmpty()) {
+            break;
+          }
+          // Replace the prior stream() -> sorted() -> map() -> map() -> collect() pipeline with a manual sort+loop. JFR profiling showed
+          // the stream pipeline plus its intermediate ReferencePipeline / SortedOps / SizedRefSortingSink objects were a meaningful
+          // allocation source inside decodeHeader, dwarfed only by LanguageRange.parse itself (which is JDK code we can't easily replace).
+          // LanguageRange.parse returns an unmodifiable list, so a mutable copy is required to call sort() in place.
+          List<Locale.LanguageRange> ranges = new ArrayList<>(parsed);
+          ranges.sort(LANGUAGE_RANGE_BY_WEIGHT_DESC);
+          List<Locale> localeList = new ArrayList<>(ranges.size());
+          for (Locale.LanguageRange range : ranges) {
+            localeList.add(Locale.forLanguageTag(range.getRange()));
+          }
+          addLocales(localeList);
         } catch (Exception e) {
           // Ignore the exception and keep the value null
         }
