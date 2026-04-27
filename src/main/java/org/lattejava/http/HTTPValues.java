@@ -88,6 +88,8 @@ public final class HTTPValues {
 
     public static final byte LF = '\n';
 
+    public static final byte[] ColonSpace = {':', ' '};
+
     public static final byte[] CRLF = {CR, LF};
 
     public static final byte[] ChunkedTerminator = {'0', CR, LF, CR, LF};
@@ -148,7 +150,7 @@ public final class HTTPValues {
   }
 
   public static final class HeaderBytes {
-    public static final byte[] SetCookie = Headers.SetCookie.getBytes();
+    public static final byte[] SetCookie = Headers.SetCookie.getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
     private HeaderBytes() {
     }

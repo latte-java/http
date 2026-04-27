@@ -479,24 +479,23 @@ public final class HTTPTools {
 
     writeStatusLine(response, outputStream);
 
-    // Write the headers (minus the cookies)
+    // Explicit UTF-8 instead of platform-default getBytes(): same bytes on a UTF-8-default JVM (the dominant case) but portable across
+    // non-UTF-8 defaults. For ASCII-only header tokens — the dominant traffic — HotSpot takes the compact-string fast path and skips the
+    // encoder loop. Preserves existing behavior for non-ASCII header values, which is asserted by the utf8HeaderValues test.
     for (var headers : response.getHeadersMap().entrySet()) {
       String name = headers.getKey();
       for (String value : headers.getValue()) {
-        outputStream.write(name.getBytes());
-        outputStream.write(':');
-        outputStream.write(' ');
-        outputStream.write(value.getBytes());
+        outputStream.write(name.getBytes(StandardCharsets.UTF_8));
+        outputStream.write(HTTPValues.ControlBytes.ColonSpace);
+        outputStream.write(value.getBytes(StandardCharsets.UTF_8));
         outputStream.write(HTTPValues.ControlBytes.CRLF);
       }
     }
 
-    // Write the cookies
     for (var cookie : cookies) {
       outputStream.write(HTTPValues.HeaderBytes.SetCookie);
-      outputStream.write(':');
-      outputStream.write(' ');
-      outputStream.write(cookie.toResponseHeader().getBytes());
+      outputStream.write(HTTPValues.ControlBytes.ColonSpace);
+      outputStream.write(cookie.toResponseHeader().getBytes(StandardCharsets.UTF_8));
       outputStream.write(HTTPValues.ControlBytes.CRLF);
     }
 
@@ -591,10 +590,10 @@ public final class HTTPTools {
   private static void writeStatusLine(HTTPResponse response, OutputStream out) throws IOException {
     out.write(HTTPValues.ProtocolBytes.HTTTP1_1);
     out.write(' ');
-    out.write(Integer.toString(response.getStatus()).getBytes());
+    out.write(Integer.toString(response.getStatus()).getBytes(StandardCharsets.UTF_8));
     out.write(' ');
     if (response.getStatusMessage() != null) {
-      out.write(response.getStatusMessage().getBytes());
+      out.write(response.getStatusMessage().getBytes(StandardCharsets.UTF_8));
     }
     out.write(HTTPValues.ControlBytes.CRLF);
   }
