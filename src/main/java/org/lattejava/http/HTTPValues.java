@@ -15,6 +15,8 @@
  */
 package org.lattejava.http;
 
+import module java.base;
+
 /**
  * All the HTTP constants you might need. Okay, maybe not everything, but the ones you'll likely need. :)
  *
@@ -150,7 +152,7 @@ public final class HTTPValues {
   }
 
   public static final class HeaderBytes {
-    public static final byte[] SetCookie = Headers.SetCookie.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    public static final byte[] SetCookie = Headers.SetCookie.getBytes(StandardCharsets.UTF_8);
 
     private HeaderBytes() {
     }
