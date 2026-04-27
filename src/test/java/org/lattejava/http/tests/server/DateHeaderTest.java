@@ -20,6 +20,8 @@ import module java.net.http;
 import module org.lattejava.http;
 import module org.testng;
 
+import org.lattejava.http.util.DateTools;
+
 import static org.testng.Assert.*;
 
 /**
@@ -115,6 +117,20 @@ public class DateHeaderTest extends BaseTest {
       assertEquals(response.headers().firstValue("Date").orElse(null), fixedDate,
                    "Handler-set Date must not be overwritten by the auto-Date logic.");
     }
+  }
+
+  /**
+   * Use case: regression coverage for IMF-fixdate (RFC 9110 §5.6.7) day-of-month zero-padding. The JDK's
+   * {@link DateTimeFormatter#RFC_1123_DATE_TIME} emits 1-2 digits for day-of-month, so days 1-9 render as
+   * {@code Sun, 3 May 2026 ...} — invalid IMF-fixdate. This formats an early-month instant directly to catch any
+   * future regression that swaps the formatter back.
+   */
+  @Test
+  public void formatter_zero_pads_single_digit_day() {
+    Instant instant = Instant.parse("2026-05-03T08:49:37Z");
+    String formatted = DateTools.RFC_5322_DATE_TIME.format(instant.atZone(ZoneOffset.UTC));
+    assertEquals(formatted, "Sun, 03 May 2026 08:49:37 GMT",
+                 "RFC_5322_DATE_TIME must zero-pad day-of-month per IMF-fixdate (RFC 9110 §5.6.7).");
   }
 
   /**

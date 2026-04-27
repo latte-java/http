@@ -740,7 +740,14 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     if (values == null || values.isEmpty()) {
       return Set.of();
     }
-    Set<String> tokens = new HashSet<>();
+
+    // Fast path: one header instance with no comma is a single token. Avoids HashSet and split() regex on the per-request hot path.
+    if (values.size() == 1 && values.getFirst().indexOf(',') < 0) {
+      String token = values.getFirst().trim();
+      return token.isEmpty() ? Set.of() : Set.of(token.toLowerCase(Locale.ROOT));
+    }
+
+    Set<String> tokens = HashSet.newHashSet(2);
     for (String value : values) {
       for (String token : value.split(",")) {
         token = token.trim();
