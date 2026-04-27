@@ -88,6 +88,16 @@ check_command java
 check_command curl
 check_command jq
 
+# Tomcat's catalina.sh falls back to `/usr/libexec/java_home` when JAVA_HOME is unset. On macOS that returns whichever JDK Apple's
+# system-wide registry chooses (often the oldest one — on this dev machine, JDK 8), which does not recognize --add-opens and refuses
+# to start. Resolve JAVA_HOME from whatever `java` is on PATH so every server runs on the same JDK we're benchmarking with.
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  RESOLVED_JAVA_HOME="$(java -XshowSettings:properties -version 2>&1 | awk -F' = ' '/java.home/ {print $2; exit}')"
+  if [[ -n "${RESOLVED_JAVA_HOME}" && -d "${RESOLVED_JAVA_HOME}" ]]; then
+    export JAVA_HOME="${RESOLVED_JAVA_HOME}"
+  fi
+fi
+
 # --- Parse duration to seconds ---
 
 duration_to_seconds() {
