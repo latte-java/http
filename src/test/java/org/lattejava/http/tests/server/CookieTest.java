@@ -20,6 +20,8 @@ import module java.net.http;
 import module org.lattejava.http;
 import module org.testng;
 
+import org.lattejava.http.Cookie;
+
 import static org.testng.Assert.*;
 
 /**
