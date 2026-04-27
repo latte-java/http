@@ -117,6 +117,120 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     this.ipAddress = ipAddress;
   }
 
+  /**
+   * Parse an Accept-Encoding header value into the list of encodings ordered by RFC 9110 priority — q-value descending, original-position
+   * ascending for ties. Walks the input with indexOf() instead of {@link String#split(String)} + {@link java.util.TreeSet} + a stream
+   * pipeline. The previous implementation showed up at ~17% of CPU and was the top single-source allocator in JFR profiling. Browsers send
+   * 1–4 entries with no q-values in the common case; for that path the insertion sort is O(N) over already-sorted weights.
+   *
+   * @param value the raw header value, e.g. {@code "gzip, deflate, br;q=0.5"}
+   * @return the encodings in priority order, never null
+   */
+  private static List<String> parseAcceptEncoding(String value) {
+    int cap = 4;
+    String[] encodings = new String[cap];
+    double[] weights = new double[cap];
+    int count = 0;
+    int len = value.length();
+    int from = 0;
+
+    while (from < len) {
+      int comma = value.indexOf(',', from);
+      int segmentEnd = comma < 0 ? len : comma;
+
+      // Trim OWS (RFC 9110 §5.6.3 allows space and HTAB) from both ends of the segment.
+      int start = from;
+      while (start < segmentEnd && (value.charAt(start) == ' ' || value.charAt(start) == '\t')) {
+        start++;
+      }
+      int end = segmentEnd;
+      while (end > start && (value.charAt(end - 1) == ' ' || value.charAt(end - 1) == '\t')) {
+        end--;
+      }
+
+      if (start < end) {
+        // Locate the optional ';q=...' parameter. Other parameters (rare for Accept-Encoding) are skipped over.
+        int semi = value.indexOf(';', start);
+        if (semi < 0 || semi >= end) {
+          semi = -1;
+        }
+
+        double weight = 1.0;
+        int encEnd = end;
+        if (semi >= 0) {
+          encEnd = semi;
+          while (encEnd > start && (value.charAt(encEnd - 1) == ' ' || value.charAt(encEnd - 1) == '\t')) {
+            encEnd--;
+          }
+
+          int p = semi + 1;
+          while (p < end) {
+            while (p < end && (value.charAt(p) == ' ' || value.charAt(p) == '\t')) {
+              p++;
+            }
+            if (p + 1 < end && (value.charAt(p) == 'q' || value.charAt(p) == 'Q') && value.charAt(p + 1) == '=') {
+              int qStart = p + 2;
+              int qEnd = value.indexOf(';', qStart);
+              if (qEnd < 0 || qEnd > end) {
+                qEnd = end;
+              }
+              try {
+                weight = Double.parseDouble(value.substring(qStart, qEnd).trim());
+              } catch (NumberFormatException ignored) {
+                // Malformed q-value — leave weight at default 1.0.
+              }
+              break;
+            }
+            int next = value.indexOf(';', p);
+            if (next < 0 || next >= end) {
+              break;
+            }
+            p = next + 1;
+          }
+        }
+
+        if (count == cap) {
+          cap *= 2;
+          encodings = Arrays.copyOf(encodings, cap);
+          weights = Arrays.copyOf(weights, cap);
+        }
+        encodings[count] = value.substring(start, encEnd);
+        weights[count] = weight;
+        count++;
+      }
+
+      if (comma < 0) {
+        break;
+      }
+      from = comma + 1;
+    }
+
+    if (count == 0) {
+      return List.of();
+    }
+
+    // Insertion sort: weight DESC, original index ASC. Stable on equal weights because we only swap on strict less-than. O(N) on the common
+    // browser case where every weight is 1.0 and the input is already in priority order.
+    for (int i = 1; i < count; i++) {
+      String e = encodings[i];
+      double w = weights[i];
+      int j = i - 1;
+      while (j >= 0 && weights[j] < w) {
+        encodings[j + 1] = encodings[j];
+        weights[j + 1] = weights[j];
+        j--;
+      }
+      encodings[j + 1] = e;
+      weights[j + 1] = w;
+    }
+
+    List<String> result = new ArrayList<>(count);
+    for (int i = 0; i < count; i++) {
+      result.add(encodings[i]);
+    }
+    return result;
+  }
+
   public void addAcceptEncoding(String encoding) {
     this.acceptEncodings.add(encoding);
   }
@@ -762,120 +876,6 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
       }
     }
     return tokens;
-  }
-
-  /**
-   * Parse an Accept-Encoding header value into the list of encodings ordered by RFC 9110 priority — q-value descending, original-position
-   * ascending for ties. Walks the input with indexOf() instead of {@link String#split(String)} + {@link java.util.TreeSet} + a stream
-   * pipeline. The previous implementation showed up at ~17% of CPU and was the top single-source allocator in JFR profiling. Browsers send
-   * 1–4 entries with no q-values in the common case; for that path the insertion sort is O(N) over already-sorted weights.
-   *
-   * @param value the raw header value, e.g. {@code "gzip, deflate, br;q=0.5"}
-   * @return the encodings in priority order, never null
-   */
-  private static List<String> parseAcceptEncoding(String value) {
-    int cap = 4;
-    String[] encodings = new String[cap];
-    double[] weights = new double[cap];
-    int count = 0;
-    int len = value.length();
-    int from = 0;
-
-    while (from < len) {
-      int comma = value.indexOf(',', from);
-      int segmentEnd = comma < 0 ? len : comma;
-
-      // Trim OWS (RFC 9110 §5.6.3 allows space and HTAB) from both ends of the segment.
-      int start = from;
-      while (start < segmentEnd && (value.charAt(start) == ' ' || value.charAt(start) == '\t')) {
-        start++;
-      }
-      int end = segmentEnd;
-      while (end > start && (value.charAt(end - 1) == ' ' || value.charAt(end - 1) == '\t')) {
-        end--;
-      }
-
-      if (start < end) {
-        // Locate the optional ';q=...' parameter. Other parameters (rare for Accept-Encoding) are skipped over.
-        int semi = value.indexOf(';', start);
-        if (semi < 0 || semi >= end) {
-          semi = -1;
-        }
-
-        double weight = 1.0;
-        int encEnd = end;
-        if (semi >= 0) {
-          encEnd = semi;
-          while (encEnd > start && (value.charAt(encEnd - 1) == ' ' || value.charAt(encEnd - 1) == '\t')) {
-            encEnd--;
-          }
-
-          int p = semi + 1;
-          while (p < end) {
-            while (p < end && (value.charAt(p) == ' ' || value.charAt(p) == '\t')) {
-              p++;
-            }
-            if (p + 1 < end && (value.charAt(p) == 'q' || value.charAt(p) == 'Q') && value.charAt(p + 1) == '=') {
-              int qStart = p + 2;
-              int qEnd = value.indexOf(';', qStart);
-              if (qEnd < 0 || qEnd > end) {
-                qEnd = end;
-              }
-              try {
-                weight = Double.parseDouble(value.substring(qStart, qEnd).trim());
-              } catch (NumberFormatException ignored) {
-                // Malformed q-value — leave weight at default 1.0.
-              }
-              break;
-            }
-            int next = value.indexOf(';', p);
-            if (next < 0 || next >= end) {
-              break;
-            }
-            p = next + 1;
-          }
-        }
-
-        if (count == cap) {
-          cap *= 2;
-          encodings = Arrays.copyOf(encodings, cap);
-          weights = Arrays.copyOf(weights, cap);
-        }
-        encodings[count] = value.substring(start, encEnd);
-        weights[count] = weight;
-        count++;
-      }
-
-      if (comma < 0) {
-        break;
-      }
-      from = comma + 1;
-    }
-
-    if (count == 0) {
-      return List.of();
-    }
-
-    // Insertion sort: weight DESC, original index ASC. Stable on equal weights because we only swap on strict less-than. O(N) on the common
-    // browser case where every weight is 1.0 and the input is already in priority order.
-    for (int i = 1; i < count; i++) {
-      String e = encodings[i];
-      double w = weights[i];
-      int j = i - 1;
-      while (j >= 0 && weights[j] < w) {
-        encodings[j + 1] = encodings[j];
-        weights[j + 1] = weights[j];
-        j--;
-      }
-      encodings[j + 1] = e;
-      weights[j + 1] = w;
-    }
-
-    List<String> result = new ArrayList<>(count);
-    for (int i = 0; i < count; i++) {
-      result.add(encodings[i]);
-    }
-    return result;
   }
 
   private void decodeHeader(String name, String value) {
