@@ -30,6 +30,13 @@ import static java.time.temporal.ChronoField.*;
 public final class DateTools {
   public static final DateTimeFormatter RFC_5322_DATE_TIME;
 
+  /**
+   * Cached IMF-fixdate string for the current second. Per-second resolution is sufficient for an HTTP {@code Date}
+   * header and avoids re-formatting on every request. Stale entries are simply replaced — the resulting string is
+   * deterministic for any given second so concurrent replacements are harmless.
+   */
+  private static final AtomicReference<CachedDate> dateCache = new AtomicReference<>();
+
   static {
     Map<Long, String> dow = new HashMap<>();
     dow.put(1L, "Mon");
@@ -81,6 +88,23 @@ public final class DateTools {
   private DateTools() {
   }
 
+  /**
+   * Returns the current time formatted as an HTTP IMF-fixdate (RFC 1123 / RFC 9110 §5.6.7) suitable for an HTTP
+   * {@code Date} header. Result is cached at one-second resolution to avoid re-formatting on every request.
+   */
+  public static String currentHTTPDate() {
+    long second = System.currentTimeMillis() / 1000L;
+    CachedDate cached = dateCache.get();
+    if (cached != null && cached.second == second) {
+      return cached.value;
+    }
+    // RFC_5322_DATE_TIME zero-pads day-of-month (2,2 digits) — JDK's RFC_1123_DATE_TIME emits 1-2 digits, which violates
+    // IMF-fixdate (RFC 9110 §5.6.7) on days 1-9. Output is identical for UTC: "Tue, 03 Jun 2008 11:05:30 GMT".
+    String formatted = RFC_5322_DATE_TIME.format(Instant.ofEpochSecond(second).atZone(ZoneOffset.UTC));
+    dateCache.set(new CachedDate(second, formatted));
+    return formatted;
+  }
+
   public static String format(ZonedDateTime value) {
     return value.format(DateTools.RFC_5322_DATE_TIME);
   }
@@ -91,5 +115,8 @@ public final class DateTools {
     } catch (Exception e) {
       return null;
     }
+  }
+
+  private record CachedDate(long second, String value) {
   }
 }

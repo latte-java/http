@@ -403,7 +403,9 @@ public class HeadTest extends BaseSocketTest {
         .withWriteThroughputCalculationDelayDuration(Duration.ofMinutes(2))
         .withKeepAliveTimeoutDuration(Duration.ofSeconds(23))
         .withInitialReadTimeout(Duration.ofSeconds(19))
-        .withProcessingTimeoutDuration(Duration.ofSeconds(27));
+        .withProcessingTimeoutDuration(Duration.ofSeconds(27))
+        // Suppress auto-Date so the byte-exact HEAD/GET response comparisons below stay deterministic.
+        .withSendDateHeader(false);
 
     try (HTTPServer ignore = server.start();
          Socket socket = makeClientSocket("http")) {

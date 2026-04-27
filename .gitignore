@@ -5,4 +5,5 @@ build
 benchmarks/lib
 benchmarks/results/
 benchmarks/tomcat/web/WEB-INF/lib
+.claude/worktrees
 .worktrees

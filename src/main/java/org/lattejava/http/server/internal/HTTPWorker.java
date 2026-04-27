@@ -159,6 +159,12 @@ public class HTTPWorker implements Runnable {
           state = State.Read;
         }
 
+        // RFC 9110 §6.6.1 — origin servers with a clock MUST emit a Date header. We populate it before invoking the handler so
+        // the handler can override (set a different value) or suppress (call removeHeader) per-response without needing extra API.
+        if (configuration.isSendDateHeader()) {
+          response.setHeader(HTTPValues.Headers.Date, DateTools.currentHTTPDate());
+        }
+
         // Transition to processing
         state = State.Process;
         logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), state);

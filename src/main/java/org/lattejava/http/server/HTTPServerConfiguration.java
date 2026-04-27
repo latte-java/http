@@ -81,6 +81,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   private int responseBufferSize = 64 * 1024; // 64 Kilobytes
 
+  private boolean sendDateHeader = true;
+
   private Duration shutdownDuration = Duration.ofSeconds(10);
 
   private HTTPUnexpectedExceptionHandler unexpectedExceptionHandler = new DefaultHTTPUnexpectedExceptionHandler();
@@ -347,6 +349,14 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public boolean isCompressByDefault() {
     return compressByDefault;
+  }
+
+  /**
+   * @return Whether the server auto-emits an RFC 1123 {@code Date} header on every response. Defaults to true per
+   *     RFC 9110 §6.6.1.
+   */
+  public boolean isSendDateHeader() {
+    return sendDateHeader;
   }
 
   /**
@@ -668,6 +678,15 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
     }
 
     this.responseBufferSize = responseBufferSize;
+    return this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public HTTPServerConfiguration withSendDateHeader(boolean sendDateHeader) {
+    this.sendDateHeader = sendDateHeader;
     return this;
   }
 

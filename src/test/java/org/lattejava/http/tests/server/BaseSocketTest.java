@@ -49,7 +49,11 @@ public abstract class BaseSocketTest extends BaseTest {
         .withProcessingTimeoutDuration(Duration.ofSeconds(27))
 
         // Default is 8k, reduce this 512 to ensure we overflow this and have to read from the input stream again
-        .withRequestBufferSize(512);
+        .withRequestBufferSize(512)
+
+        // Suppress the auto-Date response header so byte-exact response assertions stay deterministic. Production default is true
+        // (RFC 9110 §6.6.1); see DateHeaderTest for the on-by-default behavior verification.
+        .withSendDateHeader(false);
 
     if (maxRequestHeaderSize > 0) {
       server.withMaxRequestHeaderSize(maxRequestHeaderSize);

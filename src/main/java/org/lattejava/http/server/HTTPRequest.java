@@ -645,15 +645,16 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @return True if the Connection header is missing or not `Close`.
    */
   public boolean isKeepAlive() {
-    var connection = getHeader(HTTPValues.Headers.Connection);
-    // Attempt backwards compatibility with HTTP 1.0. In practice, I doubt we'll see many HTTP 1.0 clients in the wild. However, some
-    // load testing frameworks still use HTTP 1.0. To ensure performance doesn't suck when using those tools, we need to close sockets correctly.
-    // - HTTP 1.0 requires the client to ask explicitly for keep-alive.
+    // Connection is a comma-separated token list per RFC 9110 §7.6.1, e.g. "close, upgrade". Exact equality misclassifies any
+    // multi-token value, so split into tokens and check membership.
+    var tokens = connectionTokens();
     if (HTTPValues.Protocols.HTTTP1_0.equals(protocol)) {
-      return connection != null && connection.equalsIgnoreCase(HTTPValues.Connections.KeepAlive);
+      // HTTP/1.0 requires the client to ask explicitly for keep-alive. Some load testing frameworks still use HTTP/1.0, so this path
+      // matters for benchmark accuracy.
+      return tokens.contains(HTTPValues.Connections.KeepAlive);
     }
 
-    return connection == null || !connection.equalsIgnoreCase(HTTPValues.Connections.Close);
+    return !tokens.contains(HTTPValues.Connections.Close);
   }
 
   public boolean isMultipart() {
@@ -732,6 +733,30 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
           .forEach(list::add);
 
     combinedParameters = null;
+  }
+
+  private Set<String> connectionTokens() {
+    var values = getHeaders(HTTPValues.Headers.Connection);
+    if (values == null || values.isEmpty()) {
+      return Set.of();
+    }
+
+    // Fast path: one header instance with no comma is a single token. Avoids HashSet and split() regex on the per-request hot path.
+    if (values.size() == 1 && values.getFirst().indexOf(',') < 0) {
+      String token = values.getFirst().trim();
+      return token.isEmpty() ? Set.of() : Set.of(token.toLowerCase(Locale.ROOT));
+    }
+
+    Set<String> tokens = HashSet.newHashSet(2);
+    for (String value : values) {
+      for (String token : value.split(",")) {
+        token = token.trim();
+        if (!token.isEmpty()) {
+          tokens.add(token.toLowerCase(Locale.ROOT));
+        }
+      }
+    }
+    return tokens;
   }
 
   private void decodeHeader(String name, String value) {
