@@ -42,4 +42,4 @@ if [[ $# -ge 1 && $1 == "--suspend" ]]; then
 fi
 
 ulimit -S -n 32768
-java ${suspend} -cp "${CLASSPATH}" -Dorg.lattejava.http.server.stats="${SCRIPT_DIR}" org.lattejava.http.benchmark.Main
+java ${suspend} ${JAVA_OPTS:-} -cp "${CLASSPATH}" -Dorg.lattejava.http.server.stats="${SCRIPT_DIR}" org.lattejava.http.benchmark.Main

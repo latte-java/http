@@ -35,12 +35,13 @@ SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null && pwd)"
 
 # Defaults
 ALL_SERVERS="self jdk-httpserver jetty netty tomcat"
-ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed"
+ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed realistic"
 SERVERS="${ALL_SERVERS}"
 SCENARIOS="${ALL_SCENARIOS}"
 LABEL=""
 OUTPUT_DIR="${SCRIPT_DIR}/results"
 DURATION="30s"
+TRIALS=1
 
 usage() {
   echo "Usage: $0 [OPTIONS]"
@@ -53,6 +54,7 @@ usage() {
   echo "  --label <name>       Label for the results file"
   echo "  --output <dir>       Output directory (default: benchmarks/results/)"
   echo "  --duration <time>    Duration per scenario (default: 30s)"
+  echo "  --trials <n>         Number of trials per scenario (default: 1)"
   echo "  -h, --help           Show this help"
   exit 0
 }
@@ -65,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     --label)     LABEL="$2"; shift 2 ;;
     --output)    OUTPUT_DIR="$2"; shift 2 ;;
     --duration)  DURATION="$2"; shift 2 ;;
+    --trials)    TRIALS="$2"; shift 2 ;;
     -h|--help)   usage ;;
     *)           echo "Unknown option: $1"; usage ;;
   esac
@@ -182,6 +185,7 @@ scenario_config() {
     large-file)       echo "4 10 /file?size=1048576" ;;
     high-concurrency) echo "12 1000 /" ;;
     mixed)            echo "12 100 /" ;;
+    realistic)        echo "12 100 /" ;;
     *)                echo ""; return 1 ;;
   esac
 }
@@ -244,15 +248,19 @@ stop_server() {
 }
 
 # --- Run a single wrk benchmark ---
-# Args: $1=server, $2=scenario, $3=threads, $4=connections, $5=endpoint
+# Args: $1=server, $2=scenario, $3=threads, $4=connections, $5=endpoint, $6=trial
 # Appends result to RESULTS_JSON
 run_wrk_benchmark() {
-  local server="$1" scenario="$2" threads="$3" connections="$4" endpoint="$5"
+  local server="$1" scenario="$2" threads="$3" connections="$4" endpoint="$5" trial="$6"
 
-  echo "  [wrk] Running: ${scenario} (${threads}t, ${connections}c, ${DURATION}) -> ${endpoint}"
+  local trial_label=""
+  if [[ "${TRIALS}" -gt 1 ]]; then
+    trial_label=" [trial ${trial}/${TRIALS}]"
+  fi
+  echo "  [wrk] Running: ${scenario} (${threads}t, ${connections}c, ${DURATION}) -> ${endpoint}${trial_label}"
 
   # Run wrk and capture JSON output from the Lua done() callback
-  start_timer "[wrk] ${server}/${scenario}"
+  start_timer "[wrk] ${server}/${scenario}${trial_label}"
   local wrk_output
   wrk_output="$(wrk -t"${threads}" -c"${connections}" -d"${DURATION}" \
     -s "${SCENARIO_DIR}/${scenario}.lua" \
@@ -280,13 +288,14 @@ run_wrk_benchmark() {
     --argjson connections "${connections}" \
     --arg duration "${DURATION}" \
     --arg endpoint "${endpoint}" \
+    --argjson trial "${trial}" \
     --argjson metrics "${json_line}" \
     '{
       server: $server,
       tool: $tool,
       protocol: $protocol,
       scenario: $scenario,
-      config: { threads: $threads, connections: $connections, duration: $duration, endpoint: $endpoint },
+      config: { threads: $threads, connections: $connections, duration: $duration, endpoint: $endpoint, trial: $trial },
       metrics: $metrics
     }'
   )"
@@ -357,7 +366,9 @@ for server in ${SERVERS}; do
     }
 
     read -r threads connections endpoint <<< "${config}"
-    run_wrk_benchmark "${server}" "${scenario}" "${threads}" "${connections}" "${endpoint}"
+    for trial in $(seq 1 "${TRIALS}"); do
+      run_wrk_benchmark "${server}" "${scenario}" "${threads}" "${connections}" "${endpoint}" "${trial}"
+    done
   done
 
   echo ""
