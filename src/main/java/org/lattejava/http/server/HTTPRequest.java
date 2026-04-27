@@ -30,6 +30,11 @@ import module org.lattejava.http;
  */
 @SuppressWarnings("unused")
 public class HTTPRequest implements Buildable<HTTPRequest> {
+  // Cached so each Accept-Language header parse doesn't allocate a fresh Comparator. Sorts language ranges by their q-value (weight)
+  // descending. Double.compare(b, a) avoids both auto-boxing and the .reversed() wrapper we'd get from Comparator.comparingDouble().
+  private static final Comparator<Locale.LanguageRange> LANGUAGE_RANGE_BY_WEIGHT_DESC =
+      (a, b) -> Double.compare(b.getWeight(), a.getWeight());
+
   private final List<String> acceptEncodings = new LinkedList<>();
 
   private final Map<String, Object> attributes = new HashMap<>();
@@ -880,12 +885,21 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
         break;
       case HTTPValues.Headers.AcceptLanguageLower:
         try {
-          addLocales(Locale.LanguageRange.parse(value) // Default to English
-                                         .stream()
-                                         .sorted(Comparator.comparing(Locale.LanguageRange::getWeight).reversed())
-                                         .map(Locale.LanguageRange::getRange)
-                                         .map(Locale::forLanguageTag)
-                                         .collect(Collectors.toList()));
+          List<Locale.LanguageRange> parsed = Locale.LanguageRange.parse(value);
+          if (parsed.isEmpty()) {
+            break;
+          }
+          // Replace the prior stream() -> sorted() -> map() -> map() -> collect() pipeline with a manual sort+loop. JFR profiling showed
+          // the stream pipeline plus its intermediate ReferencePipeline / SortedOps / SizedRefSortingSink objects were a meaningful
+          // allocation source inside decodeHeader, dwarfed only by LanguageRange.parse itself (which is JDK code we can't easily replace).
+          // LanguageRange.parse returns an unmodifiable list, so a mutable copy is required to call sort() in place.
+          List<Locale.LanguageRange> ranges = new ArrayList<>(parsed);
+          ranges.sort(LANGUAGE_RANGE_BY_WEIGHT_DESC);
+          List<Locale> localeList = new ArrayList<>(ranges.size());
+          for (Locale.LanguageRange range : ranges) {
+            localeList.add(Locale.forLanguageTag(range.getRange()));
+          }
+          addLocales(localeList);
         } catch (Exception e) {
           // Ignore the exception and keep the value null
         }
