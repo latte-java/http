@@ -397,6 +397,22 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
+   * Controls whether the server auto-emits an RFC 1123 {@code Date} header on every response. Defaults to {@code true},
+   * which is what RFC 9110 §6.6.1 requires of an origin server with a clock. Disable for embedded environments without
+   * a reliable clock, for byte-deterministic test fixtures, or when running behind a reverse proxy that adds Date.
+   * <p>
+   * When enabled, the server populates Date before invoking the handler so that the handler can override the value or
+   * call {@link HTTPResponse#removeHeader} to suppress it for an individual response.
+   *
+   * @param sendDateHeader true to auto-emit Date (default), false to never emit Date.
+   * @return This.
+   */
+  default T withSendDateHeader(boolean sendDateHeader) {
+    configuration().withSendDateHeader(sendDateHeader);
+    return (T) this;
+  }
+
+  /**
    * Sets the duration the server will wait for running requests to be completed. Defaults to 10 seconds.
    *
    * @param duration The duration the server will wait for all running request processing threads to complete their

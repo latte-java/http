@@ -103,6 +103,109 @@ public class HTTP11SocketTest extends BaseSocketTest {
   }
 
   /**
+   * RFC 9110 §7.6.1: Connection is a comma-separated list of tokens. A real-world request that wants to upgrade and close
+   * after the upgrade response will send {@code Connection: close, upgrade}. Our server must honor the {@code close}
+   * token and end the connection, even when other tokens appear alongside it.
+   * <p>
+   * Use case: client speaking HTTP/1.1 to a backend that emits something like {@code Connection: close, upgrade} when it
+   * does not want the connection reused after this exchange. Misclassifying this as keep-alive would leak connections
+   * and contradict the client's stated intent.
+   */
+  @Test
+  public void connection_close_token_among_others_HTTP11() throws Exception {
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        Connection: close, upgrade\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        \r
+        {body}"""
+    ).expectResponse("""
+        HTTP/1.1 200 \r
+        connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
+  /**
+   * Token-list parsing must not depend on token order. {@code Connection: upgrade, close} carries the same intent as
+   * {@code Connection: close, upgrade} — close after this response.
+   * <p>
+   * Use case: defensive — different proxies/clients emit tokens in different orders. A server that only honored the
+   * first token would misbehave depending on upstream ordering.
+   */
+  @Test
+  public void connection_close_token_last_HTTP11() throws Exception {
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        Connection: upgrade, close\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        \r
+        {body}"""
+    ).expectResponse("""
+        HTTP/1.1 200 \r
+        connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
+  /**
+   * Header field values are case-insensitive for token-list comparisons (RFC 9110 §5.6.2). {@code Connection: Close}
+   * with a capital C must be honored exactly like the lowercase form.
+   * <p>
+   * Use case: hand-rolled clients and some legacy stacks emit title-cased token values. A case-sensitive comparison
+   * would silently keep the connection alive against the client's intent.
+   */
+  @Test
+  public void connection_close_case_insensitive_HTTP11() throws Exception {
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        Connection: Close\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        \r
+        {body}"""
+    ).expectResponse("""
+        HTTP/1.1 200 \r
+        connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
+  /**
+   * Multiple Connection header lines are semantically equivalent to a single header with comma-joined values per RFC
+   * 9110 §5.3. The server must aggregate tokens across all Connection lines.
+   * <p>
+   * Use case: clients or intermediaries sometimes emit one header per token — {@code Connection: upgrade} on one line,
+   * {@code Connection: close} on another. Treating only the first header would leak the connection.
+   */
+  @Test
+  public void connection_close_split_across_headers_HTTP11() throws Exception {
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        Connection: upgrade\r
+        Connection: close\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        \r
+        {body}"""
+    ).expectResponse("""
+        HTTP/1.1 200 \r
+        connection: close\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
+  /**
    * Connection: close on HTTP/1.1 should result in a 200 and the response should include connection: close.
    * <p>
    * See <a href="https://www.rfc-editor.org/rfc/rfc9112#section-9.6">RFC 9112 Section 9.6</a>

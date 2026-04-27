@@ -77,6 +77,32 @@ public class HTTP10SocketTest extends BaseSocketTest {
         """);
   }
 
+  /**
+   * RFC 9110 §7.6.1: Connection is a comma-separated list of tokens. An HTTP/1.0 client that wants both keep-alive and
+   * an upgrade hint will send {@code Connection: keep-alive, upgrade}. The server must honor the {@code keep-alive}
+   * token even when other tokens appear alongside it.
+   * <p>
+   * Use case: HTTP/1.0 client (e.g. some load testers) coupled with a proxy that adds an Upgrade hint. Without
+   * token-list parsing the keep-alive request is downgraded to a close, hurting throughput on every iteration.
+   */
+  @Test
+  public void connection_keep_alive_token_among_others_HTTP10() throws Exception {
+    withRequest("""
+        GET / HTTP/1.0\r
+        Host: cyberdyne-systems.com\r
+        Connection: keep-alive, upgrade\r
+        Content-Type: plain/text\r
+        Content-Length: {contentLength}\r
+        \r
+        {body}"""
+    ).expectResponse("""
+        HTTP/1.1 200 \r
+        connection: keep-alive\r
+        content-length: 0\r
+        \r
+        """);
+  }
+
   @Test(invocationCount = 100)
   public void test_HTTP_10_OK() throws Exception {
     // Minor version less than the highest supported: HTTP/1.0

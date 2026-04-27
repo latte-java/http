@@ -236,7 +236,11 @@ public class FormDataTest extends BaseTest {
           // Using various timeouts to make it easier to debug which one we are hitting.
           .withKeepAliveTimeoutDuration(Duration.ofSeconds(23))
           .withInitialReadTimeout(Duration.ofSeconds(19))
-          .withProcessingTimeoutDuration(Duration.ofSeconds(27));
+          .withProcessingTimeoutDuration(Duration.ofSeconds(27))
+
+          // Suppress auto-Date so the byte-exact response assertions in this test stay deterministic — these tests verify form
+          // parsing and size limits, not the Date header.
+          .withSendDateHeader(false);
 
       if (configuration != null) {
         configuration.accept(server.configuration());

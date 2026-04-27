@@ -1192,8 +1192,9 @@ public class CoreTest extends BaseTest {
       }
     };
 
-    // Java HttpClient only supports ASCII header values, so send request directly
-    try (HTTPServer ignore = makeServer(scheme, handler).start();
+    // Java HttpClient only supports ASCII header values, so send request directly. Disable auto-Date so the byte-exact comparison
+    // below stays deterministic — this test verifies UTF-8 header passthrough, not the Date header.
+    try (HTTPServer ignore = makeServer(scheme, handler).withSendDateHeader(false).start();
          Socket socket = makeClientSocket(scheme)) {
 
       var os = socket.getOutputStream();
