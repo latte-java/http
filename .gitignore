@@ -5,6 +5,8 @@ build
 benchmarks/lib
 benchmarks/profiles/
 benchmarks/results/
+benchmarks/perf-results/*
+!benchmarks/perf-results/.gitkeep
 benchmarks/tomcat/web/WEB-INF/lib
 .claude/worktrees
 .worktrees
