@@ -483,3 +483,8 @@ echo "=== Result written to ${RESULT_FILE} ==="
 echo ""
 echo "Summary:"
 echo "${RESULT_JSON}" | jq .summary
+
+if [[ -n "${BASELINE}" ]]; then
+  echo ""
+  "${SCRIPT_DIR}/compare-perf.sh" "${BASELINE}" "${RESULT_FILE}"
+fi
