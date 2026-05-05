@@ -68,6 +68,13 @@ for metric in "${METRICS[@]}"; do
   base="$(jq -r ".summary.${metric}.median" "${BASELINE}")"
   cur="$(jq -r  ".summary.${metric}.median" "${COMPARISON}")"
 
+  # Defensive guard: jq -r emits literal "null" for missing fields. Without
+  # this, awk coerces "null" to 0 and we'd print misleading +∞% or -100% deltas.
+  if [[ "${base}" == "null" || "${cur}" == "null" ]]; then
+    printf "%-22s %14s %14s %10s\n" "${metric}" "${base}" "${cur}" "N/A"
+    continue
+  fi
+
   # Format delta. Skip percent if baseline is 0.
   if awk "BEGIN { exit !($base == 0) }"; then
     if awk "BEGIN { exit !($cur == 0) }"; then
