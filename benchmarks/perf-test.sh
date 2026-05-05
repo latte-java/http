@@ -365,9 +365,10 @@ for (( t=1; t<=TRIALS; t++ )); do
 
   RPS_FLOAT="$(echo "${WRK_JSON}" | jq -r '.rps')"
   ALLOC_PER_SEC="$(echo "${JFR_METRICS}" | jq -r '.alloc_bytes_per_sec')"
-  # Same denominator fix as Task 5: estimate requests during the JFR window only,
-  # since wrk runs over (warmup + JFR + slack) but allocations are only counted
-  # during the JFR window.
+  # Use rps * JFR_DURATION_SECS rather than wrk's total request count: wrk runs
+  # for warmup + JFR + slack seconds, so its request count spans a longer window
+  # than the JFR recording. Dividing JFR-window allocations by the full-window
+  # request count understates alloc_bytes_per_req by ~25% at default settings.
   JFR_REQUESTS="$(awk -v rps="${RPS_FLOAT}" -v dur="${JFR_DURATION_SECS}" \
     'BEGIN { printf "%d", rps * dur }')"
   ALLOC_PER_REQ=0
@@ -399,6 +400,7 @@ aggregate_all() {
     --argjson rps                 "$(echo "${trials}" | aggregate_metric 'wrk.rps')" \
     --argjson avg_latency_us      "$(echo "${trials}" | aggregate_metric 'wrk.avg_latency_us')" \
     --argjson p99_us              "$(echo "${trials}" | aggregate_metric 'wrk.p99_us')" \
+    # TODO(task-7): widen to total errors across connect/read/write/timeout buckets
     --argjson errors              "$(echo "${trials}" | aggregate_metric 'wrk.errors_connect')" \
     --argjson alloc_bytes_per_sec "$(echo "${trials}" | aggregate_metric 'jfr.alloc_bytes_per_sec')" \
     --argjson alloc_bytes_per_req "$(echo "${trials}" | aggregate_metric 'jfr.alloc_bytes_per_req')" \
