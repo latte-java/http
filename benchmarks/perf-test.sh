@@ -74,6 +74,26 @@ for cmd in wrk latte java jq curl jfr; do
   }
 done
 
+# --- System metadata (mirrors run-benchmarks.sh) ---
+
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+CPU_CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"
+if [[ "${OS}" == "Darwin" ]]; then
+  CPU_MODEL="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+  RAM_GB=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+  OS_VERSION="$(sw_vers -productName 2>/dev/null || echo macOS) $(sw_vers -productVersion 2>/dev/null || echo unknown)"
+else
+  CPU_MODEL="$(awk -F: '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null | sed 's/^ *//' || echo unknown)"
+  RAM_GB=$(( $(awk '/MemTotal/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0) / 1048576 ))
+  OS_VERSION="$( . /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-Linux}" || echo "Linux $(uname -r)" )"
+fi
+JAVA_VERSION="$(java -version 2>&1 | head -1)"
+
+GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+GIT_DIRTY=false
+git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null || GIT_DIRTY=true
+
 # --- Scenario validation (mirrors run-benchmarks.sh) ---
 case "${SCENARIO}" in
   baseline)         THREADS=12; CONNS=100;  ENDPOINT="/" ;;
@@ -384,7 +404,7 @@ for (( t=1; t<=TRIALS; t++ )); do
     --arg     jfr_file "${JFR_FILE#${SCRIPT_DIR}/}" \
     '{
       trial: $trial,
-      wrk: $wrk,
+      wrk: ($wrk + { errors_total: ($wrk.errors_connect + $wrk.errors_read + $wrk.errors_write + $wrk.errors_timeout) }),
       jfr: ($jfr + { alloc_bytes_per_req: $alloc_per_req }),
       jfr_file: $jfr_file
     }')"
@@ -400,8 +420,7 @@ aggregate_all() {
     --argjson rps                 "$(echo "${trials}" | aggregate_metric 'wrk.rps')" \
     --argjson avg_latency_us      "$(echo "${trials}" | aggregate_metric 'wrk.avg_latency_us')" \
     --argjson p99_us              "$(echo "${trials}" | aggregate_metric 'wrk.p99_us')" \
-    # TODO(task-7): widen to total errors across connect/read/write/timeout buckets
-    --argjson errors              "$(echo "${trials}" | aggregate_metric 'wrk.errors_connect')" \
+    --argjson errors              "$(echo "${trials}" | aggregate_metric 'wrk.errors_total')" \
     --argjson alloc_bytes_per_sec "$(echo "${trials}" | aggregate_metric 'jfr.alloc_bytes_per_sec')" \
     --argjson alloc_bytes_per_req "$(echo "${trials}" | aggregate_metric 'jfr.alloc_bytes_per_req')" \
     --argjson gc_pause_ms_total   "$(echo "${trials}" | aggregate_metric 'jfr.gc_pause_ms_total')" \
@@ -422,6 +441,45 @@ aggregate_all() {
 
 SUMMARY_JSON="$(aggregate_all "${TRIALS_JSON}")"
 
+RESULT_JSON="$(jq -n \
+  --argjson version 1 \
+  --arg     timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg     scenario "${SCENARIO}" \
+  --arg     duration "${DURATION}" \
+  --argjson trials "${TRIALS}" \
+  --arg     os "${OS}" \
+  --arg     arch "${ARCH}" \
+  --arg     osVersion "${OS_VERSION}" \
+  --arg     cpuModel "${CPU_MODEL}" \
+  --argjson cpuCores "${CPU_CORES}" \
+  --argjson ramGB "${RAM_GB}" \
+  --arg     javaVersion "${JAVA_VERSION}" \
+  --arg     gitSha "${GIT_SHA}" \
+  --argjson gitDirty "${GIT_DIRTY}" \
+  --argjson summary "${SUMMARY_JSON}" \
+  --argjson trials_raw "${TRIALS_JSON}" \
+  --argjson detailed null \
+  '{
+    version: $version,
+    timestamp: $timestamp,
+    scenario: $scenario,
+    duration: $duration,
+    trials: $trials,
+    system: {
+      os: $os, arch: $arch, osVersion: $osVersion,
+      cpuModel: $cpuModel, cpuCores: $cpuCores, ramGB: $ramGB,
+      javaVersion: $javaVersion
+    },
+    git: { sha: $gitSha, dirty: $gitDirty },
+    summary: $summary,
+    trials_raw: $trials_raw,
+    detailed: $detailed
+  }')"
+
+echo "${RESULT_JSON}" > "${RESULT_FILE}"
+
 echo ""
-echo "=== Summary across ${TRIALS} trial(s) ==="
-echo "${SUMMARY_JSON}" | jq .
+echo "=== Result written to ${RESULT_FILE} ==="
+echo ""
+echo "Summary:"
+echo "${RESULT_JSON}" | jq .summary
