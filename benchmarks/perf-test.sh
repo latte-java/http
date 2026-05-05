@@ -46,7 +46,7 @@ Options:
   --output     <dir>     Output directory (default: benchmarks/perf-results/)
   -h, --help             This message
 EOF
-  exit 0
+  exit "${1:-0}"
 }
 
 # --- Parse args ---
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
     --label)    LABEL="$2"; shift 2 ;;
     --output)   OUTPUT_DIR="$2"; shift 2 ;;
     -h|--help)  usage ;;
-    *)          echo "ERROR: Unknown option: $1" >&2; usage ;;
+    *)          echo "ERROR: Unknown option: $1" >&2; usage 1 ;;
   esac
 done
 
@@ -116,6 +116,11 @@ fi
 
 if ! [[ "${TRIALS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "ERROR: --trials must be a positive integer (got: ${TRIALS})" >&2
+  exit 1
+fi
+
+if [[ -n "${LABEL}" && "${LABEL}" =~ [[:space:]/] ]]; then
+  echo "ERROR: --label must not contain whitespace or '/' (got: ${LABEL})" >&2
   exit 1
 fi
 
@@ -388,11 +393,15 @@ extract_detailed() {
 
 aggregate_metric() {
   local path="$1"
+  # Filter out null entries so a missing field in one trial does not abort the
+  # whole aggregation; an empty result returns null/zero rather than crashing.
   jq --arg path "${path}" '
-    [ .[] | getpath($path | split(".")) ] as $vals
+    [ .[] | getpath($path | split(".")) | select(. != null) ] as $vals
     | ($vals | sort) as $sorted
     | ($sorted | length) as $n
-    | {
+    | if $n == 0
+      then { median: null, min: null, max: null }
+      else {
         median: (if ($n % 2) == 1
                  then $sorted[($n / 2 | floor)]
                  else (($sorted[($n / 2) - 1] + $sorted[$n / 2]) / 2)
@@ -400,6 +409,7 @@ aggregate_metric() {
         min:    ($sorted | first),
         max:    ($sorted | last)
       }
+      end
   '
 }
 
