@@ -124,10 +124,14 @@ start_server() {
 
   SERVER_LOG="${TRIAL_DIR}/server.log"
   JAVA_OPTS="${extra_java_opts}" \
-    bash -c "cd '${SELF_DIR}/build/dist' && ./start.sh" >"${SERVER_LOG}" 2>&1 &
+    bash -c "cd '${SELF_DIR}/build/dist' && exec ./start.sh" >"${SERVER_LOG}" 2>&1 &
   SERVER_PID=$!
 
   for _ in $(seq 1 30); do
+    if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+      echo "ERROR: Server process died during startup. See ${SERVER_LOG}" >&2
+      return 1
+    fi
     if curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null | grep -q 200; then
       return 0
     fi
@@ -150,7 +154,7 @@ stop_server() {
   [[ -n "${pids}" ]] && echo "${pids}" | xargs kill 2>/dev/null || true
 }
 
-trap stop_server EXIT
+trap stop_server EXIT INT TERM
 
 # --- Build self once up front ---
 
