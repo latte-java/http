@@ -164,23 +164,56 @@ echo "--- Building self ---"
   exit 1
 }
 
-# --- Run a single trial (wrk only for now; JFR added in Task 4) ---
-# Returns the wrk JSON line on stdout.
+# --- Duration helpers ---
+# wrk accepts "30s", "5m", "1h"; we need the value in seconds for JFR.
+
+duration_to_seconds() {
+  local dur="$1"
+  local num="${dur%[smhSMH]}"
+  local unit="${dur#"${num}"}"
+  case "${unit}" in
+    s|S|"") echo "${num}" ;;
+    m|M)    echo $(( num * 60 )) ;;
+    h|H)    echo $(( num * 3600 )) ;;
+    *)      echo "${num}" ;;
+  esac
+}
+
+WARMUP_SECS=5
+DURATION_SECS="$(duration_to_seconds "${DURATION}")"
+JFR_DURATION_SECS="${DURATION_SECS}"  # JFR records during the steady-state portion
+
+# Pad the wrk run so it covers the warmup + the full JFR window plus 5s of slack.
+WRK_DURATION_SECS=$(( WARMUP_SECS + JFR_DURATION_SECS + 5 ))
+WRK_DURATION="${WRK_DURATION_SECS}s"
+
+# --- Run a single trial with JFR ---
+# Returns "wrk-json|jfr-file" on stdout for the caller to split.
 
 run_wrk_trial() {
   local trial="$1"
-  local jfr_file="$2"  # currently unused; wired in Task 4
+  local jfr_file="${TRIAL_DIR}/trial-${trial}.jfr"
 
-  start_server "" || return 1
+  local jfr_opts="-XX:StartFlightRecording=delay=${WARMUP_SECS}s,duration=${JFR_DURATION_SECS}s,filename=${jfr_file},settings=profile,dumponexit=true"
 
-  echo "  trial ${trial}/${TRIALS}: wrk ${THREADS}t/${CONNS}c for ${DURATION}..." >&2
+  start_server "${jfr_opts}" || return 1
+
+  echo "  trial ${trial}/${TRIALS}: wrk ${THREADS}t/${CONNS}c for ${WRK_DURATION} (JFR ${WARMUP_SECS}s..+${JFR_DURATION_SECS}s)..." >&2
   local wrk_output
   wrk_output="$(SCENARIO_DIR="${SCENARIO_DIR}" \
-    wrk -t"${THREADS}" -c"${CONNS}" -d"${DURATION}" \
+    wrk -t"${THREADS}" -c"${CONNS}" -d"${WRK_DURATION}" \
         -s "${SCENARIO_FILE}" \
         "http://localhost:8080${ENDPOINT}" 2>&1)"
 
+  # Give JFR a moment to flush before we kill the JVM.
+  sleep 2
   stop_server
+
+  if [[ ! -f "${jfr_file}" ]]; then
+    echo "ERROR: JFR file not produced at ${jfr_file}. Server log:" >&2
+    tail -30 "${SERVER_LOG}" >&2
+    return 1
+  fi
 
   local json_line
   json_line="$(echo "${wrk_output}" | grep '^{' | tail -1)"
@@ -189,7 +222,9 @@ run_wrk_trial() {
     echo "${wrk_output}" >&2
     return 1
   fi
-  echo "${json_line}"
+
+  # Print "wrk-json|jfr-file" so the caller can tee both.
+  echo "${json_line}|${jfr_file}"
 }
 
 # --- Trial loop (single trial in this task; full loop in Task 7) ---
@@ -198,7 +233,12 @@ echo "=== perf-test (${TIMESTAMP}) ==="
 echo "  Scenario: ${SCENARIO} | Duration: ${DURATION} | Trials: ${TRIALS}"
 echo ""
 
-WRK_JSON="$(run_wrk_trial 1 "")"
+TRIAL_RESULT="$(run_wrk_trial 1)"
+WRK_JSON="${TRIAL_RESULT%|*}"
+JFR_FILE="${TRIAL_RESULT##*|}"
+
 echo ""
 echo "wrk trial 1 JSON:"
 echo "${WRK_JSON}" | jq .
+echo ""
+echo "JFR file: ${JFR_FILE} ($(stat -f%z "${JFR_FILE}" 2>/dev/null || stat -c%s "${JFR_FILE}") bytes)"
