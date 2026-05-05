@@ -122,7 +122,6 @@ start_server() {
     exit 1
   fi
 
-  SERVER_LOG="${TRIAL_DIR}/server.log"
   JAVA_OPTS="${extra_java_opts}" \
     bash -c "cd '${SELF_DIR}/build/dist' && exec ./start.sh" >"${SERVER_LOG}" 2>&1 &
   SERVER_PID=$!
@@ -285,12 +284,38 @@ extract_jfr_metrics() {
     }'
 }
 
+# --- Aggregation helpers ---
+#
+# aggregate_metric <jq-path-to-numbers>  (reads JSON array of trial records on stdin)
+# Emits {"median": M, "min": m, "max": x} for the metric at the given path.
+#
+# Median rule: for odd N, the middle of the sorted array. For even N, the mean
+# of the two middle values. Default --trials 3 hits the simple-middle path.
+
+aggregate_metric() {
+  local path="$1"
+  jq --arg path "${path}" '
+    [ .[] | getpath($path | split(".")) ] as $vals
+    | ($vals | sort) as $sorted
+    | ($sorted | length) as $n
+    | {
+        median: (if ($n % 2) == 1
+                 then $sorted[($n / 2 | floor)]
+                 else (($sorted[($n / 2) - 1] + $sorted[$n / 2]) / 2)
+                 end),
+        min:    ($sorted | first),
+        max:    ($sorted | last)
+      }
+  '
+}
+
 # --- Run a single trial with JFR ---
 # Returns "wrk-json|jfr-file" on stdout for the caller to split.
 
 run_wrk_trial() {
   local trial="$1"
   local jfr_file="${TRIAL_DIR}/trial-${trial}.jfr"
+  SERVER_LOG="${TRIAL_DIR}/server-${trial}.log"   # per-trial log; visible to start_server via global
 
   local jfr_opts="-XX:StartFlightRecording=delay=${WARMUP_SECS}s,duration=${JFR_DURATION_SECS}s,filename=${jfr_file},settings=profile,dumponexit=true"
 
@@ -325,44 +350,76 @@ run_wrk_trial() {
   echo "${json_line}|${jfr_file}"
 }
 
-# --- Trial loop (single trial in this task; full loop in Task 7) ---
-
 echo "=== perf-test (${TIMESTAMP}) ==="
-echo "  Scenario: ${SCENARIO} | Duration: ${DURATION} | Trials: ${TRIALS}"
+echo "  Scenario: ${SCENARIO} | Duration: ${DURATION} per trial | Trials: ${TRIALS}"
 echo ""
 
-TRIAL_RESULT="$(run_wrk_trial 1)"
-WRK_JSON="${TRIAL_RESULT%|*}"
-JFR_FILE="${TRIAL_RESULT##*|}"
+TRIALS_JSON="[]"
+
+for (( t=1; t<=TRIALS; t++ )); do
+  TRIAL_RESULT="$(run_wrk_trial "${t}")"
+  WRK_JSON="${TRIAL_RESULT%|*}"
+  JFR_FILE="${TRIAL_RESULT##*|}"
+
+  JFR_METRICS="$(extract_jfr_metrics "${JFR_FILE}" "${JFR_DURATION_SECS}")"
+
+  RPS_FLOAT="$(echo "${WRK_JSON}" | jq -r '.rps')"
+  ALLOC_PER_SEC="$(echo "${JFR_METRICS}" | jq -r '.alloc_bytes_per_sec')"
+  # Same denominator fix as Task 5: estimate requests during the JFR window only,
+  # since wrk runs over (warmup + JFR + slack) but allocations are only counted
+  # during the JFR window.
+  JFR_REQUESTS="$(awk -v rps="${RPS_FLOAT}" -v dur="${JFR_DURATION_SECS}" \
+    'BEGIN { printf "%d", rps * dur }')"
+  ALLOC_PER_REQ=0
+  if [[ "${JFR_REQUESTS}" -gt 0 ]]; then
+    ALLOC_PER_REQ=$(( (ALLOC_PER_SEC * JFR_DURATION_SECS) / JFR_REQUESTS ))
+  fi
+
+  TRIAL_JSON="$(jq -n \
+    --argjson trial "${t}" \
+    --argjson wrk "${WRK_JSON}" \
+    --argjson jfr "${JFR_METRICS}" \
+    --argjson alloc_per_req "${ALLOC_PER_REQ}" \
+    --arg     jfr_file "${JFR_FILE#${SCRIPT_DIR}/}" \
+    '{
+      trial: $trial,
+      wrk: $wrk,
+      jfr: ($jfr + { alloc_bytes_per_req: $alloc_per_req }),
+      jfr_file: $jfr_file
+    }')"
+
+  TRIALS_JSON="$(echo "${TRIALS_JSON}" | jq --argjson e "${TRIAL_JSON}" '. + [$e]')"
+done
+
+# --- Aggregate ---
+
+aggregate_all() {
+  local trials="$1"
+  jq -n \
+    --argjson rps                 "$(echo "${trials}" | aggregate_metric 'wrk.rps')" \
+    --argjson avg_latency_us      "$(echo "${trials}" | aggregate_metric 'wrk.avg_latency_us')" \
+    --argjson p99_us              "$(echo "${trials}" | aggregate_metric 'wrk.p99_us')" \
+    --argjson errors              "$(echo "${trials}" | aggregate_metric 'wrk.errors_connect')" \
+    --argjson alloc_bytes_per_sec "$(echo "${trials}" | aggregate_metric 'jfr.alloc_bytes_per_sec')" \
+    --argjson alloc_bytes_per_req "$(echo "${trials}" | aggregate_metric 'jfr.alloc_bytes_per_req')" \
+    --argjson gc_pause_ms_total   "$(echo "${trials}" | aggregate_metric 'jfr.gc_pause_ms_total')" \
+    --argjson gc_count            "$(echo "${trials}" | aggregate_metric 'jfr.gc_count')" \
+    --argjson heap_peak_mb        "$(echo "${trials}" | aggregate_metric 'jfr.heap_peak_mb')" \
+    '{
+      rps: $rps,
+      avg_latency_us: $avg_latency_us,
+      p99_us: $p99_us,
+      errors: $errors,
+      alloc_bytes_per_sec: $alloc_bytes_per_sec,
+      alloc_bytes_per_req: $alloc_bytes_per_req,
+      gc_pause_ms_total: $gc_pause_ms_total,
+      gc_count: $gc_count,
+      heap_peak_mb: $heap_peak_mb
+    }'
+}
+
+SUMMARY_JSON="$(aggregate_all "${TRIALS_JSON}")"
 
 echo ""
-JFR_METRICS="$(extract_jfr_metrics "${JFR_FILE}" "${JFR_DURATION_SECS}")"
-
-ALLOC_PER_SEC="$(echo "${JFR_METRICS}" | jq -r '.alloc_bytes_per_sec')"
-# Use rps * JFR_DURATION_SECS rather than wrk's total request count: wrk runs
-# for warmup + JFR + slack seconds, so its request count spans a longer window
-# than the JFR recording. Dividing JFR-window allocations by the full-window
-# request count understates alloc_bytes_per_req by ~25% at default settings.
-RPS_FLOAT="$(echo "${WRK_JSON}" | jq -r '.rps')"
-JFR_REQUESTS="$(awk -v rps="${RPS_FLOAT}" -v dur="${JFR_DURATION_SECS}" \
-  'BEGIN { printf "%d", rps * dur }')"
-ALLOC_PER_REQ=0
-if [[ "${JFR_REQUESTS}" -gt 0 ]]; then
-  ALLOC_PER_REQ=$(( (ALLOC_PER_SEC * JFR_DURATION_SECS) / JFR_REQUESTS ))
-fi
-
-TRIAL_JSON="$(jq -n \
-  --argjson trial 1 \
-  --argjson wrk "${WRK_JSON}" \
-  --argjson jfr "${JFR_METRICS}" \
-  --argjson alloc_per_req "${ALLOC_PER_REQ}" \
-  --arg     jfr_file "${JFR_FILE#${SCRIPT_DIR}/}" \
-  '{
-    trial: $trial,
-    wrk: $wrk,
-    jfr: ($jfr + { alloc_bytes_per_req: $alloc_per_req }),
-    jfr_file: $jfr_file
-  }')"
-
-echo "Trial 1 record:"
-echo "${TRIAL_JSON}" | jq .
+echo "=== Summary across ${TRIALS} trial(s) ==="
+echo "${SUMMARY_JSON}" | jq .
