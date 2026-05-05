@@ -187,6 +187,102 @@ JFR_DURATION_SECS="${DURATION_SECS}"  # JFR records during the steady-state port
 WRK_DURATION_SECS=$(( WARMUP_SECS + JFR_DURATION_SECS + 5 ))
 WRK_DURATION="${WRK_DURATION_SECS}s"
 
+# --- JFR metric extraction ---
+#
+# extract_jfr_metrics <jfr_file> <duration_secs>
+#
+# Emits a single-line JSON object with:
+#   alloc_bytes_per_sec — sum of (heap_before(GC[n]) - heap_after(GC[n-1])) / duration
+#   gc_count            — number of garbage collections
+#   gc_pause_ms_total   — sum of GC pause times
+#   gc_pause_ms_max     — longest individual GC pause
+#   heap_peak_mb        — max(heap_before) across the recording, in MB
+#
+# Note on alloc rate: jdk.GCHeapSummary events have a "when" field of
+# "Before GC" or "After GC". Pairing consecutive (After GC[n-1], Before GC[n])
+# events gives the bytes allocated between collections. Sum / duration = rate.
+# This is more accurate than sampled allocation events because it counts the
+# delta the JVM actually had to GC.
+
+extract_jfr_metrics() {
+  local jfr_file="$1"
+  local duration_secs="$2"
+
+  # Pull GCHeapSummary events as JSON; sort by start time; project to a flat array.
+  local heap_events
+  heap_events="$(jfr print --json --events jdk.GCHeapSummary "${jfr_file}" \
+    | jq -c '
+        [ (.recording.events[] // .events[])
+          | { ts: .startTime, when: .values.when, used: (.values.heapUsed | tonumber) } ]
+        | sort_by(.ts)
+      ')"
+
+  # Compute alloc bytes (sum of before[n] - after[n-1]).
+  local alloc_bytes
+  alloc_bytes="$(echo "${heap_events}" | jq '
+    reduce .[] as $e (
+      { total: 0, last_after: null };
+      if $e.when == "Before GC" and .last_after != null
+      then .total += ($e.used - .last_after) | (if .total < 0 then .total = 0 else . end)
+      elif $e.when == "After GC"
+      then .last_after = $e.used
+      else .
+      end
+    ) | .total
+  ')"
+
+  local heap_peak_bytes
+  heap_peak_bytes="$(echo "${heap_events}" | jq '[.[] | select(.when == "Before GC") | .used] | (max // 0)')"
+
+  # GC count comes from `jfr summary` — its labelled output is stable across JDKs.
+  local summary
+  summary="$(jfr summary "${jfr_file}")"
+
+  local gc_count
+  gc_count="$(echo "${summary}" | awk '/jdk\.GarbageCollection/ {print $2; exit}')"
+  gc_count="${gc_count:-0}"
+
+  # Sum + max GCPhasePause durations directly from the events for precision.
+  # `jfr print --events jdk.GCPhasePause` prints lines like:
+  #   jdk.GCPhasePause { startTime = ..., duration = 1.234 ms, ... }
+  local pause_lines
+  pause_lines="$(jfr print --events jdk.GCPhasePause "${jfr_file}" 2>/dev/null \
+    | awk '/duration = / {
+        for (i=1; i<=NF; i++) if ($i == "duration") { print $(i+2), $(i+3); break }
+      }')"
+
+  # pause_lines is one "<value> <unit>" per line; convert all to milliseconds.
+  local gc_pause_ms_total gc_pause_ms_max
+  read -r gc_pause_ms_total gc_pause_ms_max <<< "$(echo "${pause_lines}" | awk '
+    {
+      val = $1; unit = $2
+      if      (unit == "ns")  ms = val / 1e6
+      else if (unit == "us")  ms = val / 1e3
+      else if (unit == "ms")  ms = val
+      else if (unit == "s")   ms = val * 1e3
+      else                    ms = val
+      total += ms
+      if (ms > max) max = ms
+    }
+    END { printf "%.3f %.3f", (total ? total : 0), (max ? max : 0) }
+  ')"
+
+  jq -n \
+    --argjson alloc_bytes "${alloc_bytes:-0}" \
+    --argjson duration "${duration_secs}" \
+    --argjson heap_peak_bytes "${heap_peak_bytes:-0}" \
+    --argjson gc_count "${gc_count}" \
+    --arg     gc_pause_total "${gc_pause_ms_total}" \
+    --arg     gc_pause_max "${gc_pause_ms_max}" '
+    {
+      alloc_bytes_per_sec: ( ($alloc_bytes / $duration) | floor ),
+      heap_peak_mb:        ( ($heap_peak_bytes / 1048576) | floor ),
+      gc_count:            $gc_count,
+      gc_pause_ms_total:   ($gc_pause_total | tonumber),
+      gc_pause_ms_max:     ($gc_pause_max | tonumber)
+    }'
+}
+
 # --- Run a single trial with JFR ---
 # Returns "wrk-json|jfr-file" on stdout for the caller to split.
 
@@ -238,7 +334,27 @@ WRK_JSON="${TRIAL_RESULT%|*}"
 JFR_FILE="${TRIAL_RESULT##*|}"
 
 echo ""
-echo "wrk trial 1 JSON:"
-echo "${WRK_JSON}" | jq .
-echo ""
-echo "JFR file: ${JFR_FILE} ($(stat -f%z "${JFR_FILE}" 2>/dev/null || stat -c%s "${JFR_FILE}") bytes)"
+JFR_METRICS="$(extract_jfr_metrics "${JFR_FILE}" "${JFR_DURATION_SECS}")"
+
+REQUESTS="$(echo "${WRK_JSON}" | jq -r '.requests')"
+ALLOC_PER_SEC="$(echo "${JFR_METRICS}" | jq -r '.alloc_bytes_per_sec')"
+ALLOC_PER_REQ=0
+if [[ "${REQUESTS}" -gt 0 ]]; then
+  ALLOC_PER_REQ=$(( (ALLOC_PER_SEC * JFR_DURATION_SECS) / REQUESTS ))
+fi
+
+TRIAL_JSON="$(jq -n \
+  --argjson trial 1 \
+  --argjson wrk "${WRK_JSON}" \
+  --argjson jfr "${JFR_METRICS}" \
+  --argjson alloc_per_req "${ALLOC_PER_REQ}" \
+  --arg     jfr_file "${JFR_FILE#${SCRIPT_DIR}/}" \
+  '{
+    trial: $trial,
+    wrk: $wrk,
+    jfr: ($jfr + { alloc_bytes_per_req: $alloc_per_req }),
+    jfr_file: $jfr_file
+  }')"
+
+echo "Trial 1 record:"
+echo "${TRIAL_JSON}" | jq .
