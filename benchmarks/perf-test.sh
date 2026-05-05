@@ -108,14 +108,93 @@ TRIAL_DIR="${OUTPUT_DIR}/${TIMESTAMP}${SUFFIX}"
 
 mkdir -p "${OUTPUT_DIR}" "${TRIAL_DIR}"
 
-# --- Plan dry-run output ---
+# --- Server lifecycle helpers ---
+
+SERVER_PID=""
+SERVER_LOG=""
+
+start_server() {
+  local extra_java_opts="${1:-}"
+
+  EXISTING_PID="$(lsof -ti :8080 2>/dev/null || true)"
+  if [[ -n "${EXISTING_PID}" ]]; then
+    echo "ERROR: Port 8080 is in use by PID ${EXISTING_PID}." >&2
+    exit 1
+  fi
+
+  SERVER_LOG="${TRIAL_DIR}/server.log"
+  JAVA_OPTS="${extra_java_opts}" \
+    bash -c "cd '${SELF_DIR}/build/dist' && ./start.sh" >"${SERVER_LOG}" 2>&1 &
+  SERVER_PID=$!
+
+  for _ in $(seq 1 30); do
+    if curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null | grep -q 200; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: Server did not start within 30s. See ${SERVER_LOG}" >&2
+  return 1
+}
+
+stop_server() {
+  if [[ -n "${SERVER_PID}" ]] && kill -0 "${SERVER_PID}" 2>/dev/null; then
+    kill "${SERVER_PID}" 2>/dev/null || true
+    sleep 1
+    kill -9 "${SERVER_PID}" 2>/dev/null || true
+  fi
+  SERVER_PID=""
+  # Also catch anything still on 8080 (catalina, child procs, etc.)
+  local pids
+  pids="$(lsof -ti :8080 2>/dev/null || true)"
+  [[ -n "${pids}" ]] && echo "${pids}" | xargs kill 2>/dev/null || true
+}
+
+trap stop_server EXIT
+
+# --- Build self once up front ---
+
+echo "--- Building self ---"
+(cd "${SELF_DIR}" && latte clean app) >"${TRIAL_DIR}/build.log" 2>&1 || {
+  echo "ERROR: build failed. See ${TRIAL_DIR}/build.log" >&2
+  exit 1
+}
+
+# --- Run a single trial (wrk only for now; JFR added in Task 4) ---
+# Returns the wrk JSON line on stdout.
+
+run_wrk_trial() {
+  local trial="$1"
+  local jfr_file="$2"  # currently unused; wired in Task 4
+
+  start_server "" || return 1
+
+  echo "  trial ${trial}/${TRIALS}: wrk ${THREADS}t/${CONNS}c for ${DURATION}..." >&2
+  local wrk_output
+  wrk_output="$(SCENARIO_DIR="${SCENARIO_DIR}" \
+    wrk -t"${THREADS}" -c"${CONNS}" -d"${DURATION}" \
+        -s "${SCENARIO_FILE}" \
+        "http://localhost:8080${ENDPOINT}" 2>&1)"
+
+  stop_server
+
+  local json_line
+  json_line="$(echo "${wrk_output}" | grep '^{' | tail -1)"
+  if [[ -z "${json_line}" ]]; then
+    echo "ERROR: wrk produced no JSON line. Output:" >&2
+    echo "${wrk_output}" >&2
+    return 1
+  fi
+  echo "${json_line}"
+}
+
+# --- Trial loop (single trial in this task; full loop in Task 7) ---
+
 echo "=== perf-test (${TIMESTAMP}) ==="
-echo "  Scenario:  ${SCENARIO} (${THREADS}t / ${CONNS}c / endpoint=${ENDPOINT})"
-echo "  Duration:  ${DURATION} per trial"
-echo "  Trials:    ${TRIALS}"
-echo "  Detailed:  $((DETAILED == 1 ? 1 : 0))"
-echo "  Baseline:  ${BASELINE:-(none)}"
-echo "  Output:    ${RESULT_FILE}"
-echo "  JFR dir:   ${TRIAL_DIR}"
+echo "  Scenario: ${SCENARIO} | Duration: ${DURATION} | Trials: ${TRIALS}"
 echo ""
-echo "(skeleton — execution logic added in subsequent tasks)"
+
+WRK_JSON="$(run_wrk_trial 1 "")"
+echo ""
+echo "wrk trial 1 JSON:"
+echo "${WRK_JSON}" | jq .
