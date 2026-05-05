@@ -330,7 +330,7 @@ extract_detailed() {
   #     ]
   #   }
   local hot_methods
-  hot_methods="$(jfr print --events jdk.ExecutionSample "${jfr_file}" 2>/dev/null \
+  hot_methods="$( { jfr print --events jdk.ExecutionSample "${jfr_file}" 2>/dev/null || true; } \
     | awk '
         /^jdk\.ExecutionSample \{/ { capture = 0; in_stack = 0; next }
         /stackTrace = \[/           { in_stack = 1; next }
@@ -354,7 +354,7 @@ extract_detailed() {
   # jdk.ObjectAllocationSample (not the TLAB events, which require a different
   # preset and have zero occurrences in a normal profile recording).
   local alloc_sites
-  alloc_sites="$(jfr print --events jdk.ObjectAllocationSample "${jfr_file}" 2>/dev/null \
+  alloc_sites="$( { jfr print --events jdk.ObjectAllocationSample "${jfr_file}" 2>/dev/null || true; } \
     | awk '
         /^jdk\.ObjectAllocationSample \{/ { in_stack = 0; next }
         /stackTrace = \[/                  { in_stack = 1; next }
