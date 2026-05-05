@@ -304,6 +304,80 @@ extract_jfr_metrics() {
     }'
 }
 
+# --- Detailed extraction (optional) ---
+#
+# extract_detailed <jfr_file>  →  JSON object with hot_methods + alloc_sites.
+#
+# Uses sampled events from JFR's "profile" preset:
+#   jdk.ExecutionSample       — periodic CPU sample, top frame names the method
+#   jdk.ObjectAllocation*     — sampled allocation events, top frame names the site
+#
+# Output is the top 20 frames by sample/event count, with percentage of total.
+
+extract_detailed() {
+  local jfr_file="$1"
+
+  # Top 20 methods by execution-sample count. `jfr print --events
+  # jdk.ExecutionSample` produces one event per line with a stack-trace block;
+  # we extract just the top frame and tally.
+  #
+  # Actual format from `jfr print`:
+  #   jdk.ExecutionSample {
+  #     ...
+  #     stackTrace = [
+  #       fully.Qualified.method(args) line: N    ← 4-space indent, first = top of stack
+  #       ...
+  #     ]
+  #   }
+  local hot_methods
+  hot_methods="$(jfr print --events jdk.ExecutionSample "${jfr_file}" 2>/dev/null \
+    | awk '
+        /^jdk\.ExecutionSample \{/ { capture = 0; in_stack = 0; next }
+        /stackTrace = \[/           { in_stack = 1; next }
+        in_stack && /^    [A-Za-z0-9_.$]+\(/ { print $1; in_stack = 0 }
+        /^\}$/                      { in_stack = 0 }
+      ' \
+    | sort | uniq -c | sort -rn | head -20 \
+    | awk '
+        { c[NR]=$1; m[NR]=$2; total += $1 }
+        END {
+          printf "["
+          for (i = 1; i <= NR; i++) {
+            printf "%s{\"method\":\"%s\",\"samples\":%d,\"pct\":%.2f}",
+                   (i > 1 ? "," : ""), m[i], c[i], (total > 0 ? c[i] * 100.0 / total : 0)
+          }
+          print "]"
+        }')"
+  hot_methods="${hot_methods:-[]}"
+
+  # Top 20 allocation sites by event count. The JFR "profile" preset records
+  # jdk.ObjectAllocationSample (not the TLAB events, which require a different
+  # preset and have zero occurrences in a normal profile recording).
+  local alloc_sites
+  alloc_sites="$(jfr print --events jdk.ObjectAllocationSample "${jfr_file}" 2>/dev/null \
+    | awk '
+        /^jdk\.ObjectAllocationSample \{/ { in_stack = 0; next }
+        /stackTrace = \[/                  { in_stack = 1; next }
+        in_stack && /^    [A-Za-z0-9_.$]+\(/ { print $1; in_stack = 0 }
+        /^\}$/                             { in_stack = 0 }
+      ' \
+    | sort | uniq -c | sort -rn | head -20 \
+    | awk '
+        { c[NR]=$1; s[NR]=$2; total += $1 }
+        END {
+          printf "["
+          for (i = 1; i <= NR; i++) {
+            printf "%s{\"site\":\"%s\",\"events\":%d,\"pct\":%.2f}",
+                   (i > 1 ? "," : ""), s[i], c[i], (total > 0 ? c[i] * 100.0 / total : 0)
+          }
+          print "]"
+        }')"
+  alloc_sites="${alloc_sites:-[]}"
+
+  jq -n --argjson hot "${hot_methods}" --argjson sites "${alloc_sites}" \
+    '{ hot_methods: $hot, alloc_sites: $sites }'
+}
+
 # --- Aggregation helpers ---
 #
 # aggregate_metric <jq-path-to-numbers>  (reads JSON array of trial records on stdin)
@@ -441,6 +515,18 @@ aggregate_all() {
 
 SUMMARY_JSON="$(aggregate_all "${TRIALS_JSON}")"
 
+DETAILED_JSON="null"
+if (( DETAILED == 1 )); then
+  # Pick the trial with the median RPS so the detailed view reflects a
+  # representative run, not an outlier.
+  MEDIAN_RPS="$(echo "${SUMMARY_JSON}" | jq -r '.rps.median')"
+  MEDIAN_TRIAL_JFR="$(echo "${TRIALS_JSON}" | jq -r --argjson median "${MEDIAN_RPS}" '
+    map(. + {abs_delta: ((.wrk.rps - $median) | if . < 0 then -. else . end)})
+    | sort_by(.abs_delta) | first | .jfr_file
+  ')"
+  DETAILED_JSON="$(extract_detailed "${SCRIPT_DIR}/${MEDIAN_TRIAL_JFR}")"
+fi
+
 RESULT_JSON="$(jq -n \
   --argjson version 1 \
   --arg     timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -458,7 +544,7 @@ RESULT_JSON="$(jq -n \
   --argjson gitDirty "${GIT_DIRTY}" \
   --argjson summary "${SUMMARY_JSON}" \
   --argjson trials_raw "${TRIALS_JSON}" \
-  --argjson detailed null \
+  --argjson detailed "${DETAILED_JSON}" \
   '{
     version: $version,
     timestamp: $timestamp,
