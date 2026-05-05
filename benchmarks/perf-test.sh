@@ -209,10 +209,12 @@ extract_jfr_metrics() {
   local duration_secs="$2"
 
   # Pull GCHeapSummary events as JSON; sort by start time; project to a flat array.
+  # try/catch is required: when .recording is absent, iterating .recording.events[]
+  # raises a runtime error — the // operator only catches false/null, not errors.
   local heap_events
   heap_events="$(jfr print --json --events jdk.GCHeapSummary "${jfr_file}" \
     | jq -c '
-        [ (.recording.events[] // .events[])
+        [ ((try .recording.events[] catch null) // .events[])
           | { ts: .startTime, when: .values.when, used: (.values.heapUsed | tonumber) } ]
         | sort_by(.ts)
       ')"
@@ -336,11 +338,17 @@ JFR_FILE="${TRIAL_RESULT##*|}"
 echo ""
 JFR_METRICS="$(extract_jfr_metrics "${JFR_FILE}" "${JFR_DURATION_SECS}")"
 
-REQUESTS="$(echo "${WRK_JSON}" | jq -r '.requests')"
 ALLOC_PER_SEC="$(echo "${JFR_METRICS}" | jq -r '.alloc_bytes_per_sec')"
+# Use rps * JFR_DURATION_SECS rather than wrk's total request count: wrk runs
+# for warmup + JFR + slack seconds, so its request count spans a longer window
+# than the JFR recording. Dividing JFR-window allocations by the full-window
+# request count understates alloc_bytes_per_req by ~25% at default settings.
+RPS_FLOAT="$(echo "${WRK_JSON}" | jq -r '.rps')"
+JFR_REQUESTS="$(awk -v rps="${RPS_FLOAT}" -v dur="${JFR_DURATION_SECS}" \
+  'BEGIN { printf "%d", rps * dur }')"
 ALLOC_PER_REQ=0
-if [[ "${REQUESTS}" -gt 0 ]]; then
-  ALLOC_PER_REQ=$(( (ALLOC_PER_SEC * JFR_DURATION_SECS) / REQUESTS ))
+if [[ "${JFR_REQUESTS}" -gt 0 ]]; then
+  ALLOC_PER_REQ=$(( (ALLOC_PER_SEC * JFR_DURATION_SECS) / JFR_REQUESTS ))
 fi
 
 TRIAL_JSON="$(jq -n \
