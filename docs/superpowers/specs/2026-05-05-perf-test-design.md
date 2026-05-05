@@ -108,10 +108,11 @@ One JSON file per `perf-test.sh` invocation, written to `perf-results/`:
 }
 ```
 
-Aggregation rules:
-- Median is the per-trial value at index `floor(N/2)` of the sorted array
-  (matches what `run-benchmarks.sh --trials` already does, if anything; if not,
-  we define this here and reuse).
+Aggregation rules (defined here; `run-benchmarks.sh` currently emits per-trial
+records without aggregation, so there is nothing to inherit):
+- Median: for odd `N`, the middle value of the sorted per-trial array. For
+  even `N`, the mean of the two middle values. Default `--trials 3` is odd, so
+  the common path is the simple middle.
 - Min/max are the per-trial extremes.
 - With `--trials 1`, median == min == max. The schema is the same so consumers
   don't have to special-case.
