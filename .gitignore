@@ -3,7 +3,6 @@
 out
 build
 benchmarks/lib
-benchmarks/profiles/
 benchmarks/results/
 benchmarks/perf-results/*
 !benchmarks/perf-results/.gitkeep
