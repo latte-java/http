@@ -108,6 +108,31 @@ public final class HTTPValues {
     }
   }
 
+  public static final class ForbiddenTrailers {
+    /**
+     * RFC 9110 §6.5.2 forbids any trailer field that affects message framing, routing, authentication, request
+     * modifiers, response control, caching, payload processing, or connection management. Lowercased; lookups must
+     * lowercase the candidate name.
+     */
+    public static final Set<String> Names = Set.of(
+        // Framing
+        "content-encoding", "content-length", "content-range", "content-type", "transfer-encoding",
+        // Routing / pseudo-headers (h2)
+        ":authority", ":method", ":path", ":scheme", ":status", "host",
+        // Request modifiers
+        "cache-control", "expect", "max-forwards", "pragma", "range", "te",
+        // Authentication / cookies
+        "authorization", "cookie", "proxy-authenticate", "proxy-authorization", "set-cookie", "www-authenticate",
+        // Response control
+        "age", "date", "expires", "location", "retry-after", "vary", "warning",
+        // Connection management
+        "connection", "keep-alive", "proxy-connection", "trailer", "upgrade"
+    );
+
+    private ForbiddenTrailers() {
+    }
+  }
+
   /**
    * Named cookie attributes (in the specs). This includes upper and lower versions since some implementations are not
    * case-sensitive.
@@ -269,6 +294,10 @@ public final class HTTPValues {
     public static final String RetryAfter = "Retry-After";
 
     public static final String SetCookie = "Set-Cookie";
+
+    public static final String TE = "TE";
+
+    public static final String Trailer = "Trailer";
 
     public static final String TransferEncoding = "Transfer-Encoding";
 
