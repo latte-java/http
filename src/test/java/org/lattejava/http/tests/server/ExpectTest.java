@@ -127,7 +127,7 @@ public class ExpectTest extends BaseTest {
       res.setStatus(200);
     };
 
-    try (HTTPServer ignored = makeServer("http", handler).start();
+    try (HTTPServer ignored = makeServer("http", handler).withSendDateHeader(false).start();
          Socket socket = makeClientSocket("http")) {
       socket.setSoTimeout((int) Duration.ofSeconds(10).toMillis());
 
