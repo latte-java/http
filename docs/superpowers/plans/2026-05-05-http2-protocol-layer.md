@@ -45,7 +45,8 @@
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -112,7 +113,8 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTP2SettingsTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -175,7 +177,8 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -279,7 +282,8 @@ A sealed interface lets the reader return a typed record and the writer pattern-
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -430,7 +434,8 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTP2FrameReaderTest.java`
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -530,7 +535,8 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -703,7 +709,8 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -802,7 +809,8 @@ Create `src/test/java/org/lattejava/http/tests/server/HPACKHuffmanTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 

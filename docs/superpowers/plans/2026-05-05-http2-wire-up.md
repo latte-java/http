@@ -54,7 +54,8 @@ Get the abstraction in place before adding the second protocol.
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -152,7 +153,8 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPListenerConfigurationH
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -303,7 +305,8 @@ git commit -m "Configure ALPN on accepted SSLSocket from listener config"
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -350,7 +353,8 @@ The peek read is already time-bounded by the existing `clientSocket.setSoTimeout
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -646,7 +650,8 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -808,7 +813,8 @@ git commit -m "Add HTTP2Connection with preface validation and initial SETTINGS 
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -869,7 +875,8 @@ public class HTTP2InputStream extends InputStream {
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server.internal;
 
@@ -1179,7 +1186,8 @@ JDK 21's `HttpClient` speaks h2 natively when `Version.HTTP_2` is set. The test 
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 

@@ -94,7 +94,8 @@ git commit -m "Add HTTPValues.ForbiddenTrailers deny-list per RFC 9110 §6.5.2"
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.server;
 
@@ -141,7 +142,8 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPRequestTETest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -237,7 +239,8 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPRequestTrailersAPITest
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -351,7 +354,8 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPResponseTrailersAPITes
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -483,7 +487,8 @@ Create `src/test/java/org/lattejava/http/tests/io/ChunkedInputStreamTrailersTest
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.io;
 
@@ -643,7 +648,8 @@ Create `src/test/java/org/lattejava/http/tests/server/RequestTrailersTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -733,7 +739,8 @@ Create `src/test/java/org/lattejava/http/tests/io/ChunkedOutputStreamTrailersTes
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.io;
 
@@ -838,7 +845,8 @@ Create `src/test/java/org/lattejava/http/tests/server/ResponseTrailersTest.java`
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -1000,7 +1008,8 @@ Create `src/test/java/org/lattejava/http/tests/server/ProtocolSwitchTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 

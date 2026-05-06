@@ -106,7 +106,8 @@ git commit -m "Add h2spec installer script"
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
@@ -367,7 +368,8 @@ Use the light path.
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 

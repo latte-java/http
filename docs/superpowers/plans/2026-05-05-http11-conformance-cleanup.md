@@ -192,7 +192,8 @@ These tests verify that `RequestPreambleState` already rejects bare CR, whitespa
 
 ```java
 /*
- * Copyright (c) 2026, The Latte Project
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
  */
 package org.lattejava.http.tests.server;
 
