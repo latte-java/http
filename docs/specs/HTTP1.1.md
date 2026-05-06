@@ -201,6 +201,7 @@ Items grouped by effort and value:
 **Required for "compliant" claim:** complete.
 
 **Low-effort hardening:** complete (Plan A 2026-05-05).
+Remaining: absolute-form and authority-form request-target tests (§3).
 
 **Medium-effort features:**
 - Response trailers API + `TE: trailers` honoring

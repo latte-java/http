@@ -117,11 +117,6 @@ public abstract class BaseSocketTest extends BaseTest {
     }
   }
 
-  @FunctionalInterface
-  private interface ThrowingConsumer<T> {
-    void accept(T t) throws Exception;
-  }
-
   protected class Builder {
     public String chunkedExtension;
     public HTTPHandler handler;
@@ -154,5 +149,10 @@ public abstract class BaseSocketTest extends BaseTest {
       this.maxRequestHeaderSize = maxRequestHeaderSize;
       return this;
     }
+  }
+
+  @FunctionalInterface
+  private interface ThrowingConsumer<T> {
+    void accept(T t) throws Exception;
   }
 }
