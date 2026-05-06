@@ -95,6 +95,50 @@ public abstract class BaseSocketTest extends BaseTest {
     }
   }
 
+  private void assertResponseSubstring(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler, String substring)
+      throws Exception {
+    HTTPHandler effectiveHandler = handler != null ? handler : (req, res) -> {
+      // Read the request body
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+
+    var server = makeServer("http", effectiveHandler)
+        .withReadThroughputCalculationDelayDuration(Duration.ofMinutes(2))
+        .withWriteThroughputCalculationDelayDuration(Duration.ofMinutes(2))
+
+        // Using various timeouts to make it easier to debug which one we are hitting.
+        .withKeepAliveTimeoutDuration(Duration.ofSeconds(23))
+        .withInitialReadTimeout(Duration.ofSeconds(19))
+        .withProcessingTimeoutDuration(Duration.ofSeconds(27))
+
+        // Default is 8k, reduce this 512 to ensure we overflow this and have to read from the input stream again
+        .withRequestBufferSize(512)
+
+        // Suppress the auto-Date response header so byte-exact response assertions stay deterministic.
+        .withSendDateHeader(false);
+
+    if (maxRequestHeaderSize > 0) {
+      server.withMaxRequestHeaderSize(maxRequestHeaderSize);
+    }
+
+    try (HTTPServer ignore = server.start();
+         Socket socket = makeClientSocket("http")) {
+
+      socket.setSoTimeout((int) Duration.ofSeconds(30).toMillis());
+
+      var os = socket.getOutputStream();
+      os.write(request.getBytes(StandardCharsets.UTF_8));
+
+      var is = socket.getInputStream();
+      byte[] buffer = new byte[8192];
+      int read = is.read(buffer);
+      var actualResponse = new String(buffer, 0, read, StandardCharsets.UTF_8);
+
+      assertTrue(actualResponse.contains(substring), "Expected response to contain [" + substring + "] but got:\n" + actualResponse);
+    }
+  }
+
   protected class Builder {
     public String chunkedExtension;
 
@@ -110,6 +154,10 @@ public abstract class BaseSocketTest extends BaseTest {
 
     public void expectResponse(String response) throws Exception {
       assertResponse(request, chunkedExtension, maxRequestHeaderSize, handler, response);
+    }
+
+    public void expectResponseSubstring(String substring) throws Exception {
+      assertResponseSubstring(request, chunkedExtension, maxRequestHeaderSize, handler, substring);
     }
 
     public Builder withChunkedExtension(String extension) {
