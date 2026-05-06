@@ -330,6 +330,8 @@ public final class HTTPValues {
   public static final class Status {
     public static final String ContinueRequest = "100-continue";
 
+    public static final int ExpectationFailed = 417;
+
     public static final int MovedPermanently = 301;
 
     public static final int MovedTemporarily = 302;
