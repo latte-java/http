@@ -200,11 +200,7 @@ Items grouped by effort and value:
 
 **Required for "compliant" claim:** complete.
 
-**Low-effort hardening (next):**
-- Tests for `OPTIONS *`, absolute-form, authority-form request-targets
-- Test + reject whitespace-before-colon, obs-fold
-- `417` for unknown Expect values
-- Test for chunk extensions
+**Low-effort hardening:** complete (Plan A 2026-05-05).
 
 **Medium-effort features:**
 - Response trailers API + `TE: trailers` honoring
