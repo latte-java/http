@@ -92,6 +92,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   private String queryString;
 
   private String scheme;
+  private Map<String, List<String>> trailers;
 
   public HTTPRequest() {
     this.contextPath = "";
@@ -315,6 +316,13 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   public void addLocales(Collection<Locale> locales) {
     this.locales.addAll(locales);
+  }
+
+  public void addTrailer(String name, String value) {
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    trailers.computeIfAbsent(name.toLowerCase(), k -> new ArrayList<>()).add(value);
   }
 
   public void addURLParameter(String name, String value) {
@@ -723,6 +731,25 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     this.scheme = scheme;
   }
 
+  public String getTrailer(String name) {
+    if (trailers == null) {
+      return null;
+    }
+    List<String> values = trailers.get(name.toLowerCase());
+    return (values == null || values.isEmpty()) ? null : values.getFirst();
+  }
+
+  public Map<String, List<String>> getTrailerMap() {
+    return trailers == null ? Map.of() : trailers;
+  }
+
+  public List<String> getTrailers(String name) {
+    if (trailers == null) {
+      return List.of();
+    }
+    return trailers.getOrDefault(name.toLowerCase(), List.of());
+  }
+
   public String getTransferEncoding() {
     return getHeader(HTTPValues.Headers.TransferEncoding);
   }
@@ -756,6 +783,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
     Long contentLength = getContentLength();
     return contentLength != null && contentLength > 0;
+  }
+
+  public boolean hasTrailers() {
+    return trailers != null && !trailers.isEmpty();
   }
 
   public boolean isChunked() {
