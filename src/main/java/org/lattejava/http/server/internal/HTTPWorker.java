@@ -143,20 +143,25 @@ public class HTTPWorker implements Runnable {
           request.setMethod(HTTPMethod.GET);
         }
 
-        // Handle the Expect: 100-continue request header.
+        // Handle the Expect request header. RFC 9110 §10.1.1 — server MUST respond 417 to any expectation it does not support; we only support 100-continue.
         String expect = request.getHeader(HTTPValues.Headers.Expect);
-        if (expect != null && expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
-          state = State.Write;
+        if (expect != null) {
+          if (expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
+            state = State.Write;
 
-          boolean doContinue = handleExpectContinue(request);
-          if (!doContinue) {
-            // Note that the expectContinue code already wrote to the OutputStream, all we need to do is close the socket.
-            closeSocketOnly(CloseSocketReason.Expected);
+            boolean doContinue = handleExpectContinue(request);
+            if (!doContinue) {
+              // Note that the expectContinue code already wrote to the OutputStream, all we need to do is close the socket.
+              closeSocketOnly(CloseSocketReason.Expected);
+              return;
+            }
+
+            // Otherwise, transition the state to Read
+            state = State.Read;
+          } else {
+            closeSocketOnError(response, HTTPValues.Status.ExpectationFailed);
             return;
           }
-
-          // Otherwise, transition the state to Read
-          state = State.Read;
         }
 
         // RFC 9110 §6.6.1 — origin servers with a clock MUST emit a Date header. We populate it before invoking the handler so
