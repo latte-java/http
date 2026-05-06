@@ -194,6 +194,24 @@ public class HTTPWorker implements Runnable {
           }
         }
 
+        // If the handler requested a protocol switch, emit the 101 preamble and hand off the socket.
+        // Normal response writing is bypassed — the new protocol owns the socket from this point.
+        if (response.isProtocolSwitchPending()) {
+          String target = response.getSwitchProtocolsTarget();
+          StringBuilder sb = new StringBuilder();
+          sb.append("HTTP/1.1 101 Switching Protocols\r\n");
+          sb.append("Connection: Upgrade\r\n");
+          sb.append("Upgrade: ").append(target).append("\r\n");
+          for (var entry : response.getSwitchProtocolsHeaders().entrySet()) {
+            sb.append(entry.getKey()).append(": ").append(entry.getValue()).append("\r\n");
+          }
+          sb.append("\r\n");
+          socket.getOutputStream().write(sb.toString().getBytes(StandardCharsets.US_ASCII));
+          socket.getOutputStream().flush();
+          response.getSwitchProtocolsHandler().handle(socket);
+          return;
+        }
+
         // Do this before we write the response preamble. The normal Keep-Alive check below will handle closing the socket.
         if (handledRequests >= configuration.getMaxRequestsPerConnection()) {
           logger.trace("[{}] Maximum requests per connection has been reached. Turn off Keep-Alive.", Thread.currentThread().threadId());

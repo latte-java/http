@@ -38,6 +38,12 @@ public class HTTPResponse {
 
   private String statusMessage;
 
+  private ProtocolSwitchHandler switchProtocolsHandler;
+
+  private Map<String, String> switchProtocolsHeaders;
+
+  private String switchProtocolsTarget;
+
   private Map<String, List<String>> trailers;
 
   private Writer writer;
@@ -206,6 +212,18 @@ public class HTTPResponse {
     this.statusMessage = statusMessage;
   }
 
+  public ProtocolSwitchHandler getSwitchProtocolsHandler() {
+    return switchProtocolsHandler;
+  }
+
+  public Map<String, String> getSwitchProtocolsHeaders() {
+    return switchProtocolsHeaders == null ? Map.of() : switchProtocolsHeaders;
+  }
+
+  public String getSwitchProtocolsTarget() {
+    return switchProtocolsTarget;
+  }
+
   public Map<String, List<String>> getTrailers() {
     return trailers == null ? Map.of() : trailers;
   }
@@ -248,6 +266,10 @@ public class HTTPResponse {
    */
   public void setCompress(boolean compress) {
     outputStream.setCompress(compress);
+  }
+
+  public boolean isProtocolSwitchPending() {
+    return switchProtocolsHandler != null;
   }
 
   public void removeCookie(String name) {
@@ -342,6 +364,27 @@ public class HTTPResponse {
     List<String> list = new ArrayList<>(1);
     list.add(value);
     trailers.put(name.toLowerCase(Locale.ROOT), list);
+  }
+
+  /**
+   * Records the intent to perform a protocol switch. The worker will emit a {@code 101 Switching Protocols} response
+   * preamble and then hand the raw socket to the supplied handler. Normal response writing is bypassed — the handler
+   * owns the socket from that point on.
+   *
+   * @param protocol          the protocol token for the {@code Upgrade} response header.
+   * @param additionalHeaders extra headers to include in the 101 preamble, or {@code null} for none.
+   * @param handler           the handler that will take ownership of the socket after the 101 is flushed.
+   */
+  public void switchProtocols(String protocol, Map<String, String> additionalHeaders, ProtocolSwitchHandler handler) {
+    if (protocol == null || protocol.isEmpty()) {
+      throw new IllegalArgumentException("Protocol name must not be empty");
+    }
+    if (handler == null) {
+      throw new IllegalArgumentException("Handler must not be null");
+    }
+    this.switchProtocolsTarget = protocol;
+    this.switchProtocolsHeaders = additionalHeaders;
+    this.switchProtocolsHandler = handler;
   }
 
   /**
