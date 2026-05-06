@@ -47,11 +47,15 @@ The selector never crosses back. The single exception is `Upgrade: h2c`, which i
 
 ### Selector logic
 
-1. **TLS path.** After handshake, read `SSLSocket.getApplicationProtocol()`.
+1. **TLS path.** The selector calls `SSLSocket.startHandshake()` explicitly so ALPN protocol selection has completed before we branch (today's accept loop relies on implicit handshake on first I/O — that's fine for h1.1 but races with `getApplicationProtocol()`). Then read `sslSocket.getApplicationProtocol()`:
    - `"h2"` → `HTTP2Connection`.
    - `"http/1.1"`, `null`, or `""` → `HTTP1Worker`. (No ALPN extension on the client side counts as null. Historical default for TLS-without-ALPN is HTTP/1.1.)
-2. **Cleartext path with `enableH2cPriorKnowledge=true`.** Peek the first 24 bytes (the HTTP/2 connection preface, `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`). Match → `HTTP2Connection` with the peeked bytes replayed. No match → `HTTP1Worker` with the peeked bytes replayed.
+2. **Cleartext path with `enableH2cPriorKnowledge=true`.** Peek the first 24 bytes (the HTTP/2 connection preface, `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`) by reading them into a 24-byte buffer and pushing back via the existing `PushbackInputStream.push`. Match → `HTTP2Connection` (which re-reads the preface from the pushed-back buffer). No match → `HTTP1Worker` (same — its preamble parser reads the bytes back).
 3. **Cleartext path with `enableH2cPriorKnowledge=false`.** No peek. `HTTP1Worker` immediately.
+
+### ALPN configuration
+
+`SSLContext.getServerSocketFactory()` produces sockets whose ALPN protocol list is empty by default. ALPN is set per-`SSLSocket` via `SSLParameters.setApplicationProtocols(...)`. We add a small hook in `HTTPServerThread` (or a helper on `SecurityTools`) that, on each accepted `SSLSocket`, sets `["h2", "http/1.1"]` when `listener.enableHTTP2 == true` and `["http/1.1"]` otherwise. `SecurityTools.serverContext(cert, pk)` keeps its current signature; ALPN is a per-socket concern, not a per-context one.
 
 ### Class layout (new and renamed)
 
@@ -63,7 +67,9 @@ Under `org.lattejava.http.server.internal/`:
 - `HTTP2FrameReader` / `HTTP2FrameWriter` — frame codec.
 - `HPACKEncoder` / `HPACKDecoder` — header coding (own component, hand-written per zero-dependency policy).
 - `HTTP2RateLimits` — sliding-window counters for DoS mitigations.
+- `HTTP2InputStream` / `HTTP2OutputStream` — h2-specific concrete stream classes. These live in `org.lattejava.http.server.internal`, not `server/io/`: they're not part of the public API surface (handlers see them only as `InputStream` / `OutputStream`).
 - `ProtocolSelector` — dispatch entry point.
+- `ClientConnection` — small interface implemented by both `HTTP1Worker` and `HTTP2Connection`. Methods: `state()`, `getSocket()`, `getStartInstant()`, `getHandledRequests()`. Lets the existing `HTTPServerCleanerThread` and `ClientInfo` record stay protocol-agnostic. h2's `state()` returns the worst-case role state across reader/writer/active handlers (Read if any thread is blocked reading, Write if any is blocked writing, otherwise Process). See "Cleaner thread integration" below.
 - Small extracted utilities (`ExpectHandler`, `HandlerInvoker` — exact decomposition resolved during implementation) for the few pieces both workers share.
 
 ### Reuse boundary
@@ -100,11 +106,27 @@ Three virtual-thread roles per connection:
 - **Writer (1)** — owns the socket `OutputStream` and a bounded outbound frame queue. Pulls frames, applies connection-level + per-stream flow-control accounting, emits bytes. Handler-side output goes through this queue, never directly to the socket. Centralization gives us per-frame ordering, flow-control coordination at one site, and a single point for write-throughput accounting (existing `Throughput` instrumentation drops in).
 - **Stream handlers (1 per active stream)** — spawned by the reader on HEADERS-with-`END_HEADERS`. Run `HTTPHandler.handle(request, response)`. Read body via an `HTTP2InputStream` backed by the per-stream pipe; write via an `HTTP2OutputStream` whose target is the writer queue. (These are h2-specific concrete classes; the handler-facing types remain `InputStream`/`OutputStream` so handlers don't see the difference.) End on handler return or on RST_STREAM-induced interruption.
 
+### Stream pipe (reader → handler)
+
+Implementation: a per-stream bounded `ArrayBlockingQueue<byte[]>` whose elements are DATA payload chunks taken directly from the frame reader's payload buffer (copied off the reusable frame buffer when handed to the queue — see "Frame layer" for the buffer-ownership note). `HTTP2InputStream.read()` blocks on `queue.take()` and walks the current chunk before pulling the next. Queue capacity is tied to the per-stream receive-window: capacity in bytes never exceeds the advertised receive-window, so the queue is naturally backpressured by flow control. EOF is signalled by enqueueing a zero-length sentinel marker after the END_STREAM-bearing DATA frame is observed.
+
+We deliberately avoid `PipedInputStream` / `PipedOutputStream` — their ring-buffer + monitor-based signaling is allocation-heavy and slow under contention.
+
+### Cleaner thread integration
+
+The existing `HTTPServerCleanerThread` polls `worker.state()` on a `ClientInfo` record holding a typed `HTTPWorker`. To support both protocols, `ClientInfo` is reshaped to hold a `ClientConnection` interface (see Class layout). For h2, `state()` aggregates: Read if reader is blocked on socket read with no active handlers, Write if any thread is blocked on socket write, Process if any handler is in user code. Slow-read / slow-write detection then falls out of the existing `Throughput` flow that wraps the socket streams; the writer-thread routing is the only new piece (the writer is the sole socket-writer post-preface, so wrapping its OutputStream in `ThroughputOutputStream` covers all writes uniformly).
+
 ### Backpressure and flow control coordination
 
 The writer holds the connection-level send-window and per-stream send-windows. When a stream's handler tries to write DATA that would exceed available window, the handler's `HTTP2OutputStream.write` blocks (waits on a per-stream condition). When WINDOW_UPDATE arrives, the reader signals the relevant condition, unblocking the handler.
 
 Inbound flow control mirrors: each DATA frame consumed reduces our advertised connection-level and per-stream receive-windows. When either drops below half its initial size, the reader enqueues a WINDOW_UPDATE bringing it back to full. Simple replenish-when-half-empty strategy; matches what most servers do.
+
+### Settings retroactive window adjustment (§6.9.2)
+
+When the peer sends a SETTINGS frame that changes `INITIAL_WINDOW_SIZE`, all currently-open streams' send-windows must shift by the delta — the reader observes the change but the writer owns the windows. Coordination model: send-window state is held in `HTTP2Stream` fields guarded by a per-stream `ReentrantLock` with a `Condition`. The reader applies the delta to every active stream under its lock and signals the per-stream Condition (so any writer-thread blocked on flow-control wakes and re-evaluates). A negative resulting window is legal per spec (the stream goes "in the red" until WINDOW_UPDATEs lift it back above zero); writers must check `>= bytes_to_send`, not `> 0`.
+
+A connection-level FLOW_CONTROL_ERROR is raised only if a peer's WINDOW_UPDATE causes overflow past `2^31 - 1` — not from SETTINGS-induced negative windows.
 
 ---
 
@@ -112,9 +134,22 @@ Inbound flow control mirrors: each DATA frame consumed reduces our advertised co
 
 Frame format per RFC 9113 §4.1: 9-byte header (`length`, `type`, `flags`, `stream_id` with reserved bit) + payload up to `SETTINGS_MAX_FRAME_SIZE`.
 
-`HTTP2FrameReader.readFrame()` reads the 9-byte header, validates length against `MAX_FRAME_SIZE` (default 16384, configurable up to 16777215), reads payload into a buffer drawn from `HTTPBuffers`, and returns a typed `HTTP2Frame` record. Type-specific decoding is dispatched via a static map. Validation of malformed frames (e.g. RST_STREAM with payload length ≠ 4) emits `GOAWAY(FRAME_SIZE_ERROR)` or `RST_STREAM(PROTOCOL_ERROR)` per RFC.
+`HTTP2FrameReader.readFrame()` reads the 9-byte header, validates length against `MAX_FRAME_SIZE` (default 16384, configurable up to 16777215), reads payload into a per-connection reusable buffer held on `HTTPBuffers`, and returns a typed `HTTP2Frame` record. Type-specific decoding is dispatched via a static map. Validation of malformed frames (e.g. RST_STREAM with payload length ≠ 4) emits `GOAWAY(FRAME_SIZE_ERROR)` or `RST_STREAM(PROTOCOL_ERROR)` per RFC.
 
-`HTTP2FrameWriter.writeFrame()` does the inverse, serializing into the socket OutputStream. Frames in the writer queue are drained sequentially; the writer is the only thread that touches the socket OutputStream after the connection preface exchange.
+### Buffer ownership
+
+`HTTPBuffers` gains three additions, all per-connection (not server-wide pool):
+- `frameReadBuffer` — a single `byte[MAX_FRAME_SIZE]` reused on every `readFrame()`. Frame decoders that need to retain bytes past the call (DATA payload handed to the stream pipe, HEADERS payload pending CONTINUATION) **copy out** of this buffer before returning. This is the one mandatory copy in the data path.
+- `headerAccumulationBuffer` — a growable `byte[]` scoped to the lifetime of an in-progress HEADERS+CONTINUATION block; capped at `SETTINGS_MAX_HEADER_LIST_SIZE`. Released when END_HEADERS is observed.
+- `frameWriteBuffer` — a single `byte[9 + MAX_FRAME_SIZE]` reused on every `writeFrame()`.
+
+This pattern matches the existing `HTTPBuffers.requestBuffer()` / `responseBuffer()` shape — one allocation set per connection, cleared on connection close. No `ThreadLocal` (broken with virtual threads), no shared pool (contention).
+
+### DATA fragmentation against peer's MAX_FRAME_SIZE
+
+The peer announces its receive-side `MAX_FRAME_SIZE` in its SETTINGS. Our writer respects it: a handler `write(byte[], 0, n)` where `n` exceeds peer `MAX_FRAME_SIZE` produces `ceil(n / max)` DATA frames. Fragmentation happens in the writer thread, not the handler — the handler's view is "I wrote n bytes."
+
+`HTTP2FrameWriter.writeFrame()` does the inverse of read, serializing into the socket OutputStream. Frames in the writer queue are drained sequentially; the writer is the only thread that touches the socket OutputStream after the connection preface exchange.
 
 Connection preface handling:
 - For h2 over TLS: server sends its initial SETTINGS frame after the TLS handshake completes. Client sends its preface (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`) followed by its SETTINGS. Server receives preface (validates exact match) then continues normally.
@@ -159,6 +194,8 @@ Receiving a frame illegal in the current state is a stream or connection error p
 
 `MAX_CONCURRENT_STREAMS` (default 100, configurable) caps simultaneously-open streams. New HEADERS over the cap → `RST_STREAM(REFUSED_STREAM)`. The cap counts streams in `open`, `half-closed (local)`, and `half-closed (remote)` states.
 
+The worst-case virtual-thread count per connection is `1 (reader) + 1 (writer) + MAX_CONCURRENT_STREAMS`. With Loom this is cheap (a few KB stack per VT initially; carrier-thread pool is bounded), so 100 streams × N connections is fine in practice. We don't add a server-wide stream cap; if needed, it can be layered on later via the existing accept-time backpressure (`maxPendingSocketConnections`) or a new knob.
+
 Stream-id rules:
 - Client-initiated streams use odd ids; server-initiated even (we never initiate a stream — push is out of scope).
 - Stream ids monotonically increase. Receiving a stream-id ≤ highest-seen-from-peer is connection error PROTOCOL_ERROR.
@@ -179,6 +216,18 @@ The HPACK decoder produces an ordered list of (name, value) pairs. The HEADERS-f
 Regular headers go through the existing header collection (case-insensitive lookup means downstream code is unaffected). Multiple `Cookie` h2 headers are coalesced (semicolon-joined) per RFC 9113 §8.2.3 before exposure.
 
 The handler-facing API does not change. A handler written for HTTP/1.1 works on HTTP/2 with no modifications. `HTTPRequest.getProtocol()` returns `"HTTP/2.0"` so handlers that need to discriminate can.
+
+### Connection / keep-alive semantics on h2
+
+`HTTPRequest.isKeepAlive()` is HTTP/1.1-specific (driven by the `Connection` header). For h2 it always returns `true` — the connection is multiplexed and persistent by definition; "close after this response" doesn't exist at the per-stream level. The `Connection` response header is forbidden on h2 (RFC 9113 §8.2.2 connection-specific header rule); the h2 response path strips it before encoding rather than failing the response. Same treatment for `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, and `Proxy-Connection`. Logged at debug level so handler authors can find the strip during dev.
+
+### Transfer-Encoding: chunked interaction
+
+Forbidden in h2. Today's `HTTPOutputStream` may set `Transfer-Encoding: chunked` automatically when content-length is unknown — the h2 emission path must not propagate it. Strategy: the h2 response path uses a different writer (`HTTP2OutputStream`), which doesn't go through `HTTPOutputStream`'s chunked encoder at all — DATA frames *are* the chunking. The h1.1-specific header-mutation that adds `Transfer-Encoding` lives behind a check for the protocol; on h2, suppressed. Handler-set `Transfer-Encoding: chunked` is also stripped (treated like the connection-specific headers above).
+
+### Expect: 100-continue over h2
+
+RFC 9110 §10.1.1 still applies, but the wire shape is different. h2 servers signal 100-Continue by emitting an interim HEADERS frame with `:status 100` (no `END_STREAM`), then later the final HEADERS frame with the real status. The `Expect: 100-continue` plumbing in the shared above-the-line code (`ExpectValidator`, `handleExpectContinue`) doesn't change; the h2 response path renders a `100` decision as an interim HEADERS frame instead of an HTTP/1.1 status line. Implementation point: `HTTPResponse` currently mutates state to write the status line directly; we add a small protocol-aware indirection (a `ResponseEmitter` collaborator) so the same call site produces an HTTP/1.1 status line on h1 and a HEADERS-with-`:status 100` frame on h2.
 
 ---
 
@@ -219,7 +268,16 @@ Already parsed by `ChunkedInputStream` (today they are parse-and-discard). Modif
 
 ### Trailer-name restrictions
 
-RFC 9110 §6.5.2 forbids trailer fields that affect framing (`Transfer-Encoding`, `Content-Length`), routing (`Host`), authentication (`Authorization`), payload processing (`Content-Encoding`), caching directives, and connection management. We enforce the deny-list at API entry (`setTrailer`/`addTrailer` throws `IllegalArgumentException` for forbidden names).
+RFC 9110 §6.5.2 forbids any trailer field that affects message framing, routing, authentication, request modifiers, response control, caching, payload processing, or connection management. We enforce the deny-list at API entry (`setTrailer`/`addTrailer` throws `IllegalArgumentException` for forbidden names). Concrete list (case-insensitive):
+
+- Framing: `Transfer-Encoding`, `Content-Length`, `Content-Type`, `Content-Range`, `Content-Encoding`
+- Routing: `Host`, `:authority`, `:scheme`, `:method`, `:path`, `:status`
+- Request modifiers: `Cache-Control`, `Expect`, `Max-Forwards`, `Pragma`, `Range`, `TE`
+- Authentication: `WWW-Authenticate`, `Authorization`, `Proxy-Authenticate`, `Proxy-Authorization`, `Set-Cookie`, `Cookie`
+- Response control: `Age`, `Expires`, `Date`, `Location`, `Retry-After`, `Vary`, `Warning`
+- Connection management: `Connection`, `Keep-Alive`, `Proxy-Connection`, `Upgrade`, `Trailer`
+
+Enforced as a constant `Set<String>` on `HTTPValues` (lowercased lookup). The deny-list is shared between request-trailer-receive and response-trailer-set so both directions reject the same names.
 
 ---
 
@@ -288,6 +346,7 @@ This hook is generic. h2c-Upgrade is the first consumer; future WebSockets work 
 | `withHTTP2MaxHeaderListSize(int)` | 8192 | §6.5.2 — `SETTINGS_MAX_HEADER_LIST_SIZE` |
 | `withHTTP2RateLimits(HTTP2RateLimits)` | (sensible defaults — see Security) | DoS counters bundle |
 | `withHTTP2KeepAlivePingInterval(Duration)` | disabled | Optional server-initiated PING |
+| `withHTTP2SettingsAckTimeout(Duration)` | 10 s | RFC 9113 §6.5.3 — peer must ACK our SETTINGS within this; otherwise `GOAWAY(SETTINGS_TIMEOUT)`. Matches Jetty's default. |
 
 `SETTINGS_ENABLE_PUSH` is fixed at `0` and not configurable (we don't implement push).
 
@@ -424,8 +483,9 @@ src/main/java/org/lattejava/http/server/internal/HPACKDecoder.java
 src/main/java/org/lattejava/http/server/internal/HPACKDynamicTable.java
 src/main/java/org/lattejava/http/server/internal/HPACKHuffman.java
 src/main/java/org/lattejava/http/server/internal/ProtocolSelector.java
-src/main/java/org/lattejava/http/server/io/HTTP2InputStream.java                    // h2-specific request-body reader (backed by per-stream pipe)
-src/main/java/org/lattejava/http/server/io/HTTP2OutputStream.java                   // h2-specific response writer (enqueues DATA frames to writer)
+src/main/java/org/lattejava/http/server/internal/HTTP2InputStream.java              // h2-specific request-body reader (backed by per-stream pipe). Internal — handlers see InputStream.
+src/main/java/org/lattejava/http/server/internal/HTTP2OutputStream.java             // h2-specific response writer (enqueues DATA frames to writer). Internal — handlers see OutputStream.
+src/main/java/org/lattejava/http/server/internal/ClientConnection.java              // protocol-agnostic interface for the cleaner thread
 src/main/java/org/lattejava/http/server/ProtocolSwitchHandler.java                  // public — handler-visible
 
 src/test/java/org/lattejava/http/tests/server/HTTP2BasicTest.java
@@ -456,8 +516,8 @@ src/main/java/org/lattejava/http/server/HTTPListenerConfiguration.java   // add 
 src/main/java/org/lattejava/http/server/HTTPServerConfiguration.java     // add HTTP/2 knobs (settings, rate limits, ping interval)
 src/main/java/org/lattejava/http/server/HTTPRequest.java                 // request trailer accessors; getProtocol() returns HTTP/2.0 for h2
 src/main/java/org/lattejava/http/server/HTTPResponse.java                // response trailer accessors; switchProtocols(...)
-src/main/java/org/lattejava/http/server/internal/HTTPServerThread.java   // dispatch through ProtocolSelector instead of constructing HTTPWorker directly
-src/main/java/org/lattejava/http/server/internal/HTTPBuffers.java        // possibly: frame-buffer pool
+src/main/java/org/lattejava/http/server/internal/HTTPServerThread.java   // dispatch through ProtocolSelector instead of constructing HTTPWorker directly; ALPN setup on accepted SSLSocket; ClientInfo holds ClientConnection
+src/main/java/org/lattejava/http/server/internal/HTTPBuffers.java        // add frameReadBuffer / frameWriteBuffer / headerAccumulationBuffer (per-connection, reused per frame)
 src/main/java/org/lattejava/http/server/io/HTTPInputStream.java          // h1.1 trailer plumbing — surface populated trailers from ChunkedInputStream
 src/main/java/org/lattejava/http/server/io/HTTPOutputStream.java         // h1.1 trailer emission; auto-set Trailer header
 src/main/java/org/lattejava/http/io/ChunkedInputStream.java              // populate request trailer map on terminator
@@ -491,3 +551,4 @@ None blocking. Review feedback welcome on:
 - Default for `withHTTP2InitialWindowSize` — RFC default (65535) vs. throughput-tuned default (e.g. 1 MiB matching Jetty).
 - Threshold values for DoS rate counters — we'll calibrate after first running implementation; the table in Security is a starting point, not a final SLA.
 - Class decomposition specifics in `HTTP2Connection` — likely extract a `HTTP2StreamRegistry` collaborator if the connection class grows past ~600 lines.
+- `ResponseEmitter` indirection for protocol-aware status-line / interim-response writing — the design assumes a small collaborator; if the existing `HTTPResponse` mutation is too tangled to refactor cleanly, we may end up with two `writePreamble` paths instead. Decide during implementation, not now.

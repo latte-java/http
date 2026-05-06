@@ -29,8 +29,10 @@ Class layout in `org.lattejava.http.server.internal`:
 - `HTTP2Connection` — connection-level state (settings, send/receive windows, stream registry, GOAWAY).
 - `HTTP2Stream` — per-stream state machine, input pipe, output queue.
 - `HTTP2FrameReader` / `HTTP2FrameWriter` — frame codec.
+- `HTTP2InputStream` / `HTTP2OutputStream` — h2-specific stream classes; not exported (handlers see only `InputStream`/`OutputStream`).
 - `HPACKEncoder` / `HPACKDecoder` / `HPACKDynamicTable` / `HPACKHuffman` — RFC 7541.
 - `HTTP2RateLimits` — sliding-window counters for DoS mitigations.
+- `ClientConnection` — interface implemented by both `HTTP1Worker` and `HTTP2Connection` so the cleaner thread is protocol-agnostic.
 - `ProtocolSelector` — dispatch.
 
 ---
@@ -120,8 +122,10 @@ Class layout in `org.lattejava.http.server.internal`:
 | `:method`, `:scheme`, `:path`, `:authority` required | ❌ | All four must be present and exactly once. Validation order: pseudo-headers must precede regular headers. |
 | Connection-specific headers forbidden (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) | ❌ | Stream error PROTOCOL_ERROR. |
 | Uppercase in header name forbidden | ❌ | Stream error PROTOCOL_ERROR. |
-| `Cookie` coalescing across multiple headers | ❌ | Per RFC 9113 §8.2.3, h2 splits Cookie across multiple headers; we coalesce with `; ` before exposure. |
+| `Cookie` coalescing across multiple headers | ❌ | Per RFC 9113 §8.2.3, h2 splits Cookie across multiple headers; we coalesce with `; ` before exposure to the existing `HTTPRequest.getCookies()` parser. |
 | `getProtocol()` returns `"HTTP/2.0"` | ❌ | For handlers that need to discriminate. |
+| `isKeepAlive()` returns `true` on h2 | ❌ | Multiplexed h2 connections are persistent by definition; the per-request close concept doesn't apply. |
+| Strip h1.1-only response headers (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) on h2 emit | ❌ | Connection-specific headers forbidden on h2 (RFC 9113 §8.2.2). Stripped (logged at debug), not error-failed. |
 
 ---
 
@@ -134,7 +138,7 @@ Class layout in `org.lattejava.http.server.internal`:
 | Trailers-only response (no body) | ❌ | gRPC failed-RPC pattern: HEADERS without END_STREAM (response headers) followed by HEADERS with END_STREAM (trailers). |
 | Request trailers — h2 | ❌ | `HTTPRequest.getTrailer/getTrailers/getTrailerMap/hasTrailers`. Available after request input EOF. |
 | Request trailers — h1.1 | ❌ | Same API. Populated from `ChunkedInputStream` trailer parse. |
-| Trailer-name deny-list (RFC 9110 §6.5.2) | ❌ | `setTrailer`/`addTrailer` throws `IllegalArgumentException` for forbidden names (Transfer-Encoding, Content-Length, Host, Authorization, Content-Encoding, Cache-Control, etc.). |
+| Trailer-name deny-list (RFC 9110 §6.5.2) | ❌ | `setTrailer`/`addTrailer` throws `IllegalArgumentException` for forbidden names. Full enumerated list lives on `HTTPValues.ForbiddenTrailers` and covers framing, routing, request modifiers, authentication, response control, and connection management headers — see the dated design doc for the exact set. |
 
 ---
 
@@ -150,6 +154,7 @@ Initial server settings sent in the first SETTINGS frame after the connection pr
 | `SETTINGS_INITIAL_WINDOW_SIZE` | 65535 | yes | `withHTTP2InitialWindowSize(int)` |
 | `SETTINGS_MAX_FRAME_SIZE` | 16384 | yes | `withHTTP2MaxFrameSize(int)` (max 16777215) |
 | `SETTINGS_MAX_HEADER_LIST_SIZE` | 8192 | yes | `withHTTP2MaxHeaderListSize(int)` |
+| `SETTINGS_TIMEOUT` (peer ACK deadline) | 10 s | yes | `withHTTP2SettingsAckTimeout(Duration)` — RFC 9113 §6.5.3; non-ACK → `GOAWAY(SETTINGS_TIMEOUT)`. |
 
 Inbound SETTINGS rate-limited (DoS protection); see §10.
 
@@ -222,6 +227,7 @@ All standard error codes implemented and emitted at the appropriate trigger:
 | `withHTTP2MaxHeaderListSize(int)` | 8192 | §6.5.2 |
 | `withHTTP2RateLimits(HTTP2RateLimits)` | sensible defaults (see §10) | DoS counter bundle |
 | `withHTTP2KeepAlivePingInterval(Duration)` | disabled | Optional server-initiated PING |
+| `withHTTP2SettingsAckTimeout(Duration)` | 10 s | §6.5.3 — peer ACK deadline |
 
 `SETTINGS_ENABLE_PUSH` is fixed at 0 (push out of scope).
 
