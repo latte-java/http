@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
+ */
 module org.lattejava.http {
   exports org.lattejava.http;
   exports org.lattejava.http.io;

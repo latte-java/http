@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
+ */
 module org.lattejava.http.tests {
   requires jackson5;
   requires java.net.http;
