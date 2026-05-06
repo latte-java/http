@@ -51,13 +51,13 @@ Each entry should cite the relevant code and (where applicable) tests.
 | Reject multiple Transfer-Encoding headers | ✅ | `HTTPWorker.java:406-412`. |
 | Reject non-`chunked` TE values | ✅ | `HTTPWorker.java:414-421`. |
 | Chunk extensions (`5;name=value`) | ✅ | `RequestPreambleConformanceTest.chunk_extensions_parsed_and_discarded` |
-| Request trailers | ⚠️ | `ChunkedInputStream` parses-and-discards. Not exposed to handlers. RFC 9110 §6.5 allows MAY; conformant. |
+| Request trailers | ✅ | `RequestTrailersTest`, `HTTPRequestTrailersAPITest` |
 | `Content-Length` response | ✅ | Set by handler or auto by output stream. |
 | `Transfer-Encoding: chunked` response | ✅ | `ChunkedOutputStream`. Auto-applied when handler doesn't set CL. |
 | Strip CL/TE on 204/304 | ✅ | `HTTPOutputStream.java:212-215`. |
 | TE wins over CL on response | ✅ | `HTTPOutputStream.java:217-221`. |
-| Response trailers (sending) | ❌ | No API. RFC 9110 §6.5 makes this MAY-support — conformant to skip, but limits handler flexibility. |
-| `TE: trailers` request signaling | ❌ | Not honored. Required for a server that emits trailers. |
+| Response trailers (sending) | ✅ | `ResponseTrailersTest`, `HTTPResponseTrailersAPITest` |
+| `TE: trailers` request signaling | ✅ | `ResponseTrailersTest.trailers_dropped_without_te_trailers` |
 
 ---
 
@@ -73,7 +73,7 @@ Each entry should cite the relevant code and (where applicable) tests.
 | Keep-alive timeout | ✅ | `HTTPServerConfiguration.withKeepAliveTimeoutDuration`. |
 | Max requests per connection | ✅ | `HTTPServerConfiguration.withMaxRequestsPerConnection`. |
 | HTTP pipelining | ⚠️ | Server processes one request at a time per connection. RFC says SHOULD support, but most clients abandoned pipelining; low practical impact. |
-| `Upgrade` header / 101 Switching Protocols | ❌ | No handler hook to take over the socket. Blocks WebSocket, h2c, and any Upgrade-based protocol. |
+| `Upgrade` header / 101 Switching Protocols | ✅ | `ProtocolSwitchTest` |
 
 ---
 
@@ -204,9 +204,10 @@ Items grouped by effort and value:
 Remaining: absolute-form and authority-form request-target tests (§3).
 
 **Medium-effort features:**
-- Response trailers API + `TE: trailers` honoring
 - Range requests / 206 / `Accept-Ranges`
-- `Upgrade` / 101 hook (prerequisite for WebSockets, h2c)
+
+(Response trailers API + `TE: trailers` honoring closed by Plan B 2026-05-05.
+Upgrade / 101 hook closed by Plan B 2026-05-05.)
 
 **Out of scope for /1.1:**
 - WebSockets (RFC 6455) — separate spec, builds on Upgrade
