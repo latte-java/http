@@ -53,6 +53,8 @@ public class HTTPInputStream extends InputStream {
 
   private int bytesRead;
 
+  private ChunkedInputStream chunkedDelegate;
+
   private boolean closed;
 
   private InputStream delegate;
@@ -60,6 +62,8 @@ public class HTTPInputStream extends InputStream {
   private boolean drained;
 
   private boolean initialized;
+
+  private boolean trailersCopied;
 
   public HTTPInputStream(HTTPServerConfiguration configuration, HTTPRequest request, PushbackInputStream pushbackInputStream,
                          int maximumContentLength) {
@@ -151,6 +155,15 @@ public class HTTPInputStream extends InputStream {
       throw new ContentTooLargeException(maximumContentLength, detailedMessage);
     }
 
+    if (read == -1 && !trailersCopied && chunkedDelegate != null) {
+      trailersCopied = true;
+      for (var entry : chunkedDelegate.getTrailers().entrySet()) {
+        for (String value : entry.getValue()) {
+          request.addTrailer(entry.getKey(), value);
+        }
+      }
+    }
+
     return read;
   }
 
@@ -165,7 +178,9 @@ public class HTTPInputStream extends InputStream {
       // the request we would have removed Content-Length during validation to remove ambiguity. See HTTPWorker.validatePreamble.
       if (request.isChunked()) {
         logger.trace("Client indicated it was sending an entity-body in the request. Handling body using chunked encoding.");
-        delegate = new ChunkedInputStream(pushbackInputStream, chunkedBufferSize, maxRequestChunkSize);
+        ChunkedInputStream chunked = new ChunkedInputStream(pushbackInputStream, chunkedBufferSize, maxRequestChunkSize);
+        chunkedDelegate = chunked;
+        delegate = chunked;
         if (instrumenter != null) {
           instrumenter.chunkedRequest();
         }
