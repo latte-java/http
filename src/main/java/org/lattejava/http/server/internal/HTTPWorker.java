@@ -101,7 +101,7 @@ public class HTTPWorker implements Runnable {
         var throughputOutputStream = new ThroughputOutputStream(socket.getOutputStream(), throughput);
         response = new HTTPResponse();
 
-        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> state = State.Write);
+        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> state = State.Write);
         response.setOutputStream(outputStream);
 
         // Not this line of code will block

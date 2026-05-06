@@ -28,34 +28,26 @@ import org.lattejava.http.server.internal.*;
  */
 public class HTTPOutputStream extends OutputStream {
   private final List<String> acceptEncodings;
-
   private final HTTPBuffers buffers;
-
   private final Instrumenter instrumenter;
-
+  private final HTTPRequest request;
   private final HTTPResponse response;
-
   private final ServerToSocketOutputStream serverToSocket;
-
   private boolean bodySuppressed;
-
   private boolean committed;
-
   private boolean compress;
-
   private OutputStream delegate;
-
   private boolean suppressBody;
-
   private boolean wroteOneByteToClient;
 
-  public HTTPOutputStream(HTTPServerConfiguration configuration, List<String> acceptEncodings, HTTPResponse response, OutputStream delegate,
+  public HTTPOutputStream(HTTPServerConfiguration configuration, HTTPRequest request, List<String> acceptEncodings, HTTPResponse response, OutputStream delegate,
                           HTTPBuffers buffers, Runnable writeObserver) {
     this.acceptEncodings = acceptEncodings;
-    this.response = response;
     this.buffers = buffers;
     this.compress = configuration.isCompressByDefault();
     this.instrumenter = configuration.getInstrumenter();
+    this.request = request;
+    this.response = response;
     this.serverToSocket = new ServerToSocketOutputStream(delegate, buffers, writeObserver);
     this.delegate = serverToSocket;
   }
@@ -256,7 +248,20 @@ public class HTTPOutputStream extends OutputStream {
           }
         }
 
-        if (handlerSetTransferEncoding) {
+        // If the handler set response trailers, force chunked framing (only chunked supports trailers in HTTP/1.1).
+        if (response.hasTrailers()) {
+          if (response.getContentLength() != null) {
+            response.removeHeader(HTTPValues.Headers.ContentLength);
+          }
+          response.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
+          chunked = true;
+          // Auto-populate the Trailer response header listing the trailer field names per RFC 9110 §6.5.
+          // Gate on TE: trailers — clients that did not signal acceptance must not receive trailers.
+          if (request != null && request.acceptsTrailers()) {
+            String list = String.join(", ", response.getTrailers().keySet());
+            response.setHeader(HTTPValues.Headers.Trailer, list);
+          }
+        } else if (handlerSetTransferEncoding) {
           // Handler asked for chunked framing explicitly. Wrap the delegate so the bytes are actually chunk-framed on the wire.
           chunked = true;
         } else if (response.getContentLength() == null) {
@@ -276,7 +281,11 @@ public class HTTPOutputStream extends OutputStream {
 
     // Install body delegate(s).
     if (chunked) {
-      delegate = new ChunkedOutputStream(delegate, buffers.chunkBuffer(), buffers.chuckedOutputStream());
+      ChunkedOutputStream cos = new ChunkedOutputStream(delegate, buffers.chunkBuffer(), buffers.chuckedOutputStream());
+      if (response.hasTrailers() && request != null && request.acceptsTrailers()) {
+        cos.setTrailers(response.getTrailers());
+      }
+      delegate = cos;
       if (instrumenter != null) {
         instrumenter.chunkedResponse();
       }

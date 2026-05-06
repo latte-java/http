@@ -36,6 +36,17 @@ public abstract class BaseSocketTest extends BaseTest {
     sendAndCapture(request, chunkedExtension, maxRequestHeaderSize, handler, socket -> assertHTTPResponseEquals(socket, response));
   }
 
+  private void assertResponseDoesNotContain(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler, String substring)
+      throws Exception {
+    sendAndCapture(request, chunkedExtension, maxRequestHeaderSize, handler, socket -> {
+      var is = socket.getInputStream();
+      byte[] buffer = new byte[8192];
+      int read = is.read(buffer);
+      var actualResponse = new String(buffer, 0, read, StandardCharsets.UTF_8);
+      assertFalse(actualResponse.contains(substring), "Expected response to NOT contain [" + substring + "] but got:\n" + actualResponse);
+    });
+  }
+
   private void assertResponseSubstring(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler, String substring)
       throws Exception {
     sendAndCapture(request, chunkedExtension, maxRequestHeaderSize, handler, socket -> {
@@ -131,8 +142,14 @@ public abstract class BaseSocketTest extends BaseTest {
       assertResponse(request, chunkedExtension, maxRequestHeaderSize, handler, response);
     }
 
-    public void expectResponseSubstring(String substring) throws Exception {
+    public Builder expectResponseDoesNotContain(String substring) throws Exception {
+      assertResponseDoesNotContain(request, chunkedExtension, maxRequestHeaderSize, handler, substring);
+      return this;
+    }
+
+    public Builder expectResponseSubstring(String substring) throws Exception {
       assertResponseSubstring(request, chunkedExtension, maxRequestHeaderSize, handler, substring);
+      return this;
     }
 
     public Builder withChunkedExtension(String extension) {
