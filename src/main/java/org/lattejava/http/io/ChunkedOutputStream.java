@@ -33,6 +33,7 @@ public class ChunkedOutputStream extends OutputStream {
   private int bufferIndex;
 
   private boolean closed;
+  private Map<String, List<String>> trailers;
 
   public ChunkedOutputStream(OutputStream delegate, byte[] buffer, FastByteArrayOutputStream chuckOutputStream) {
     this.delegate = delegate;
@@ -44,7 +45,18 @@ public class ChunkedOutputStream extends OutputStream {
   public void close() throws IOException {
     if (!closed) {
       flush();
-      delegate.write(HTTPValues.ControlBytes.ChunkedTerminator);
+      if (trailers == null || trailers.isEmpty()) {
+        delegate.write(HTTPValues.ControlBytes.ChunkedTerminator);
+      } else {
+        delegate.write(new byte[]{'0', '\r', '\n'});
+        for (var entry : trailers.entrySet()) {
+          for (String value : entry.getValue()) {
+            String line = entry.getKey() + ": " + value + "\r\n";
+            delegate.write(line.getBytes(StandardCharsets.US_ASCII));
+          }
+        }
+        delegate.write(HTTPValues.ControlBytes.CRLF);
+      }
       delegate.flush();
       delegate.close();
     }
@@ -69,6 +81,10 @@ public class ChunkedOutputStream extends OutputStream {
     }
 
     delegate.flush();
+  }
+
+  public void setTrailers(Map<String, List<String>> trailers) {
+    this.trailers = trailers;
   }
 
   @Override
