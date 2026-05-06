@@ -23,7 +23,7 @@ Each entry should cite the relevant code and (where applicable) tests.
 | PUT | ✅ | Routed to handler. |
 | DELETE | ✅ | Routed to handler. |
 | PATCH | ✅ | Routed to handler. |
-| OPTIONS | ⚠️ | Accepted by parser; routed to handler. No automatic `OPTIONS *` (asterisk-form) test. |
+| OPTIONS | ✅ | `RequestPreambleConformanceTest.options_asterisk_form_accepted` |
 | TRACE | 🚫 | Registered as a method but no built-in implementation. RFC 9110 §9.3.8 says servers SHOULD support; we leave it to the handler (or refuse). Per modern guidance often disabled for security. |
 | CONNECT | 🚫 | Proxy-only. Not implemented; this is not a proxy. |
 
@@ -36,7 +36,7 @@ Each entry should cite the relevant code and (where applicable) tests.
 | origin-form (`/path?query`) | ✅ | Primary form; covered by most tests. |
 | absolute-form (`http://host/path`) | ⚠️ | Parser accepts (any printable ASCII passes `HTTPTools.isURICharacter`), but no tests confirm the handler sees the expected path. Required for proxy-style requests. |
 | authority-form (`host:port`) | ⚠️ | Used with CONNECT only. Parser accepts; no tests. |
-| asterisk-form (`*`) | ⚠️ | Used with `OPTIONS *`. Parser accepts; no tests. |
+| asterisk-form (`*`) | ✅ | `RequestPreambleConformanceTest.options_asterisk_form_accepted` |
 
 ---
 
@@ -50,7 +50,7 @@ Each entry should cite the relevant code and (where applicable) tests.
 | Reject multiple Content-Length headers | ✅ | `HTTPWorker.java:439-446`. |
 | Reject multiple Transfer-Encoding headers | ✅ | `HTTPWorker.java:406-412`. |
 | Reject non-`chunked` TE values | ✅ | `HTTPWorker.java:414-421`. |
-| Chunk extensions (`5;name=value`) | ⚠️ | Parsed and ignored. Need explicit test. |
+| Chunk extensions (`5;name=value`) | ✅ | `RequestPreambleConformanceTest.chunk_extensions_parsed_and_discarded` |
 | Request trailers | ⚠️ | `ChunkedInputStream` parses-and-discards. Not exposed to handlers. RFC 9110 §6.5 allows MAY; conformant. |
 | `Content-Length` response | ✅ | Set by handler or auto by output stream. |
 | `Transfer-Encoding: chunked` response | ✅ | `ChunkedOutputStream`. Auto-applied when handler doesn't set CL. |
@@ -95,14 +95,14 @@ Each entry should cite the relevant code and (where applicable) tests.
 |---|---|---|
 | `Host` header required | ✅ | `HTTPWorker.java:383-388`. |
 | Reject duplicate `Host` headers | ✅ | `HTTPWorker.java:390-397`. |
-| Empty `Host` value handling | ⚠️ | Untested — not clear if `Host:` (empty) vs missing differ. |
+| Empty `Host` value handling | ✅ | Rejected with 400. `RequestPreambleConformanceTest.empty_host_value_rejected` |
 | Protocol version `HTTP/1.0` and `HTTP/1.1` accepted | ✅ | `HTTPWorker.java:374-381`. |
 | `505 HTTP Version Not Supported` for other versions | ✅ | Same. |
 | Reject control characters in header names | ✅ | `BareLineFeedHeaderTest.control_characters_in_header_name`. |
 | Reject bare LF as line terminator | ✅ | `BareLineFeedHeaderTest`. |
-| Reject bare CR | ⚠️ | Need explicit test. |
-| Reject whitespace before `:` (`Foo : bar`) | ⚠️ | RFC 9112 §5.1 — must reject. Need test. |
-| Reject obs-fold (line-folded headers) | ⚠️ | Need test. |
+| Reject bare CR | ✅ | `RequestPreambleConformanceTest.bare_cr_in_header_value_rejected` |
+| Reject whitespace before `:` (`Foo : bar`) | ✅ | `RequestPreambleConformanceTest.whitespace_before_colon_rejected` |
+| Reject obs-fold (line-folded headers) | ✅ | `RequestPreambleConformanceTest.obs_fold_rejected` |
 | Reject invalid characters in field-value | ✅ | `HTTPTools.isValueCharacter` excludes bare CR/LF; obs-text accepted as legacy compatibility. |
 | Maximum header size | ✅ | `withMaxRequestHeaderSize`. |
 
@@ -139,7 +139,7 @@ Each entry should cite the relevant code and (where applicable) tests.
 | `Expect: 100-continue` | ✅ | `HTTPWorker.java:146-160`, `ExpectValidator`. |
 | Custom validator hook | ✅ | `HTTPServerConfiguration.withExpectValidator`. |
 | `417 Expectation Failed` path | ✅ | `ExpectTest`. |
-| Reject other Expect values | ⚠️ | RFC 9110 §10.1.1: server MUST respond 417 to any expectation it does not support. We currently ignore unknown Expect values silently; should probably 417. |
+| Reject other Expect values | ✅ | RFC 9110 §10.1.1. `ExpectTest.expect_other_value_returns_417` |
 
 ---
 
