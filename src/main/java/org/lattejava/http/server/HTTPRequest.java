@@ -322,7 +322,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     if (trailers == null) {
       trailers = new HashMap<>();
     }
-    trailers.computeIfAbsent(name.toLowerCase(), k -> new ArrayList<>()).add(value);
+    trailers.computeIfAbsent(name.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(value);
   }
 
   public void addURLParameter(String name, String value) {
@@ -735,7 +735,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     if (trailers == null) {
       return null;
     }
-    List<String> values = trailers.get(name.toLowerCase());
+    List<String> values = trailers.get(name.toLowerCase(Locale.ROOT));
     return (values == null || values.isEmpty()) ? null : values.getFirst();
   }
 
@@ -747,7 +747,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     if (trailers == null) {
       return List.of();
     }
-    return trailers.getOrDefault(name.toLowerCase(), List.of());
+    return trailers.getOrDefault(name.toLowerCase(Locale.ROOT), List.of());
   }
 
   public String getTransferEncoding() {
