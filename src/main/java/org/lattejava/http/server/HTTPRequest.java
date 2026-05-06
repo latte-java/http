@@ -231,6 +231,24 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
     return result;
   }
 
+  /**
+   * @return true if the client signaled {@code TE: trailers} per RFC 9110 §10.1.4 — trailer fields will be honored on the response.
+   */
+  public boolean acceptsTrailers() {
+    String te = getHeader(HTTPValues.Headers.TE);
+    if (te == null) {
+      return false;
+    }
+
+    for (String token : te.split(",")) {
+      if (token.trim().equalsIgnoreCase("trailers")) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   public void addAcceptEncoding(String encoding) {
     this.acceptEncodings.add(encoding);
   }
