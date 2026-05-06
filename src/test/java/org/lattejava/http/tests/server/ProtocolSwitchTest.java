@@ -60,4 +60,18 @@ public class ProtocolSwitchTest extends BaseTest {
 
     assertTrue(handlerInvoked.get(), "ProtocolSwitchHandler must run");
   }
+
+  @Test
+  public void rejects_connection_header_in_additional_headers() {
+    HTTPResponse res = new HTTPResponse();
+    expectThrows(IllegalArgumentException.class, () ->
+        res.switchProtocols("test-proto", Map.of("Connection", "keep-alive"), socket -> {}));
+  }
+
+  @Test
+  public void rejects_upgrade_header_in_additional_headers() {
+    HTTPResponse res = new HTTPResponse();
+    expectThrows(IllegalArgumentException.class, () ->
+        res.switchProtocols("test-proto", Map.of("Upgrade", "other-proto"), socket -> {}));
+  }
 }

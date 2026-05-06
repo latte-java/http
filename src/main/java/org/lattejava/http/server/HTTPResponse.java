@@ -39,9 +39,7 @@ public class HTTPResponse {
   private String statusMessage;
 
   private ProtocolSwitchHandler switchProtocolsHandler;
-
   private Map<String, String> switchProtocolsHeaders;
-
   private String switchProtocolsTarget;
 
   private Map<String, List<String>> trailers;
@@ -381,6 +379,13 @@ public class HTTPResponse {
     }
     if (handler == null) {
       throw new IllegalArgumentException("Handler must not be null");
+    }
+    if (additionalHeaders != null) {
+      for (String name : additionalHeaders.keySet()) {
+        if (name.equalsIgnoreCase("Connection") || name.equalsIgnoreCase("Upgrade")) {
+          throw new IllegalArgumentException("Header [" + name + "] is set automatically by switchProtocols and must not appear in additionalHeaders");
+        }
+      }
     }
     this.switchProtocolsTarget = protocol;
     this.switchProtocolsHeaders = additionalHeaders;
