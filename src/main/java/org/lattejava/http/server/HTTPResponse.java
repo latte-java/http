@@ -38,6 +38,8 @@ public class HTTPResponse {
 
   private String statusMessage;
 
+  private Map<String, List<String>> trailers;
+
   private Writer writer;
 
   public void addCookie(Cookie cookie) {
@@ -63,6 +65,14 @@ public class HTTPResponse {
     }
 
     headers.computeIfAbsent(name.toLowerCase(Locale.ROOT), key -> new ArrayList<>()).add(value);
+  }
+
+  public void addTrailer(String name, String value) {
+    rejectIfForbiddenTrailer(name);
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    trailers.computeIfAbsent(name.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(value);
   }
 
   public void clearHeaders() {
@@ -196,6 +206,10 @@ public class HTTPResponse {
     this.statusMessage = statusMessage;
   }
 
+  public Map<String, List<String>> getTrailers() {
+    return trailers == null ? Map.of() : trailers;
+  }
+
   public Writer getWriter() {
     Charset charset = getCharset();
     if (writer == null) {
@@ -203,6 +217,10 @@ public class HTTPResponse {
     }
 
     return writer;
+  }
+
+  public boolean hasTrailers() {
+    return trailers != null && !trailers.isEmpty();
   }
 
   /**
@@ -316,11 +334,27 @@ public class HTTPResponse {
     headers.put(name.toLowerCase(Locale.ROOT), new ArrayList<>(List.of(value)));
   }
 
+  public void setTrailer(String name, String value) {
+    rejectIfForbiddenTrailer(name);
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    List<String> list = new ArrayList<>(1);
+    list.add(value);
+    trailers.put(name.toLowerCase(Locale.ROOT), list);
+  }
+
   /**
    * @return true if compression has been requested and as far as we know, we will.
    */
   public boolean willCompress() {
     return outputStream.willCompress();
+  }
+
+  private void rejectIfForbiddenTrailer(String name) {
+    if (HTTPValues.ForbiddenTrailers.Names.contains(name.toLowerCase(Locale.ROOT))) {
+      throw new IllegalArgumentException("Header name [" + name + "] is forbidden as a trailer per RFC 9110 §6.5.2");
+    }
   }
 }
 
