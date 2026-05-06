@@ -94,19 +94,7 @@ git commit -m "Add HTTPValues.ForbiddenTrailers deny-list per RFC 9110 §6.5.2"
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
- * either express or implied. See the License for the specific
- * language governing permissions and limitations under the License.
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server;
 
@@ -153,7 +141,7 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPRequestTETest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -249,7 +237,7 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPRequestTrailersAPITest
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -363,7 +351,7 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPResponseTrailersAPITes
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -484,7 +472,7 @@ git commit -m "Add HTTPResponse trailer accessors with RFC 9110 deny-list"
 
 ## Task 6: Capture trailer text in `ChunkedInputStream` and expose parsed map
 
-The existing state machine has `Trailer`, `TrailerCR`, `TrailerLF` states that loop over trailer text but discard the bytes. We add a `StringBuilder` accumulator (one per stream lifetime) and parse on `Complete`.
+After the `0\r\n` chunk-size line, RFC 9112 §7.1.2 says trailer-fields are formatted exactly like request headers — `name: value\r\n` lines until a bare `\r\n`. Rather than instrument the existing `Trailer`/`TrailerCR`/`TrailerLF` state machine to capture bytes as they fly past (fragile under future state-machine refactors), drain the trailer section directly via a small line-based reader once the zero-length chunk is observed. The state machine retains its job of bounding the chunked body; trailer parsing becomes a separate, isolated routine.
 
 **Files:**
 - Modify: `src/main/java/org/lattejava/http/io/ChunkedInputStream.java`
@@ -495,7 +483,7 @@ Create `src/test/java/org/lattejava/http/tests/io/ChunkedInputStreamTrailersTest
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.io;
 
@@ -539,11 +527,9 @@ Expected: COMPILATION FAILURE — `getTrailers()` doesn't exist.
 
 - [ ] **Step 3: Modify `ChunkedInputStream`**
 
-Add a private accumulator field and a public accessor:
+Add a private trailers field and accessor:
 
 ```java
-private final StringBuilder trailerBuffer = new StringBuilder();
-
 private Map<String, List<String>> trailers;
 
 public Map<String, List<String>> getTrailers() {
@@ -551,51 +537,74 @@ public Map<String, List<String>> getTrailers() {
 }
 ```
 
-In the `read(byte[], int, int)` loop, when a byte is consumed by the state machine and the *previous* state was `Trailer`, `TrailerCR`, `TrailerLF`, or `Chunk` (where length==0 and we see a non-CR byte transitioning to `Trailer`), append the byte to `trailerBuffer`. Concretely, after `state.next(...)` returns `nextState`, add:
+In the `read` method, after the chunk-size loop reads `0` (the terminator chunk size) and just before transitioning the state machine into the trailer-handling states, instead invoke a dedicated parser and short-circuit to `Complete`. Concretely, find the existing branch that handles `chunkSize == 0`:
 
 ```java
-if (state == ChunkedBodyState.Chunk && nextState == ChunkedBodyState.Trailer) {
-  trailerBuffer.append((char) (buffer[bufferIndex] & 0xFF));
-} else if (state == ChunkedBodyState.Trailer || state == ChunkedBodyState.TrailerCR || state == ChunkedBodyState.TrailerLF) {
-  trailerBuffer.append((char) (buffer[bufferIndex] & 0xFF));
+if (chunkSize == 0) {
+  state = nextState;
+  continue;
 }
 ```
 
-(Place this after `state.next` and before the existing `state = nextState` reassignments. Ensure we don't append the final terminator CRLF — the parser below handles that.)
-
-When transitioning to `Complete` from a state that was inside trailer parsing, parse `trailerBuffer` into `trailers`. The simplest placement is to parse lazily in `getTrailers()` — but that defers work to the caller. Instead parse on the `Complete` transition, e.g. immediately after the `if (state == ChunkedBodyState.Complete) { state = nextState; ... }` block:
+Replace it with:
 
 ```java
-if (nextState == ChunkedBodyState.Complete && trailerBuffer.length() > 0) {
-  parseTrailers();
+if (chunkSize == 0) {
+  // Push back the byte we just consumed so the trailer parser sees the full byte stream from the start of the trailer section.
+  delegate.push(buffer, bufferIndex, bufferLength - bufferIndex);
+  bufferIndex = bufferLength;
+  parseTrailers(delegate);
+  state = ChunkedBodyState.Complete;
+  break;
 }
 ```
 
-Add the parser:
+Add the parser as a private method on `ChunkedInputStream`:
 
 ```java
-private void parseTrailers() {
-  trailers = new HashMap<>();
-  // Trim any trailing CRLF the state machine may have appended
-  String raw = trailerBuffer.toString();
-  for (String line : raw.split("\r\n")) {
-    if (line.isEmpty()) {
-      continue;
+private void parseTrailers(PushbackInputStream in) throws IOException {
+  // RFC 9112 §7.1.2: trailer-fields use the same syntax as header-fields. After the 0-chunk we have either:
+  //   "\r\n"                            (no trailers — bare terminator)
+  //   "Name: Value\r\n...\r\n\r\n"      (one or more trailers, ending in bare \r\n)
+  // Read line-by-line with a small line buffer until a bare CRLF.
+  ByteArrayOutputStream line = new ByteArrayOutputStream(64);
+  int b;
+  while ((b = in.read()) != -1) {
+    if (b == '\r') {
+      int next = in.read();
+      if (next != '\n') {
+        throw new ParseException("Expected LF after CR in trailer section; got [" + next + "]");
+      }
+      if (line.size() == 0) {
+        return; // bare CRLF — end of trailer section
+      }
+      addTrailerLine(line.toString(java.nio.charset.StandardCharsets.US_ASCII));
+      line.reset();
+    } else {
+      line.write(b);
     }
-    int colon = line.indexOf(':');
-    if (colon < 0) {
-      continue;
-    }
-    String name = line.substring(0, colon).trim().toLowerCase();
-    if (name.isEmpty() || HTTPValues.ForbiddenTrailers.Names.contains(name)) {
-      // Forbidden trailers (TE, Transfer-Encoding, etc.) are silently dropped per RFC 9110 §6.5.2.
-      continue;
-    }
-    String value = line.substring(colon + 1).trim();
-    trailers.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
   }
 }
+
+private void addTrailerLine(String raw) {
+  int colon = raw.indexOf(':');
+  if (colon < 0) {
+    return; // malformed; skip rather than crash the request
+  }
+  String name = raw.substring(0, colon).trim().toLowerCase();
+  if (name.isEmpty() || HTTPValues.ForbiddenTrailers.Names.contains(name)) {
+    // RFC 9110 §6.5.2 forbidden trailers are silently dropped.
+    return;
+  }
+  String value = raw.substring(colon + 1).trim();
+  if (trailers == null) {
+    trailers = new HashMap<>();
+  }
+  trailers.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
+}
 ```
+
+This isolates trailer parsing from the chunk-body state machine entirely. Any future refactor of the state machine cannot break trailer capture. ASCII-only is correct for HTTP field values — RFC 9110 §5.5 requires field values to be ASCII unless explicitly extended.
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -634,7 +643,7 @@ Create `src/test/java/org/lattejava/http/tests/server/RequestTrailersTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -724,7 +733,7 @@ Create `src/test/java/org/lattejava/http/tests/io/ChunkedOutputStreamTrailersTes
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.io;
 
@@ -829,7 +838,7 @@ Create `src/test/java/org/lattejava/http/tests/server/ResponseTrailersTest.java`
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -928,29 +937,26 @@ if (chunked) {
 }
 ```
 
-This requires `HTTPOutputStream` to know about the request — verify the constructor: if it doesn't currently take `HTTPRequest`, we'd need to either (a) add it, or (b) move the trailer-emission decision to the caller. Check existing constructor:
+This requires `HTTPOutputStream` to know about the request. Add `HTTPRequest request` as a constructor parameter — correctness-by-construction. A setter would silently drop trailers if a future caller forgets to invoke it; the constructor parameter makes that mistake impossible.
+
+- [ ] **Step 4: Add `HTTPRequest` to the `HTTPOutputStream` constructor**
 
 Run: `grep -n "public HTTPOutputStream" src/main/java/org/lattejava/http/server/io/HTTPOutputStream.java`
+Read the existing constructor signature and the single call site in `HTTPWorker.run()`.
 
-If the constructor doesn't have `HTTPRequest`, **prefer (b)**: a setter `setRequestForTrailerGating(HTTPRequest)` invoked once from the worker. Pass `request` in via that setter where `outputStream` is built. Yes, this is mildly ugly — accept it as the smaller refactor.
+Add `HTTPRequest request` as a parameter. Update the field list (alphabetized with existing fields):
 
-**However**: a cleaner approach is to skip the per-request gating and simply emit trailers whenever set; the deny-list ensures nothing dangerous slips through. RFC 9110 §6.5 *recommends* honoring `TE: trailers` but doesn't make it mandatory — the response remains valid HTTP/1.1 either way. **Decision for this plan: gate on `acceptsTrailers()` to be a polite citizen, but do it through a setter, not a new constructor parameter.** Document the choice with a one-line comment in `HTTPOutputStream`.
-
-- [ ] **Step 4: Add the request setter and wire it in `HTTPWorker`**
-
-Add to `HTTPOutputStream`:
 ```java
-private HTTPRequest request;
-
-public void setRequest(HTTPRequest request) {
-  this.request = request;
-}
+private final HTTPRequest request;
 ```
 
-In `HTTPWorker.run()`, immediately after constructing `outputStream`:
+Update the constructor body to assign it. Update the call site in `HTTPWorker.run()` to pass `request`:
+
 ```java
-outputStream.setRequest(request);
+HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> state = State.Write);
 ```
+
+(The exact parameter order should match the existing convention — put `request` next to `response` since they're conceptually paired.)
 
 - [ ] **Step 5: Run to verify pass**
 
@@ -977,13 +983,24 @@ git commit -m "Emit response trailers via chunked path; auto-set Trailer header;
 - Modify: `src/main/java/org/lattejava/http/server/HTTPResponse.java`
 - Modify: `src/main/java/org/lattejava/http/server/internal/HTTPWorker.java` (to honor the switch)
 
+**Pre-task verification — socket ownership.** Before writing any switchProtocols code, verify that `HTTPWorker.run()` does not auto-close the socket out from under the protocol-switch handler:
+
+- [ ] **Step 0: Audit existing socket lifecycle**
+
+Run: `grep -n "socket.close\|try.*socket\|closeSocketOnly" src/main/java/org/lattejava/http/server/internal/HTTPWorker.java`
+Read each hit. Confirm:
+- The socket is **not** in a `try-with-resources` block in `run()` (verified by inspection — should be a plain field).
+- `closeSocketOnly` is the only path that closes the socket inside `run()` — and it's called explicitly on error paths or after the keep-alive loop ends.
+
+If both are true, `return;` from `run()` after invoking the protocol-switch handler is safe — the socket stays open for the handler's caller to manage. **If either is false, stop and restructure the worker before proceeding** (the switch handler must own the socket; double-close is the failure mode).
+
 - [ ] **Step 1: Write the failing test**
 
 Create `src/test/java/org/lattejava/http/tests/server/ProtocolSwitchTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 

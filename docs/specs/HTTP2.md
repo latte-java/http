@@ -63,7 +63,7 @@ Class layout in `org.lattejava.http.server.internal`:
 | `SETTINGS` (0x4) | ❌ | Initial server settings sent on connection start; ACK on inbound. Settings flood mitigation (rate-limit). |
 | `PUSH_PROMISE` (0x5) | 🚫 | Not emitted (`SETTINGS_ENABLE_PUSH=0`). Inbound from client → connection error PROTOCOL_ERROR (clients must not push). |
 | `PING` (0x6) | ❌ | Inbound: respond with ACK. Outbound: optional server-initiated keepalive (`withHTTP2KeepAlivePingInterval`). Rate-limited. |
-| `GOAWAY` (0x7) | ❌ | Outbound on shutdown / protocol error / DoS threshold. Inbound: stop opening new streams; existing streams complete. |
+| `GOAWAY` (0x7) | ❌ | Outbound on shutdown / protocol error / DoS threshold. Inbound: stop opening new streams; existing streams complete. Graceful shutdown after `GOAWAY(NO_ERROR)` waits up to `withShutdownDuration` (default 10s) for in-flight streams before forcing socket close. |
 | `WINDOW_UPDATE` (0x8) | ❌ | Inbound: extends a send-window. Outbound: replenishes our receive-window (replenish-when-half-empty strategy). Rate-limited. |
 | `CONTINUATION` (0x9) | ❌ | Continues a HEADERS or PUSH_PROMISE block when it exceeds MAX_FRAME_SIZE. Both directions supported. CONTINUATION-flood mitigation (CVE-2024-27316). |
 | Unknown frame types | ❌ | Ignored per RFC 9113 §5.5. |
@@ -252,9 +252,11 @@ How latte-java's HTTP/2 surface compares against the Java ecosystem leaders. Cap
 | CONTINUATION flood mitigation | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Configurable concurrency cap | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Configurable initial window | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Virtual-thread per stream | ❌ planned | ⚠️ (config) | ⚠️ (config) | ❌ (event loop) | ❌ | ✅ |
+| Virtual-thread per stream | ❌ planned | ⚠️ (config) | ⚠️ (config) | ❌ (event loop) | ❌ | ⚠️[^nima] |
 
-The last row is our differentiator. Pure virtual-thread + blocking-I/O code is unique among Java performance leaders; Helidon Níma is the closest parallel.
+[^nima]: Helidon Níma uses virtual threads as carrier threads for its event loop, not strictly virtual-thread-per-stream the way latte-java does. End behavior is similar; the architectural shape differs. Worth a footnote so the comparison is honest.
+
+The last row is our differentiator. Pure virtual-thread + blocking-I/O code is unique among Java performance leaders.
 
 ---
 

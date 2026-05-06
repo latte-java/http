@@ -106,7 +106,7 @@ git commit -m "Add h2spec installer script"
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -257,7 +257,7 @@ git tag -a http2-h2spec-clean -m "h2spec --strict run is clean against latte-jav
 
 - [ ] **Step 1: Add the deps**
 
-In the `test-compile` group:
+In the `test-compile` group. Note `export: false` on the group — these dependencies are only on the test classpath. The library itself remains zero-dependency in production; `grpc-netty` (which transitively pulls Netty) does not leak into shipped jars.
 
 ```groovy
 group(name: "test-compile", export: false) {
@@ -353,10 +353,12 @@ This is the trickiest piece. gRPC-over-HTTP/2 has specific framing conventions o
 - Trailers: `grpc-status` + optional `grpc-message`
 
 **Two paths:**
-- **Heavy path:** implement a real gRPC dispatcher inside `HTTPHandler`. Lots of work; not the goal.
+- **Heavy path:** implement a real gRPC dispatcher inside `HTTPHandler` (`BindableService` integration). Lots of work; not the goal of this plan.
 - **Light path:** for *each* of the four streaming patterns, write a hand-rolled handler that knows the proto framing. Sufficient for interop verification.
 
 Use the light path.
+
+**What this proves and what it does not.** Passing tests prove our HTTP/2 framing, HPACK, flow control, and trailer semantics are correct enough that `grpc-java`'s client side can talk to a gRPC handler running on our server. That is the v1 milestone. **It does not prove** that you can drop a `grpc-java` `BindableService` directly into `HTTPHandler` and get a working server — that integration (server-side `BindableService` adapter, full status/metadata mapping, deadlines, etc.) is a separate piece of work. Make this distinction explicit in `HTTP2.md` peer-comparison wording: "gRPC interop tested" means "framing-compatible with `grpc-java` clients," not "drop-in `grpc-java` server-side."
 
 **Files:**
 - Create: `src/test/java/org/lattejava/http/tests/server/GRPCInteropTest.java`
@@ -365,7 +367,7 @@ Use the light path.
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 

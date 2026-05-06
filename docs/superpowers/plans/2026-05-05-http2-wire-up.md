@@ -54,7 +54,7 @@ Get the abstraction in place before adding the second protocol.
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -152,7 +152,7 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTPListenerConfigurationH
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -293,14 +293,64 @@ git commit -m "Configure ALPN on accepted SSLSocket from listener config"
 ### Task 5: `ProtocolSelector` — TLS ALPN dispatch
 
 **Files:**
+- Create: `src/main/java/org/lattejava/http/server/internal/HTTP2Connection.java` (minimal stub — filled in Task 7)
 - Create: `src/main/java/org/lattejava/http/server/internal/ProtocolSelector.java`
 - Modify: `src/main/java/org/lattejava/http/server/internal/HTTPServerThread.java`
 
-- [ ] **Step 1: Implement the selector**
+**Compile-order note:** `ProtocolSelector` references `HTTP2Connection` directly. Land a minimal stub class in step 0 below before the selector — Task 7 fills in the real implementation. Without the stub, this task does not compile.
+
+- [ ] **Step 0: Land a minimal `HTTP2Connection` stub**
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
+ */
+package org.lattejava.http.server.internal;
+
+import module java.base;
+import module org.lattejava.http;
+
+/**
+ * Stub implementation. Real wiring lands in Task 7.
+ */
+public class HTTP2Connection implements ClientConnection, Runnable {
+  private final Socket socket;
+
+  private final long startInstant = System.currentTimeMillis();
+
+  public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter, HTTPListenerConfiguration listener, Throughput throughput, Boolean prefaceAlreadyConsumed) throws IOException {
+    this.socket = socket;
+  }
+
+  @Override
+  public long getHandledRequests() { return 0; }
+
+  @Override
+  public Socket getSocket() { return socket; }
+
+  @Override
+  public long getStartInstant() { return startInstant; }
+
+  @Override
+  public ClientConnection.State state() { return ClientConnection.State.Read; }
+
+  @Override
+  public void run() {
+    // Real implementation lands in Task 7. For now: close the socket cleanly so anyone reaching this branch sees a clear shutdown rather than a hang.
+    try { socket.close(); } catch (IOException ignore) {}
+  }
+}
+```
+
+This compiles and lets the selector reference `HTTP2Connection` immediately. Tests that exercise the h2 path will fail until Task 7, which is expected.
+
+- [ ] **Step 1: Implement the selector**
+
+The peek read is already time-bounded by the existing `clientSocket.setSoTimeout((int) configuration.getInitialReadTimeoutDuration().toMillis())` in `HTTPServerThread.run()`. We catch `SocketTimeoutException` explicitly and fall through to HTTP/1.1 — never block forever waiting for a slowloris client to finish the preface.
+
+```java
+/*
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -329,7 +379,13 @@ public class ProtocolSelector {
     if (listener.isH2cPriorKnowledgeEnabled()) {
       var pushback = new PushbackInputStream(socket.getInputStream(), instrumenter);
       byte[] peek = new byte[HTTP2_PREFACE.length];
-      int n = pushback.readNBytes(peek, 0, peek.length);
+      int n;
+      try {
+        n = pushback.readNBytes(peek, 0, peek.length);
+      } catch (SocketTimeoutException timeout) {
+        // Slowloris-style client never finished the preface within the initial-read timeout. Fall back to HTTP/1.1, which has its own preamble parser with its own timeout — not our concern here.
+        return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput);
+      }
       if (n == HTTP2_PREFACE.length && Arrays.equals(peek, HTTP2_PREFACE)) {
         // Match: hand a connection that doesn't expect to re-read the preface (we've already consumed it).
         return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, /*prefaceConsumed=*/true);
@@ -365,7 +421,7 @@ clients.add(new ClientInfo(client, conn, throughput));
 - [ ] **Step 3: Compile and run existing tests for regressions**
 
 Run: `latte clean int --excludePerformance --excludeTimeouts`
-Expected: ALL HTTP/1.1 PASS — h2 path is reachable but `HTTP2Connection` doesn't exist yet, so any non-h1 dispatch will fail. **Comment out or stub the h2 branch** until Task 8.
+Expected: ALL HTTP/1.1 tests PASS. The h2 path compiles (thanks to the stub from Step 0) but any test that actually exercises an h2 round-trip will fail until Task 7 — that's expected at this checkpoint.
 
 - [ ] **Step 4: Commit**
 
@@ -590,7 +646,7 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -752,7 +808,7 @@ git commit -m "Add HTTP2Connection with preface validation and initial SETTINGS 
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -813,7 +869,7 @@ public class HTTP2InputStream extends InputStream {
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -951,20 +1007,46 @@ private void runFrameLoop(HTTP2FrameReader reader, HTTP2FrameWriter writer, Bloc
     state = ClientConnection.State.Read;
     HTTP2Frame frame = reader.readFrame();
 
+    // RFC 9113 §6.10 — once a HEADERS or PUSH_PROMISE frame without END_HEADERS has been received, the next frame on the connection MUST be a CONTINUATION on the same stream. Anything else is a connection error PROTOCOL_ERROR.
+    if (headerBlockStreamId != null) {
+      boolean isContinuationOnSameStream = frame instanceof HTTP2Frame.ContinuationFrame cont && cont.streamId() == headerBlockStreamId;
+      if (!isContinuationOnSameStream) {
+        goAway(writerQueue, HTTP2ErrorCode.PROTOCOL_ERROR);
+        return;
+      }
+    }
+
     switch (frame) {
       case HTTP2Frame.SettingsFrame f -> handleSettings(f, writerQueue);
       case HTTP2Frame.PingFrame f -> handlePing(f, writerQueue);
       case HTTP2Frame.WindowUpdateFrame f -> handleWindowUpdate(f);
       case HTTP2Frame.RstStreamFrame f -> handleRstStream(f, writerQueue);
       case HTTP2Frame.GoawayFrame f -> { return; /* drain and exit */ }
-      case HTTP2Frame.HeadersFrame f -> handleHeaders(f, headerAccum, decoder, writerQueue);
-      case HTTP2Frame.ContinuationFrame f -> handleContinuation(f, headerAccum, decoder, writerQueue);
+      case HTTP2Frame.HeadersFrame f -> {
+        handleHeaders(f, headerAccum, decoder, writerQueue);
+        headerBlockStreamId = (f.flags() & HTTP2Frame.FLAG_END_HEADERS) == 0 ? f.streamId() : null;
+      }
+      case HTTP2Frame.ContinuationFrame f -> {
+        handleContinuation(f, headerAccum, decoder, writerQueue);
+        if ((f.flags() & HTTP2Frame.FLAG_END_HEADERS) != 0) {
+          headerBlockStreamId = null;
+        }
+      }
       case HTTP2Frame.DataFrame f -> handleData(f);
       case HTTP2Frame.PriorityFrame ignored -> {} // RFC 9113 §5.3 — parse and discard
       case HTTP2Frame.PushPromiseFrame ignored -> goAway(writerQueue, HTTP2ErrorCode.PROTOCOL_ERROR);
       case HTTP2Frame.UnknownFrame ignored -> {} // RFC 9113 §5.5
     }
   }
+}
+```
+
+Add a corresponding raw-frame test in Task 17:
+
+```java
+@Test
+public void interleaved_frame_during_headers_continuation_triggers_goaway() throws Exception {
+  // Send HEADERS without END_HEADERS, then a DATA frame on a different stream — expect GOAWAY(PROTOCOL_ERROR).
 }
 ```
 
@@ -1097,7 +1179,7 @@ JDK 21's `HttpClient` speaks h2 natively when `Version.HTTP_2` is set. The test 
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -1141,6 +1223,7 @@ public class HTTP2BasicTest extends BaseTest {
       var body = "x".repeat(100_000);
       var resp = client.send(HttpRequest.newBuilder(makeURI("https", "/")).POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
       assertEquals(resp.statusCode(), 200);
+      assertEquals(resp.version(), HttpClient.Version.HTTP_2, "JDK HttpClient silently downgrades to h1.1 on ALPN failure — assert h2 explicitly");
       assertEquals(resp.body(), body);
     }
   }
@@ -1161,6 +1244,7 @@ public class HTTP2BasicTest extends BaseTest {
       var client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).sslContext(insecureSSLContext()).build();
       var resp = client.send(HttpRequest.newBuilder(makeURI("https", "/")).build(), HttpResponse.BodyHandlers.ofByteArray());
       assertEquals(resp.statusCode(), 200);
+      assertEquals(resp.version(), HttpClient.Version.HTTP_2);
       assertEquals(resp.body().length, 200_000);
     }
   }
@@ -1182,12 +1266,17 @@ public class HTTP2BasicTest extends BaseTest {
         futures.add(client.sendAsync(HttpRequest.newBuilder(makeURI("https", "/" + i)).build(), HttpResponse.BodyHandlers.ofString()));
       }
       for (var f : futures) {
-        assertEquals(f.get().statusCode(), 200);
+        var resp = f.get();
+        assertEquals(resp.statusCode(), 200);
+        assertEquals(resp.version(), HttpClient.Version.HTTP_2);
       }
       assertEquals(counter.get(), 20);
     }
   }
 }
+```
+
+**Critical assertion:** every `HttpClient` test in this and later tasks must assert `resp.version() == HTTP_2`. The JDK client silently downgrades to HTTP/1.1 if ALPN doesn't advertise h2 — without the explicit assertion, "h2 round-trip works" tests pass against an h1.1 fallback path, hiding broken h2.
 ```
 
 (`insecureSSLContext()` is a small test helper that trusts all certs — add to `BaseTest` if not already there.)
@@ -1409,7 +1498,7 @@ git commit -m "Add h2c prior-knowledge integration test"
 
 ```java
 public void shutdown() {
-  // Enqueue GOAWAY(NO_ERROR) with last-stream-id; writer thread emits and then sees the sentinel and exits.
+  // Enqueue GOAWAY(NO_ERROR) with last-stream-id; writer thread emits and then sees the sentinel and exits. In-flight streams have up to configuration.getShutdownDuration() to complete before HTTPServer forces socket close.
   int lastStreamId = streams.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
   try {
     writerQueue.put(new HTTP2Frame.GoawayFrame(lastStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
@@ -1419,7 +1508,7 @@ public void shutdown() {
 }
 ```
 
-Wire `HTTPServer.close()` (or the existing shutdown path in `HTTPServerThread`) to call `shutdown()` on each `HTTP2Connection` before closing sockets. Look up where `HTTPServerThread.shutdown()` interrupts client threads — `HTTP2Connection` should get a softer GOAWAY first.
+Wire `HTTPServer.close()` (or the existing shutdown path in `HTTPServerThread`) to call `shutdown()` on each `HTTP2Connection`, then wait up to `configuration.getShutdownDuration()` for streams to finish, then force-close the socket. The existing h1.1 shutdown path already uses `getShutdownDuration()` — reuse the same bound rather than introducing a new knob. Document the behavior in `HTTPServerConfiguration.withShutdownDuration` Javadoc: "Also bounds graceful HTTP/2 stream completion after GOAWAY."
 
 - [ ] **Step 2: Write the test**
 

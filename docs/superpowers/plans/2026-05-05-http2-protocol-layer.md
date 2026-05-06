@@ -45,7 +45,7 @@
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -112,7 +112,7 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTP2SettingsTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -175,7 +175,7 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -279,7 +279,7 @@ A sealed interface lets the reader return a typed record and the writer pattern-
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -347,6 +347,8 @@ git commit -m "Add HTTP2Frame sealed interface with per-type record variants"
 
 - [ ] **Step 1: Add three new lazily-initialized buffer accessors**
 
+**Critical sizing decision:** `frameReadBuffer` and `frameWriteBuffer` start at the RFC 9113 default `MAX_FRAME_SIZE` of 16384 bytes and grow on demand up to the *negotiated* `MAX_FRAME_SIZE` (which the peer sends in SETTINGS, capped at the RFC ceiling of 16777215). **Never** allocate the 16 MB ceiling upfront — that's catastrophic at scale (16 MB × N connections). Growth happens only when a frame larger than the current buffer is announced; in practice, the buffer rarely grows past the default for typical traffic.
+
 Add fields (alphabetical, after existing `chunkBuffer`):
 
 ```java
@@ -357,32 +359,7 @@ private byte[] frameWriteBuffer;
 private FastByteArrayOutputStream headerAccumulationBuffer;
 ```
 
-Add accessors:
-
-```java
-public byte[] frameReadBuffer() {
-  if (frameReadBuffer == null) {
-    frameReadBuffer = new byte[16777215]; // max possible MAX_FRAME_SIZE; sized once per connection
-  }
-  return frameReadBuffer;
-}
-
-public byte[] frameWriteBuffer() {
-  if (frameWriteBuffer == null) {
-    frameWriteBuffer = new byte[9 + 16777215];
-  }
-  return frameWriteBuffer;
-}
-
-public FastByteArrayOutputStream headerAccumulationBuffer() {
-  if (headerAccumulationBuffer == null) {
-    headerAccumulationBuffer = new FastByteArrayOutputStream(8192, 8192);
-  }
-  return headerAccumulationBuffer;
-}
-```
-
-**Note on size:** sizing `frameReadBuffer` to 16 MB up-front would balloon per-connection memory. Practical refinement: take the negotiated `MAX_FRAME_SIZE` as a constructor parameter and size the buffer to that. **Do this:** add a setter `setMaxFrameSize(int)` that grows the buffer if needed; default size = 16384. This trades simplicity for memory.
+Add accessors. The default size matches RFC 9113's initial `MAX_FRAME_SIZE`; `ensureFrameReadCapacity` grows on demand:
 
 ```java
 public byte[] frameReadBuffer() {
@@ -393,13 +370,40 @@ public byte[] frameReadBuffer() {
 }
 
 public void ensureFrameReadCapacity(int size) {
+  if (size > 16777215) {
+    throw new IllegalArgumentException("Frame size [" + size + "] exceeds RFC 9113 ceiling of 16777215");
+  }
   if (frameReadBuffer == null || frameReadBuffer.length < size) {
     frameReadBuffer = new byte[size];
   }
 }
+
+public byte[] frameWriteBuffer() {
+  if (frameWriteBuffer == null) {
+    frameWriteBuffer = new byte[9 + 16384];
+  }
+  return frameWriteBuffer;
+}
+
+public void ensureFrameWriteCapacity(int payloadSize) {
+  int needed = 9 + payloadSize;
+  if (payloadSize > 16777215) {
+    throw new IllegalArgumentException("Frame size [" + payloadSize + "] exceeds RFC 9113 ceiling");
+  }
+  if (frameWriteBuffer == null || frameWriteBuffer.length < needed) {
+    frameWriteBuffer = new byte[needed];
+  }
+}
+
+public FastByteArrayOutputStream headerAccumulationBuffer() {
+  if (headerAccumulationBuffer == null) {
+    headerAccumulationBuffer = new FastByteArrayOutputStream(8192, 8192);
+  }
+  return headerAccumulationBuffer;
+}
 ```
 
-(Same shape for `frameWriteBuffer`.)
+`HTTP2Connection.run()` calls `ensureFrameReadCapacity(peerSettings.maxFrameSize())` after the SETTINGS exchange completes, growing the buffer to the negotiated ceiling. After that point any frame larger than that announced size is itself a `FRAME_SIZE_ERROR`, so the buffer never grows further.
 
 - [ ] **Step 2: Compile**
 
@@ -426,7 +430,7 @@ Create `src/test/java/org/lattejava/http/tests/server/HTTP2FrameReaderTest.java`
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -526,7 +530,7 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -699,7 +703,7 @@ Expected: COMPILATION FAILURE.
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.server.internal;
 
@@ -798,7 +802,7 @@ Create `src/test/java/org/lattejava/http/tests/server/HPACKHuffmanTest.java`:
 
 ```java
 /*
- * Copyright (c) 2026, Daniel DeGroff, All Rights Reserved
+ * Copyright (c) 2026, The Latte Project
  */
 package org.lattejava.http.tests.server;
 
@@ -980,6 +984,15 @@ public class HPACKDynamicTableTest {
     t.add("b", "2");
     t.setMaxSize(0);
     assertEquals(t.entryCount(), 0);
+  }
+
+  @Test
+  public void max_size_zero_accepts_no_entries() {
+    // RFC 7541 §6.3 — peer can advertise HEADER_TABLE_SIZE=0 to disable compression. Decoder must not NPE / div-by-zero.
+    var t = new HPACKDynamicTable(0);
+    t.add("a", "1");
+    assertEquals(t.entryCount(), 0);
+    assertEquals(t.size(), 0);
   }
 }
 ```
@@ -1688,6 +1701,22 @@ public class HTTP2FlowControlTest {
     assertEquals(s.receiveWindow(), 600);
     s.incrementReceiveWindow(400);
     assertEquals(s.receiveWindow(), 1000);
+  }
+
+  @Test
+  public void send_window_can_go_negative_after_settings_decrease() {
+    // RFC 9113 §6.9.2: when peer reduces SETTINGS_INITIAL_WINDOW_SIZE mid-connection, the delta is applied to all
+    // open streams' send-windows — possibly making them negative. The writer must check `available >= bytesToSend`
+    // (signed comparison) and wait for WINDOW_UPDATE rather than treating negative as an error.
+    var s = new HTTP2Stream(1, 65535, 65535);
+    s.consumeSendWindow(50000);                // sendWindow now 15535
+    s.incrementSendWindow(-30000);             // peer reduced INITIAL_WINDOW_SIZE by 30000 → window now -14465
+    assertEquals(s.sendWindow(), -14465);
+    // Writer attempting to send any bytes must observe the negative window and block, not throw.
+    assertFalse(s.sendWindow() >= 1);          // no credits available
+    s.incrementSendWindow(20000);              // peer sends WINDOW_UPDATE
+    assertEquals(s.sendWindow(), 5535);        // back in the black
+    assertTrue(s.sendWindow() >= 5000);        // can now send up to 5535
   }
 }
 ```

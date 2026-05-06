@@ -124,7 +124,7 @@ Inbound flow control mirrors: each DATA frame consumed reduces our advertised co
 
 ### Settings retroactive window adjustment (§6.9.2)
 
-When the peer sends a SETTINGS frame that changes `INITIAL_WINDOW_SIZE`, all currently-open streams' send-windows must shift by the delta — the reader observes the change but the writer owns the windows. Coordination model: send-window state is held in `HTTP2Stream` fields guarded by a per-stream `ReentrantLock` with a `Condition`. The reader applies the delta to every active stream under its lock and signals the per-stream Condition (so any writer-thread blocked on flow-control wakes and re-evaluates). A negative resulting window is legal per spec (the stream goes "in the red" until WINDOW_UPDATEs lift it back above zero); writers must check `>= bytes_to_send`, not `> 0`.
+When the peer sends a SETTINGS frame that changes `INITIAL_WINDOW_SIZE`, all currently-open streams' send-windows must shift by the delta — the reader observes the change but the writer owns the windows. Coordination model: send-window state is held in `HTTP2Stream` fields guarded by a per-stream `ReentrantLock` with a `Condition`. The reader applies the delta to every active stream under its lock and signals the per-stream Condition (so any writer-thread blocked on flow-control wakes and re-evaluates). A negative resulting window is legal per spec (the stream goes "in the red" until WINDOW_UPDATEs lift it back above zero); writers must check `>= bytes_to_send` with **signed** comparison, not `> 0`. A negative `int` send-window is the easy bug to write — and an under-test case worth a dedicated unit test.
 
 A connection-level FLOW_CONTROL_ERROR is raised only if a peer's WINDOW_UPDATE causes overflow past `2^31 - 1` — not from SETTINGS-induced negative windows.
 
@@ -135,6 +135,10 @@ A connection-level FLOW_CONTROL_ERROR is raised only if a peer's WINDOW_UPDATE c
 Frame format per RFC 9113 §4.1: 9-byte header (`length`, `type`, `flags`, `stream_id` with reserved bit) + payload up to `SETTINGS_MAX_FRAME_SIZE`.
 
 `HTTP2FrameReader.readFrame()` reads the 9-byte header, validates length against `MAX_FRAME_SIZE` (default 16384, configurable up to 16777215), reads payload into a per-connection reusable buffer held on `HTTPBuffers`, and returns a typed `HTTP2Frame` record. Type-specific decoding is dispatched via a static map. Validation of malformed frames (e.g. RST_STREAM with payload length ≠ 4) emits `GOAWAY(FRAME_SIZE_ERROR)` or `RST_STREAM(PROTOCOL_ERROR)` per RFC.
+
+### HEADERS / CONTINUATION interleaving (§6.10)
+
+Once the reader has accepted a `HEADERS` (or `PUSH_PROMISE`, though we never receive one) frame without `END_HEADERS`, the very next frame on the connection MUST be a `CONTINUATION` on the same stream. Anything else — including DATA on the same stream, frames on a different stream, or non-CONTINUATION frame types — is a connection error `PROTOCOL_ERROR`. The reader loop tracks an explicit `headerBlockStreamId` between iterations and gates the next dispatch on this rule before the per-frame switch. Implicit "we'll just buffer it scoped to the block" doesn't catch interleaved frames; the rule is its own check.
 
 ### Buffer ownership
 
