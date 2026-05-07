@@ -227,8 +227,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     ArrayBlockingQueue<byte[]> pipe = new ArrayBlockingQueue<>(16);
     streamPipes.put(streamId, pipe);
     HTTP2InputStream inputStream = new HTTP2InputStream(pipe);
+    // Pass -1 for unlimited content length. Integer.MAX_VALUE would cause an integer overflow in
+    // HTTPInputStream's boundary check: maximumContentLength - bytesRead + 1 overflows to Integer.MIN_VALUE.
     request.setInputStream(new HTTPInputStream(configuration, request,
-        new PushbackInputStream(inputStream, instrumenter), Integer.MAX_VALUE));
+        new PushbackInputStream(inputStream, instrumenter), -1));
 
     // For END_STREAM-on-HEADERS (no body), pre-populate the EOF sentinel so the handler's input read returns -1 immediately.
     if ((flags & HTTP2Frame.FLAG_END_STREAM) != 0) {
@@ -292,7 +294,27 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       }
       stream.applyEvent(HTTP2Stream.Event.RECV_DATA_END_STREAM);
     }
-    // TODO: when receive-window drops below half initial, send WINDOW_UPDATE. Deferred to a follow-up task.
+
+    // Replenish-when-half-empty strategy (RFC 9113 §6.9.1).
+    // When the stream receive-window drops below half its initial value, send a WINDOW_UPDATE to restore it.
+    // Without this, uploads larger than INITIAL_WINDOW_SIZE (65535) stall waiting for credit.
+    if (f.payload().length > 0) {
+      if (stream.receiveWindow() < (long) localSettings.initialWindowSize() / 2) {
+        int delta = localSettings.initialWindowSize() - (int) stream.receiveWindow();
+        stream.incrementReceiveWindow(delta);
+        try {
+          writerQueue.put(new HTTP2Frame.WindowUpdateFrame(f.streamId(), delta));
+        } catch (InterruptedException ignore) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      // Also replenish the connection-level window for the consumed bytes so the peer can keep sending.
+      try {
+        writerQueue.put(new HTTP2Frame.WindowUpdateFrame(0, f.payload().length));
+      } catch (InterruptedException ignore) {
+        Thread.currentThread().interrupt();
+      }
+    }
   }
 
   private void handleHeadersFrame(HTTP2Frame.HeadersFrame f, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
@@ -399,6 +421,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         listener.getCertificate() != null ? "https" : "http",
         listener.getPort(),
         socket.getInetAddress().getHostAddress());
+    req.setProtocol("HTTP/2.0");
     for (var field : fields) {
       String name = field.name();
       String value = field.value();
