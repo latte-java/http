@@ -8,7 +8,6 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2RateLimits;
 import org.lattejava.http.server.internal.HTTP2Settings;
 
 import static org.testng.Assert.*;
@@ -65,10 +64,4 @@ public class HTTPServerConfigurationHTTP2Test {
     assertEquals(c.getHTTP2KeepAlivePingInterval(), java.time.Duration.ofSeconds(30));
   }
 
-  @Test
-  public void with_http2_rate_limits() {
-    var custom = new HTTP2RateLimits(50, 30000, 5, 1000, 5, 1000, 50, 30000, 50, 1000);
-    var c = new HTTPServerConfiguration().withHTTP2RateLimits(custom);
-    assertSame(c.getHTTP2RateLimits(), custom);
-  }
 }

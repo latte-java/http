@@ -90,6 +90,33 @@ public class HTTP2SecurityTest extends BaseTest {
   }
 
   @Test
+  public void continuation_flood_triggers_goaway() throws Exception {
+    // CVE-2024-27316: many CONTINUATION frames whose cumulative size exceeds MAX_HEADER_LIST_SIZE.
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    var server = makeServer("http", handler, listener);
+    // Set a small MAX_HEADER_LIST_SIZE so the test triggers quickly with modest data.
+    server.configuration().withHTTP2MaxHeaderListSize(2048);
+    try (var ignored = server.start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS with no END_HEADERS — 1024 bytes of header block fragment, no flags.
+        writeFrameHeader(out, 1024, 0x1, 0x0, 1);
+        out.write(new byte[1024]);
+        // CONTINUATION frames: each 1024 bytes, no END_HEADERS — cumulative total quickly exceeds 2048.
+        for (int i = 0; i < 5; i++) {
+          writeFrameHeader(out, 1024, 0x9, 0, 1);
+          out.write(new byte[1024]);
+        }
+        out.flush();
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0xb, "Expected GOAWAY(ENHANCE_YOUR_CALM=0xb), got: " + errorCode);
+      }
+    }
+  }
+
+  @Test
   public void ping_flood_triggers_goaway() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);

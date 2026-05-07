@@ -198,7 +198,9 @@ Add three fields with their defaults (alphabetized with existing fields):
 ```java
 private boolean h2cPriorKnowledgeEnabled = false;
 
-private boolean h2cUpgradeEnabled = true;
+private boolean h2cUpgradeEnabled = false; // Default-off: JDK HttpClient eagerly sends Upgrade: h2c on cleartext HTTP/2,
+                                            // which conflicts with existing tests; RFC 9113 also deprecated the Upgrade
+                                            // flow in favor of prior-knowledge. Opt-in via withH2cUpgradeEnabled(true).
 
 private boolean http2Enabled = true;
 ```

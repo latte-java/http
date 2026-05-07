@@ -53,6 +53,44 @@ public class HTTP2BasicTest extends BaseTest {
   }
 
   @Test
+  public void concurrent_streams_with_dynamic_headers_no_hpack_corruption() throws Exception {
+    // Regression test for Fix 1: HPACKEncoder shared across concurrent handler threads.
+    // Each request emits a unique X-Request-Path header value that falls outside the static table,
+    // forcing a dynamic-table write on every stream. Without synchronization, concurrent encode()
+    // calls corrupt the dynamic table and the client sees HPACK_COMPRESSION_ERROR.
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      res.setHeader("X-Request-Path", req.getPath());  // Forces dynamic-table use, varies per stream.
+      res.getOutputStream().write(req.getPath().getBytes());
+      res.getOutputStream().close();
+    };
+
+    var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
+    var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
+    try (var server = makeServer("https", handler, listener).start()) {
+      int port = server.getActualPort();
+      var sslContext = SecurityTools.clientContext(rootCertificate);
+      var client = HttpClient.newBuilder()
+                             .sslContext(sslContext)
+                             .version(HttpClient.Version.HTTP_2)
+                             .build();
+      var futures = new ArrayList<java.util.concurrent.CompletableFuture<HttpResponse<String>>>();
+      for (int i = 0; i < 30; i++) {
+        var uri = URI.create("https://local.lattejava.org:" + port + "/path-" + i);
+        futures.add(client.sendAsync(HttpRequest.newBuilder(uri).build(), HttpResponse.BodyHandlers.ofString()));
+      }
+      for (int i = 0; i < 30; i++) {
+        var resp = futures.get(i).get();
+        assertEquals(resp.statusCode(), 200);
+        assertEquals(resp.version(), HttpClient.Version.HTTP_2,
+            "JDK HttpClient silently downgrades to h1.1 on ALPN failure — assert h2 explicitly");
+        assertEquals(resp.body(), "/path-" + i);
+        assertEquals(resp.headers().firstValue("x-request-path").orElse(""), "/path-" + i);
+      }
+    }
+  }
+
+  @Test
   public void concurrent_streams_from_one_connection() throws Exception {
     var counter = new AtomicInteger();
     HTTPHandler handler = (req, res) -> {

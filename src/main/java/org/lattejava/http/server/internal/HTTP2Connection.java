@@ -49,6 +49,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final Map<Integer, BlockingQueue<byte[]>> streamPipes = new ConcurrentHashMap<>();
   private final Throughput throughput;
   private final BlockingQueue<HTTP2Frame> writerQueue = new LinkedBlockingQueue<>(128);
+  private volatile boolean goawaySent;
   private long handledRequests;
   private volatile int highestSeenStreamId = 0;
   private volatile ClientConnection.State state = ClientConnection.State.Read;
@@ -238,6 +239,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
             }
             case HTTP2Frame.UnknownFrame ignored -> {} // §5.5 — ignore unknown frame types
           }
+          // Rate-limit handlers call goAway() but return normally (they don't propagate the exit signal
+          // by returning from run()). Check here so the frame loop doesn't keep processing flood frames.
+          if (goawaySent) {
+            break;
+          }
         }
       } finally {
         // Signal writer thread to exit cleanly.
@@ -303,6 +309,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   private void goAway(HTTP2ErrorCode code) {
+    if (goawaySent) {
+      return; // Idempotent — only one GOAWAY per connection.
+    }
+    goawaySent = true;
     // Use the highest seen client stream-id.
     // lastStreamId == -1 is reserved as the writer-shutdown sentinel and must never be used for a real GOAWAY.
     try {
@@ -314,6 +324,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   private void handleContinuationFrame(HTTP2Frame.ContinuationFrame f, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
     headerAccum.write(f.headerBlockFragment());
+    // CVE-2024-27316: bound cumulative HEADERS+CONTINUATION accumulator to MAX_HEADER_LIST_SIZE.
+    if (headerAccum.size() > localSettings.maxHeaderListSize()) {
+      goAway(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
+      return;
+    }
     if ((f.flags() & HTTP2Frame.FLAG_END_HEADERS) != 0) {
       finalizeHeaderBlock(f.streamId(), f.flags(), headerAccum, decoder, encoder);
     }
@@ -382,6 +397,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     }
     headerAccum.reset();
     headerAccum.write(f.headerBlockFragment());
+    // CVE-2024-27316: bound cumulative HEADERS+CONTINUATION accumulator to MAX_HEADER_LIST_SIZE.
+    if (headerAccum.size() > localSettings.maxHeaderListSize()) {
+      goAway(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
+      return;
+    }
     if ((f.flags() & HTTP2Frame.FLAG_END_HEADERS) != 0) {
       finalizeHeaderBlock(f.streamId(), f.flags(), headerAccum, decoder, encoder);
     }
@@ -515,7 +535,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         }
 
         // Encode and emit HEADERS frame (without END_STREAM so that the body DATA frames follow).
-        byte[] headerBlock = encoder.encode(respFields);
+        // Synchronize on the encoder: HPACKEncoder mutates a shared HPACKDynamicTable (ArrayDeque-backed)
+        // and is not thread-safe. Multiple handler virtual-threads can call encode() concurrently on
+        // the same connection-level encoder, corrupting the dynamic-table state without coordination.
+        byte[] headerBlock;
+        synchronized (encoder) {
+          headerBlock = encoder.encode(respFields);
+        }
         try {
           writerQueue.put(new HTTP2Frame.HeadersFrame(stream.streamId(), HTTP2Frame.FLAG_END_HEADERS, headerBlock));
         } catch (InterruptedException ignore) {

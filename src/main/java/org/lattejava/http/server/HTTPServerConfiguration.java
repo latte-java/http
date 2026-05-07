@@ -516,18 +516,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * Replaces the HTTP/2 rate limits configuration. Use {@link HTTP2RateLimits#defaults()} as a starting point.
-   *
-   * @param limits The rate limits to apply. Cannot be null.
-   * @return This.
-   */
-  public HTTPServerConfiguration withHTTP2RateLimits(HTTP2RateLimits limits) {
-    Objects.requireNonNull(limits, "You cannot set the HTTP/2 rate limits to null");
-    this.http2RateLimits = limits;
-    return this;
-  }
-
-  /**
    * Sets the duration the server waits for a SETTINGS ACK from the client before treating the connection as failed. Defaults to 10 seconds.
    *
    * @param d The timeout duration. Cannot be null.

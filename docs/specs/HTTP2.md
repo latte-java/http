@@ -43,7 +43,7 @@ Class layout in `org.lattejava.http.server.internal`:
 |---|---|---|
 | h2 over TLS via ALPN (RFC 7301) | ✅ | Default-on for TLS listeners. Server advertises `["h2", "http/1.1"]`. Off-switch: `HTTPListenerConfiguration.enableHTTP2 = false`. — `HTTP2BasicTest`, `HTTP2ALPNTest` |
 | h2c prior-knowledge (cleartext) | ✅ | Opt-in: `HTTPListenerConfiguration.enableH2cPriorKnowledge = true`. Selector peeks the first 24 bytes for the connection preface. — `HTTP2H2cPriorKnowledgeTest` |
-| h2c via `Upgrade`/101 (cleartext) | ✅ | Opt-in via `withH2cUpgradeEnabled`. Note: RFC 9113 deprecated the Upgrade flow; we ship it for back-compat with older clients. — `HTTP2H2cUpgradeTest` |
+| h2c via `Upgrade`/101 (cleartext) | ✅ | Opt-in via `withH2cUpgradeEnabled` (default-off). RFC 9113 deprecated the Upgrade flow in favor of prior-knowledge; default-off avoids conflicts with JDK `HttpClient`'s eager `Upgrade: h2c` on HTTP/1.1 connections. Retained for back-compat with older clients. — `HTTP2H2cUpgradeTest` |
 | Connection preface validation | ✅ | Exact bytes `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n` required; mismatch → connection close. — `HTTP2ConnectionPrefaceTest` |
 | TLS 1.2 minimum (§9.2.1) | ✅ | JDK 21 disables TLSv1.0/1.1 by default. Implicit via JDK 21. |
 | TLS 1.2 cipher blocklist (§9.2.2) | ❌ | After ALPN selects `h2`, check `SSLSession.getCipherSuite()` against Appendix A blocklist; blocklisted → `GOAWAY(INADEQUATE_SECURITY)`. |
@@ -65,7 +65,7 @@ Class layout in `org.lattejava.http.server.internal`:
 | `PING` (0x6) | ✅ | Inbound: respond with ACK. Outbound: optional server-initiated keepalive (`withHTTP2KeepAlivePingInterval`). Rate-limited. — `HTTP2FrameReaderTest`, `HTTP2BasicTest` |
 | `GOAWAY` (0x7) | ✅ | Outbound on shutdown / protocol error / DoS threshold. Inbound: stop opening new streams; existing streams complete. Graceful shutdown after `GOAWAY(NO_ERROR)` waits up to `withShutdownDuration` (default 10s) for in-flight streams before forcing socket close. — `HTTP2RawFrameTest`, `HTTP2BasicTest` |
 | `WINDOW_UPDATE` (0x8) | ✅ | Inbound: extends a send-window. Outbound: replenishes our receive-window (replenish-when-half-empty strategy). Rate-limited. — `HTTP2FrameReaderTest`, `HTTP2BasicTest` |
-| `CONTINUATION` (0x9) | ✅ | Continues a HEADERS or PUSH_PROMISE block when it exceeds MAX_FRAME_SIZE. Both directions supported. CONTINUATION-flood mitigation (CVE-2024-27316). — `HTTP2FrameReaderTest`, `HTTP2RawFrameTest` |
+| `CONTINUATION` (0x9) | ✅ | Continues a HEADERS or PUSH_PROMISE block when it exceeds MAX_FRAME_SIZE. Both directions supported. CONTINUATION-flood mitigation via MAX_HEADER_LIST_SIZE-bounded accumulator (CVE-2024-27316). — `HTTP2FrameReaderTest`, `HTTP2RawFrameTest`, `HTTP2SecurityTest` |
 | Unknown frame types | ✅ | Ignored per RFC 9113 §5.5. — `HTTP2RawFrameTest` |
 
 ---
@@ -84,7 +84,7 @@ Class layout in `org.lattejava.http.server.internal`:
 | Huffman coding (Appendix B) | ✅ | Static code table. — `HPACKHuffmanTest` |
 | Header-name validation | ⚠️ | RFC 9113 §8.2 — HPACK decoder writes lowercase + ASCII; explicit validation (reject non-lowercase tchar → PROTOCOL_ERROR) deferred to Plan F. |
 | Header-value validation | ⚠️ | HPACK decoder writes ASCII; explicit bare CR/LF/NUL rejection deferred to Plan F. |
-| `MAX_HEADER_LIST_SIZE` enforcement | ⚠️ | SETTINGS field is parsed and sent; runtime cumulative-budget enforcement across HEADERS + CONTINUATION is incomplete. Plan F. |
+| `MAX_HEADER_LIST_SIZE` enforcement | ✅ | Cumulative byte budget enforced on the HEADERS+CONTINUATION accumulator in `HTTP2Connection.handleHeadersFrame` and `handleContinuationFrame`. GOAWAY(ENHANCE_YOUR_CALM) when exceeded. — `HTTP2SecurityTest.continuation_flood_triggers_goaway` |
 
 ---
 
@@ -189,7 +189,7 @@ All standard error codes implemented and emitted at the appropriate trigger:
 |---|---|---|
 | `MAX_CONCURRENT_STREAMS` enforcement | ✅ | See §4. |
 | Rapid Reset (CVE-2023-44487) | ✅ | Default: >100 client RST_STREAMs in 30 s → `GOAWAY(ENHANCE_YOUR_CALM)`. Configurable via `HTTP2RateLimits`. — `HTTP2SecurityTest.rapid_reset_triggers_goaway` |
-| CONTINUATION flood (CVE-2024-27316) | ⚠️ | Per-block CONTINUATION cap implicit via HEADER_LIST_SIZE-bounded accumulator; explicit per-block CONTINUATION-count cap deferred. Plan F. |
+| CONTINUATION flood (CVE-2024-27316) | ✅ | Cumulative accumulator bounded by `MAX_HEADER_LIST_SIZE`; exceeding it sends GOAWAY(ENHANCE_YOUR_CALM). — `HTTP2SecurityTest.continuation_flood_triggers_goaway` |
 | PING flood | ✅ | Default: >10 PING/s → `GOAWAY(ENHANCE_YOUR_CALM)`. — `HTTP2SecurityTest.ping_flood_triggers_goaway` |
 | SETTINGS flood | ✅ | Same shape. — `HTTP2SecurityTest.settings_flood_triggers_goaway` |
 | Empty-DATA flood (zero-length DATA without END_STREAM) | ⚠️ | Default: >100 in 30 s. Counter exists; dedicated test deferred (noted in `HTTP2SecurityTest`). |
@@ -229,11 +229,12 @@ All standard error codes implemented and emitted at the appropriate trigger:
 | `withHTTP2MaxConcurrentStreams(int)` | 100 | §6.5.2 |
 | `withHTTP2MaxFrameSize(int)` | 16384 | §6.5.2 (max 16777215) |
 | `withHTTP2MaxHeaderListSize(int)` | 8192 | §6.5.2 |
-| `withHTTP2RateLimits(HTTP2RateLimits)` | sensible defaults (see §10) | DoS counter bundle |
 | `withHTTP2KeepAlivePingInterval(Duration)` | disabled | Optional server-initiated PING |
 | `withHTTP2SettingsAckTimeout(Duration)` | 10 s | §6.5.3 — peer ACK deadline (⚠️ knob exists; ACK enforcement deferred to Plan F) |
 
 `SETTINGS_ENABLE_PUSH` is fixed at 0 (push out of scope).
+
+**Note on rate limit configuration:** `HTTP2RateLimits` is an internal type (not exported from the module). Custom rate limits are not currently configurable from the library's public API — the defaults are applied automatically. Future work can expose scalar setters per counter (e.g., `withHTTP2MaxPingsPerSecond`) or promote `HTTP2RateLimits` to a public package.
 
 ---
 
