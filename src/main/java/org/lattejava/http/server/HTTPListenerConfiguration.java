@@ -31,7 +31,7 @@ public class HTTPListenerConfiguration {
   private final PrivateKey privateKey;
   private final boolean tls;
   private boolean h2cPriorKnowledgeEnabled = false;
-  private boolean h2cUpgradeEnabled = true;
+  private boolean h2cUpgradeEnabled = false;
   private boolean http2Enabled = true;
 
   /**

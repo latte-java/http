@@ -37,6 +37,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
   private final boolean prefaceAlreadyConsumed;
   private final HTTP2RateLimits rateLimits;
+  // True for the h2c Upgrade/101 path: server sends its SETTINGS frame immediately after the 101, before reading the
+  // client connection preface. All other paths (ALPN, prior-knowledge) leave this false.
+  private final boolean serverSendsFirst;
   private final Socket socket;
   private final long startInstant;
   private final Map<Integer, HTTP2Stream> streams = new ConcurrentHashMap<>();
@@ -48,6 +51,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput, Boolean prefaceAlreadyConsumed) throws IOException {
+    this(socket, configuration, context, instrumenter, listener, throughput, prefaceAlreadyConsumed, false);
+  }
+
+  public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                         HTTPListenerConfiguration listener, Throughput throughput, Boolean prefaceAlreadyConsumed,
+                         boolean serverSendsFirst) throws IOException {
     this.socket = socket;
     this.configuration = configuration;
     this.context = context;
@@ -59,6 +68,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     this.localSettings = configuration.getHTTP2Settings();
     this.rateLimits = configuration.getHTTP2RateLimits();
     this.prefaceAlreadyConsumed = Boolean.TRUE.equals(prefaceAlreadyConsumed);
+    this.serverSendsFirst = serverSendsFirst;
     this.startInstant = System.currentTimeMillis();
   }
 
@@ -88,22 +98,38 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       var in = new ThroughputInputStream(socket.getInputStream(), throughput);
       var out = new ThroughputOutputStream(socket.getOutputStream(), throughput);
 
-      // Read and validate the connection preface unless already consumed by ProtocolSelector.
-      if (!prefaceAlreadyConsumed) {
+      var writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
+      var reader = new HTTP2FrameReader(in, buffers.frameReadBuffer());
+
+      if (serverSendsFirst) {
+        // h2c Upgrade/101 path (RFC 7540 §3.2): server sends its connection preface (SETTINGS) immediately after the
+        // 101, before reading the client preface. The client sends its preface concurrently; we read it next.
+        writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
+        out.flush();
+
+        // Read and validate the client connection preface.
         byte[] received = in.readNBytes(PREFACE.length);
         if (!Arrays.equals(received, PREFACE)) {
-          logger.debug("Invalid HTTP/2 connection preface");
+          logger.debug("Invalid HTTP/2 connection preface after h2c upgrade");
           return;
         }
+      } else {
+        // ALPN (TLS) and prior-knowledge paths: read the client connection preface first (or skip if ProtocolSelector
+        // already consumed it), then send our SETTINGS.
+        if (!prefaceAlreadyConsumed) {
+          byte[] received = in.readNBytes(PREFACE.length);
+          if (!Arrays.equals(received, PREFACE)) {
+            logger.debug("Invalid HTTP/2 connection preface");
+            return;
+          }
+        }
+
+        // Send our initial SETTINGS frame.
+        writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
+        out.flush();
       }
 
-      // Send our initial SETTINGS frame.
-      var writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
-      writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
-      out.flush();
-
       // Read the peer's first SETTINGS frame.
-      var reader = new HTTP2FrameReader(in, buffers.frameReadBuffer());
       var firstFrame = reader.readFrame();
       if (!(firstFrame instanceof HTTP2Frame.SettingsFrame settings) || (settings.flags() & HTTP2Frame.FLAG_ACK) != 0) {
         logger.debug("Expected client SETTINGS frame after preface");

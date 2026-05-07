@@ -16,7 +16,7 @@ public class HTTPListenerConfigurationHTTP2Test {
     var c = new HTTPListenerConfiguration(80);
     assertTrue(c.isHTTP2Enabled());
     assertFalse(c.isH2cPriorKnowledgeEnabled());
-    assertTrue(c.isH2cUpgradeEnabled());
+    assertFalse(c.isH2cUpgradeEnabled());
   }
 
   @Test

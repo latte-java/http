@@ -157,6 +157,44 @@ public class HTTP1Worker implements ClientConnection, Runnable {
           return;
         }
 
+        // h2c via Upgrade/101 (RFC 7540 §3.2 — back-compat path; RFC 9113 deprecates this in favor of prior-knowledge).
+        boolean upgradeRequested = false;
+        if (listener.isH2cUpgradeEnabled()) {
+          String upgrade = request.getHeader("Upgrade");
+          if (upgrade != null && upgrade.equalsIgnoreCase("h2c")) {
+            // RFC 9113 §3.2 requires HTTP2-Settings to be present. The preamble parser drops headers with empty values, so
+            // a null here may mean "present but empty" rather than truly absent. Treat both null and empty as an empty
+            // settings payload — the practical effect is identical (no peer settings overrides), and rejecting empty
+            // values would break the most common h2c upgrade pattern used by curl and other tooling.
+            String h2settings = request.getHeader("HTTP2-Settings");
+            byte[] settingsPayload;
+            if (h2settings == null || h2settings.isBlank()) {
+              settingsPayload = new byte[0];
+            } else {
+              try {
+                settingsPayload = Base64.getUrlDecoder().decode(h2settings.strip());
+              } catch (IllegalArgumentException e) {
+                closeSocketOnError(response, Status.BadRequest);
+                return;
+              }
+            }
+            HTTP2Settings peerSettings = HTTP2Settings.defaults();
+            peerSettings.applyPayload(settingsPayload);
+            // TODO Plan E: the h2c spec says the original HTTP/1.1 request becomes implicit stream 1 in the new HTTP/2
+            //   connection. We punt on that here — the simpler implementation drops the original request and lets the
+            //   client re-send it as a proper HTTP/2 stream after the 101. Most h2c-Upgrade clients (curl --http2) do
+            //   not send a request body in the upgrade request and re-send after receiving the 101.
+            response.switchProtocols("h2c", Map.of(), s -> {
+              try {
+                new HTTP2Connection(s, configuration, context, instrumenter, listener, throughput, /*prefaceConsumed=*/false, /*serverSendsFirst=*/true).run();
+              } catch (Exception e) {
+                logger.debug("h2c upgrade handler ended", e);
+              }
+            });
+            upgradeRequested = true;
+          }
+        }
+
         // Automatic HEAD handling: dispatch through GET logic but suppress body output. The HTTPRequest captured HEAD as the originalMethod on
         // the first setMethod call during preamble parsing, so isHeadRequest() remains true even after this rewrite.
         if (request.getMethod().is(HTTPMethod.HEAD)) {
@@ -195,7 +233,9 @@ public class HTTP1Worker implements ClientConnection, Runnable {
         workerState = WorkerState.Process;
         logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), workerState);
         try {
-          configuration.getHandler().handle(request, response);
+          if (!upgradeRequested) {
+            configuration.getHandler().handle(request, response);
+          }
           logger.trace("[{}] Handler completed successfully", Thread.currentThread().threadId());
         } finally {
           // Clean up temporary files if instructed to do so.
