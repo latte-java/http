@@ -50,6 +50,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final Throughput throughput;
   private final BlockingQueue<HTTP2Frame> writerQueue = new LinkedBlockingQueue<>(128);
   private long handledRequests;
+  private volatile int highestSeenStreamId = 0;
   private volatile ClientConnection.State state = ClientConnection.State.Read;
 
   public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
@@ -93,6 +94,19 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   @Override
   public ClientConnection.State state() {
     return state;
+  }
+
+  /**
+   * Initiates a graceful shutdown by enqueuing a {@code GOAWAY(NO_ERROR)} frame with the highest seen client stream-id.
+   * The writer thread emits it and in-flight streams are given up to the server's configured shutdown duration to
+   * complete before the socket is force-closed by {@link HTTPServer}.
+   */
+  public void shutdown() {
+    try {
+      writerQueue.put(new HTTP2Frame.GoawayFrame(highestSeenStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   @Override
@@ -173,7 +187,6 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
       ByteArrayOutputStream headerAccum = new ByteArrayOutputStream();
       Integer headerBlockStreamId = null;
-      int highestStreamId = 0;
 
       try {
         while (true) {
@@ -200,11 +213,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
               return; // Peer is shutting down — drain and exit.
             }
             case HTTP2Frame.HeadersFrame f -> {
-              if (f.streamId() <= highestStreamId) {
+              if (f.streamId() <= highestSeenStreamId) {
                 goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
                 return;
               }
-              highestStreamId = f.streamId();
+              highestSeenStreamId = f.streamId();
               handleHeadersFrame(f, headerAccum, decoder, encoder);
               headerBlockStreamId = (f.flags() & HTTP2Frame.FLAG_END_HEADERS) == 0 ? f.streamId() : null;
             }
@@ -279,9 +292,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private void goAway(HTTP2ErrorCode code) {
     // Use the highest seen client stream-id.
     // lastStreamId == -1 is reserved as the writer-shutdown sentinel and must never be used for a real GOAWAY.
-    int highest = streams.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
     try {
-      writerQueue.put(new HTTP2Frame.GoawayFrame(highest, code.value, new byte[0]));
+      writerQueue.put(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
     } catch (InterruptedException ignore) {
       Thread.currentThread().interrupt();
     }

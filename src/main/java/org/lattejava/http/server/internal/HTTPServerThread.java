@@ -127,7 +127,13 @@ public class HTTPServerThread extends Thread {
       }
     }
 
-    // Close all the client connections as cleanly as possible
+    // Close all the client connections as cleanly as possible.
+    // HTTP/2 connections get a GOAWAY(NO_ERROR) so the peer knows the server is shutting down gracefully.
+    for (ClientInfo client : clients) {
+      if (client.runnable() instanceof HTTP2Connection h2) {
+        h2.shutdown();
+      }
+    }
     for (ClientInfo client : clients) {
       client.thread().interrupt();
     }
