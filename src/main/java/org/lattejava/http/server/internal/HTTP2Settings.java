@@ -73,6 +73,31 @@ public class HTTP2Settings {
   public int maxFrameSize() { return maxFrameSize; }
   public int maxHeaderListSize() { return maxHeaderListSize; }
 
+  public HTTP2Settings withHeaderTableSize(int size) {
+    this.headerTableSize = size;
+    return this;
+  }
+
+  public HTTP2Settings withInitialWindowSize(int size) {
+    this.initialWindowSize = size;
+    return this;
+  }
+
+  public HTTP2Settings withMaxConcurrentStreams(int n) {
+    this.maxConcurrentStreams = n;
+    return this;
+  }
+
+  public HTTP2Settings withMaxFrameSize(int size) {
+    this.maxFrameSize = size;
+    return this;
+  }
+
+  public HTTP2Settings withMaxHeaderListSize(int size) {
+    this.maxHeaderListSize = size;
+    return this;
+  }
+
   public static class HTTP2SettingsException extends RuntimeException {
     public HTTP2SettingsException(String message) { super(message); }
   }

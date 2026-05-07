@@ -42,8 +42,10 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   private String contextPath = "";
   private ExpectValidator expectValidator = new AlwaysContinueExpectValidator();
   private HTTPHandler handler;
+  private Duration http2KeepAlivePingInterval;
   private HTTP2RateLimits http2RateLimits = HTTP2RateLimits.defaults();
   private HTTP2Settings http2Settings = HTTP2Settings.defaults();
+  private Duration http2SettingsAckTimeout = Duration.ofSeconds(10);
   private Duration initialReadTimeoutDuration = Duration.ofSeconds(2);
 
   private Instrumenter instrumenter;
@@ -132,6 +134,13 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
+   * @return The interval at which the server sends HTTP/2 PING frames to keep connections alive, or null if keep-alive pings are disabled.
+   */
+  public Duration getHTTP2KeepAlivePingInterval() {
+    return http2KeepAlivePingInterval;
+  }
+
+  /**
    * @return The HTTP/2 rate limits configuration.
    */
   public HTTP2RateLimits getHTTP2RateLimits() {
@@ -143,6 +152,13 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public HTTP2Settings getHTTP2Settings() {
     return http2Settings;
+  }
+
+  /**
+   * @return The duration the server waits for a SETTINGS ACK from the client before treating the connection as failed. Defaults to 10 seconds.
+   */
+  public Duration getHTTP2SettingsAckTimeout() {
+    return http2SettingsAckTimeout;
   }
 
   /**
@@ -430,6 +446,96 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   public HTTPServerConfiguration withHandler(HTTPHandler handler) {
     Objects.requireNonNull(handler, "You cannot set the handler to null");
     this.handler = handler;
+    return this;
+  }
+
+  /**
+   * Sets the HPACK header table size advertised to the client in the initial SETTINGS frame. Defaults to 4096 (RFC 9113 §6.5.2).
+   *
+   * @param size The header table size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2HeaderTableSize(int size) {
+    http2Settings = http2Settings.withHeaderTableSize(size);
+    return this;
+  }
+
+  /**
+   * Sets the initial stream-level flow-control window size advertised to the client. Defaults to 65535 (RFC 9113 §6.9.2).
+   *
+   * @param size The initial window size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2InitialWindowSize(int size) {
+    http2Settings = http2Settings.withInitialWindowSize(size);
+    return this;
+  }
+
+  /**
+   * Sets the interval at which the server sends HTTP/2 PING frames to keep idle connections alive. Set to null to disable.
+   *
+   * @param d The ping interval duration, or null to disable keep-alive pings.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2KeepAlivePingInterval(Duration d) {
+    this.http2KeepAlivePingInterval = d;
+    return this;
+  }
+
+  /**
+   * Sets the maximum number of concurrent streams the server allows per connection. Defaults to unlimited.
+   *
+   * @param n The maximum number of concurrent streams.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2MaxConcurrentStreams(int n) {
+    http2Settings = http2Settings.withMaxConcurrentStreams(n);
+    return this;
+  }
+
+  /**
+   * Sets the maximum HTTP/2 frame size the server is willing to receive. Must be in the range [16384, 16777215] per RFC 9113 §6.5.2. Defaults to 16384.
+   *
+   * @param size The maximum frame size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2MaxFrameSize(int size) {
+    http2Settings = http2Settings.withMaxFrameSize(size);
+    return this;
+  }
+
+  /**
+   * Sets the maximum size of the header list the server is willing to accept. Defaults to unlimited.
+   *
+   * @param size The maximum header list size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2MaxHeaderListSize(int size) {
+    http2Settings = http2Settings.withMaxHeaderListSize(size);
+    return this;
+  }
+
+  /**
+   * Replaces the HTTP/2 rate limits configuration. Use {@link HTTP2RateLimits#defaults()} as a starting point.
+   *
+   * @param limits The rate limits to apply. Cannot be null.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2RateLimits(HTTP2RateLimits limits) {
+    Objects.requireNonNull(limits, "You cannot set the HTTP/2 rate limits to null");
+    this.http2RateLimits = limits;
+    return this;
+  }
+
+  /**
+   * Sets the duration the server waits for a SETTINGS ACK from the client before treating the connection as failed. Defaults to 10 seconds.
+   *
+   * @param d The timeout duration. Cannot be null.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2SettingsAckTimeout(Duration d) {
+    Objects.requireNonNull(d, "You cannot set the HTTP/2 settings ACK timeout to null");
+    this.http2SettingsAckTimeout = d;
     return this;
   }
 
