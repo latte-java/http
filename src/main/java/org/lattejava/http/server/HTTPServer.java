@@ -69,6 +69,16 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
   }
 
   /**
+   * @return The actual port the first listener is bound to. Useful when the listener was configured with port 0 (OS-assigned). Returns -1 if the server has not been started.
+   */
+  public int getActualPort() {
+    if (servers.isEmpty()) {
+      return -1;
+    }
+    return servers.get(0).getActualPort();
+  }
+
+  /**
    * @return The HTTP Context or null if the server hasn't been started yet.
    */
   public HTTPContext getContext() {

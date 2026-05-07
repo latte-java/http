@@ -226,7 +226,7 @@ public class FormDataTest extends BaseTest {
       };
 
       //noinspection resource
-      HTTPServer server = makeServer(scheme, handler, null)
+      HTTPServer server = makeServer(scheme, handler, (Instrumenter) null)
           .withMinimumWriteThroughput(-1)
           .withMinimumReadThroughput(-1)
 

@@ -18,6 +18,9 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
+import org.lattejava.http.server.internal.HTTP2RateLimits;
+import org.lattejava.http.server.internal.HTTP2Settings;
+
 /**
  * The HTTP Server configuration.
  *
@@ -34,17 +37,13 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   private final Map<String, Integer> maxRequestBodySize = new HashMap<>(DefaultMaxRequestSizes);
 
   private Path baseDir = Path.of("");
-
   private int chunkedBufferSize = 4 * 1024; // 4 Kilobytes
-
   private boolean compressByDefault = true;
-
   private String contextPath = "";
-
   private ExpectValidator expectValidator = new AlwaysContinueExpectValidator();
-
   private HTTPHandler handler;
-
+  private HTTP2RateLimits http2RateLimits = HTTP2RateLimits.defaults();
+  private HTTP2Settings http2Settings = HTTP2Settings.defaults();
   private Duration initialReadTimeoutDuration = Duration.ofSeconds(2);
 
   private Instrumenter instrumenter;
@@ -130,6 +129,20 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public HTTPHandler getHandler() {
     return handler;
+  }
+
+  /**
+   * @return The HTTP/2 rate limits configuration.
+   */
+  public HTTP2RateLimits getHTTP2RateLimits() {
+    return http2RateLimits;
+  }
+
+  /**
+   * @return The HTTP/2 settings for this server.
+   */
+  public HTTP2Settings getHTTP2Settings() {
+    return http2Settings;
   }
 
   /**

@@ -133,6 +133,13 @@ public class HTTPServerThread extends Thread {
     }
   }
 
+  /**
+   * @return The actual port the server socket is bound to. Useful when the listener was configured with port 0 (OS-assigned).
+   */
+  public int getActualPort() {
+    return socket.getLocalPort();
+  }
+
   public void shutdown() {
     running = false;
     try {

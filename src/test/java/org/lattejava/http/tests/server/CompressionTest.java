@@ -258,7 +258,7 @@ public class CompressionTest extends BaseTest {
     var bodyPublisher = HttpRequest.BodyPublishers.ofByteArray(payload);
 
     try (var client = makeClient(scheme, null);
-         var ignore = makeServer(scheme, handler, null).start()) {
+         var ignore = makeServer(scheme, handler, (Instrumenter) null).start()) {
 
       URI uri = makeURI(scheme, "");
       var response = client.send(
@@ -434,7 +434,7 @@ public class CompressionTest extends BaseTest {
     var bodyPublisher = HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream("Hello World".getBytes(StandardCharsets.UTF_8)));
 
     try (var client = makeClient(scheme, null);
-         var ignore = makeServer(scheme, handler, null).start()) {
+         var ignore = makeServer(scheme, handler, (Instrumenter) null).start()) {
 
       URI uri = makeURI(scheme, "");
       var response = client.send(

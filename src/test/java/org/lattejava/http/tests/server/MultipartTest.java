@@ -293,7 +293,7 @@ public class MultipartTest extends BaseTest {
         }
       };
 
-      HTTPServer server = makeServer(scheme, handler, null)
+      HTTPServer server = makeServer(scheme, handler, (Instrumenter) null)
           .withInitialReadTimeout(Duration.ofSeconds(30))
           .withKeepAliveTimeoutDuration(Duration.ofSeconds(30))
           .withMinimumWriteThroughput(1024)
