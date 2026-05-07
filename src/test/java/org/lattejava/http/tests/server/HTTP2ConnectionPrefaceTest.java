@@ -5,6 +5,7 @@
 package org.lattejava.http.tests.server;
 
 import module java.base;
+import module java.net.http;
 import module org.lattejava.http;
 import module org.testng;
 
@@ -50,6 +51,31 @@ public class HTTP2ConnectionPrefaceTest extends BaseTest {
         int firstByte = in.read();
         assertEquals(firstByte, -1, "Server should close on invalid preface");
       }
+    }
+  }
+
+  /**
+   * Smoke test: a full HTTP/2 round-trip via the JDK HttpClient over TLS with ALPN. The handler simply sets status 200
+   * and writes no body. Verifies that the frame loop, HPACK dispatch, handler-thread spawn, and writer thread all
+   * cooperate to produce a valid HTTP/2 response.
+   */
+  @Test
+  public void simple_get_h2_round_trip() throws Exception {
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
+    var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
+    try (var server = makeServer("https", handler, listener).start()) {
+      int port = server.getActualPort();
+      var sslContext = SecurityTools.clientContext(rootCertificate);
+      var client = HttpClient.newBuilder()
+                             .sslContext(sslContext)
+                             .version(HttpClient.Version.HTTP_2)
+                             .build();
+      var resp = client.send(
+          HttpRequest.newBuilder(URI.create("https://local.lattejava.org:" + port + "/")).build(),
+          HttpResponse.BodyHandlers.discarding());
+      assertEquals(resp.statusCode(), 200);
+      assertEquals(resp.version(), HttpClient.Version.HTTP_2);
     }
   }
 

@@ -34,6 +34,8 @@ public class HTTPResponse {
 
   private HTTPOutputStream outputStream;
 
+  private OutputStream rawOutputStream;
+
   private int status = 200;
 
   private String statusMessage;
@@ -91,6 +93,8 @@ public class HTTPResponse {
   public void close() throws IOException {
     if (writer != null) {
       writer.close();
+    } else if (rawOutputStream != null) {
+      rawOutputStream.close();
     } else {
       outputStream.close();
     }
@@ -111,7 +115,11 @@ public class HTTPResponse {
    * @throws IOException If the socket throws.
    */
   public void flush() throws IOException {
-    outputStream.forceFlush();
+    if (rawOutputStream != null) {
+      rawOutputStream.flush();
+    } else {
+      outputStream.forceFlush();
+    }
   }
 
   /**
@@ -183,7 +191,18 @@ public class HTTPResponse {
   }
 
   public OutputStream getOutputStream() {
-    return outputStream;
+    return rawOutputStream != null ? rawOutputStream : outputStream;
+  }
+
+  /**
+   * Sets the raw output stream for protocols (e.g. HTTP/2) that bypass the HTTP/1.1 {@link HTTPOutputStream} wrapper.
+   * When a raw output stream is set, {@link #getOutputStream()} returns it instead of the {@link HTTPOutputStream}.
+   * Methods that delegate to {@link HTTPOutputStream} (compress, commit, etc.) are not available when using a raw stream.
+   *
+   * @param rawOutputStream the raw output stream to use for body emission.
+   */
+  public void setRawOutputStream(OutputStream rawOutputStream) {
+    this.rawOutputStream = rawOutputStream;
   }
 
   public void setOutputStream(HTTPOutputStream outputStream) {
@@ -241,17 +260,18 @@ public class HTTPResponse {
 
   /**
    * @return True if the response has been committed, meaning at least one byte was written back to the client. False
-   *     otherwise.
+   *     otherwise. Always returns false when using a raw output stream (HTTP/2 path).
    */
   public boolean isCommitted() {
-    return outputStream.isCommitted();
+    return rawOutputStream == null && outputStream.isCommitted();
   }
 
   /**
-   * @return true if compression will be utilized when writing the HTTP OutputStream.
+   * @return true if compression will be utilized when writing the HTTP OutputStream. Always false on the HTTP/2 path
+   *     (compression is handled at the TLS layer or not at all for h2c).
    */
   public boolean isCompress() {
-    return outputStream.isCompress();
+    return rawOutputStream == null && outputStream.isCompress();
   }
 
   /**
@@ -259,11 +279,15 @@ public class HTTPResponse {
    * the first byte being written to the HTTP OutputStream.
    * <p>
    * An {@link IllegalStateException} will be thrown if you call this method after writing to the OutputStream.
+   * <p>
+   * This method is a no-op when using a raw output stream (HTTP/2 path).
    *
    * @param compress true to enable the response to be written back compressed.
    */
   public void setCompress(boolean compress) {
-    outputStream.setCompress(compress);
+    if (rawOutputStream == null) {
+      outputStream.setCompress(compress);
+    }
   }
 
   public boolean isProtocolSwitchPending() {
@@ -290,14 +314,16 @@ public class HTTPResponse {
    * this throws up.
    */
   public void reset() {
-    if (outputStream.isCommitted()) {
+    if (rawOutputStream == null && outputStream.isCommitted()) {
       throw new IllegalStateException("The HTTPResponse can't be reset after it has been committed, meaning at least one byte was written back to the client.");
     }
 
     cookies.clear();
     headers.clear();
     exception = null;
-    outputStream.reset();
+    if (rawOutputStream == null) {
+      outputStream.reset();
+    }
     status = 200;
     statusMessage = null;
     writer = null;
@@ -393,10 +419,10 @@ public class HTTPResponse {
   }
 
   /**
-   * @return true if compression has been requested and as far as we know, we will.
+   * @return true if compression has been requested and as far as we know, we will. Always false on the HTTP/2 path.
    */
   public boolean willCompress() {
-    return outputStream.willCompress();
+    return rawOutputStream == null && outputStream.willCompress();
   }
 
   private void rejectIfForbiddenTrailer(String name) {
