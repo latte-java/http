@@ -67,6 +67,27 @@ public class HTTP1Worker implements ClientConnection, Runnable {
     logger.trace("[{}] Starting HTTP worker.", Thread.currentThread().threadId());
   }
 
+  /**
+   * Alternate constructor used by {@link ProtocolSelector} when the h2c prior-knowledge peek path has already consumed
+   * bytes from the socket's InputStream and pushed them back into a pre-built {@link PushbackInputStream}. Passing the
+   * stream directly avoids a second wrapping and ensures no peeked bytes are lost.
+   */
+  public HTTP1Worker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                     HTTPListenerConfiguration listener, Throughput throughput, PushbackInputStream inputStream) throws IOException {
+    this.socket = socket;
+    this.configuration = configuration;
+    this.context = context;
+    this.instrumenter = instrumenter;
+    this.listener = listener;
+    this.throughput = throughput;
+    this.buffers = new HTTPBuffers(configuration);
+    this.logger = configuration.getLoggerFactory().getLogger(HTTP1Worker.class);
+    this.inputStream = inputStream;
+    this.workerState = WorkerState.Read;
+    this.startInstant = System.currentTimeMillis();
+    logger.trace("[{}] Starting HTTP worker.", Thread.currentThread().threadId());
+  }
+
   public long getHandledRequests() {
     return handledRequests;
   }

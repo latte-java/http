@@ -14,7 +14,7 @@ public class HTTPListenerConfigurationHTTP2Test {
   @Test
   public void defaults() {
     var c = new HTTPListenerConfiguration(80);
-    assertFalse(c.isHTTP2Enabled());
+    assertTrue(c.isHTTP2Enabled());
     assertFalse(c.isH2cPriorKnowledgeEnabled());
     assertTrue(c.isH2cUpgradeEnabled());
   }
@@ -22,10 +22,10 @@ public class HTTPListenerConfigurationHTTP2Test {
   @Test
   public void withers_set_flags() {
     var c = new HTTPListenerConfiguration(80)
-        .withHTTP2Enabled(true)
+        .withHTTP2Enabled(false)
         .withH2cPriorKnowledgeEnabled(true)
         .withH2cUpgradeEnabled(false);
-    assertTrue(c.isHTTP2Enabled());
+    assertFalse(c.isHTTP2Enabled());
     assertTrue(c.isH2cPriorKnowledgeEnabled());
     assertFalse(c.isH2cUpgradeEnabled());
   }

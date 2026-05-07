@@ -205,7 +205,9 @@ public abstract class BaseTest {
       builder.cookieHandler(cookieHandler);
     }
 
-    return builder.connectTimeout(ClientTimeout).build();
+    // Pin to HTTP/1.1 until Task 7 delivers real HTTP/2 support. Without this, the JDK client will negotiate h2 via
+    // ALPN when the server advertises it, and the stub HTTP2Connection closes the socket immediately.
+    return builder.connectTimeout(ClientTimeout).version(HttpClient.Version.HTTP_1_1).build();
   }
 
   public Socket makeClientSocket(String scheme) throws GeneralSecurityException, IOException {

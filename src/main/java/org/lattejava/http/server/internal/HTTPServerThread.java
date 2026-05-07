@@ -101,12 +101,12 @@ public class HTTPServerThread extends Thread {
         }
 
         Throughput throughput = new Throughput(configuration.getReadThroughputCalculationDelay().toMillis(), configuration.getWriteThroughputCalculationDelay().toMillis());
-        HTTP1Worker runnable = new HTTP1Worker(clientSocket, configuration, context, instrumenter, listener, throughput);
+        ClientConnection conn = ProtocolSelector.select(clientSocket, configuration, context, instrumenter, listener, throughput);
         Thread client = Thread.ofVirtual()
                               .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
-                              .start(runnable);
+                              .start((Runnable) conn);
 
-        clients.add(new ClientInfo(client, runnable, throughput));
+        clients.add(new ClientInfo(client, conn, throughput));
       } catch (SocketTimeoutException ignore) {
         // Completely smother since this is expected with the SO_TIMEOUT setting in the constructor
         logger.debug("Nothing accepted. Cleaning up existing connections.");

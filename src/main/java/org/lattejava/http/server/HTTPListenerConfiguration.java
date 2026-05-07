@@ -32,7 +32,7 @@ public class HTTPListenerConfiguration {
   private final boolean tls;
   private boolean h2cPriorKnowledgeEnabled = false;
   private boolean h2cUpgradeEnabled = true;
-  private boolean http2Enabled = false;
+  private boolean http2Enabled = true;
 
   /**
    * Stores the configuration for a single HTTP listener for the server. This constructor sets up a non-TLS based
