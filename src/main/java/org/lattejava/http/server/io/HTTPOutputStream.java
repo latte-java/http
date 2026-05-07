@@ -106,7 +106,7 @@ public class HTTPOutputStream extends OutputStream {
     committed = false;
     compress = false;
     delegate = serverToSocket;
-    // suppressBody is intentionally preserved across reset() so that HEAD error responses (triggered via response.reset() in closeSocketOnError) continue to suppress the body. HTTPOutputStream is constructed fresh per connection iteration in HTTPWorker, so there is no cross-request bleed.
+    // suppressBody is intentionally preserved across reset() so that HEAD error responses (triggered via response.reset() in closeSocketOnError) continue to suppress the body. HTTPOutputStream is constructed fresh per connection iteration in HTTP1Worker, so there is no cross-request bleed.
   }
 
   /**

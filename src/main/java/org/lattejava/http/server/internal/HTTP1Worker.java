@@ -26,7 +26,7 @@ import org.lattejava.http.io.PushbackInputStream;
  *
  * @author Brian Pontarelli
  */
-public class HTTPWorker implements Runnable {
+public class HTTP1Worker implements ClientConnection, Runnable {
   private final HTTPBuffers buffers;
 
   private final HTTPServerConfiguration configuration;
@@ -49,10 +49,10 @@ public class HTTPWorker implements Runnable {
 
   private long handledRequests;
 
-  private volatile State state;
+  private volatile WorkerState workerState;
 
-  public HTTPWorker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
-                    HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
+  public HTTP1Worker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                     HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
     this.socket = socket;
     this.configuration = configuration;
     this.context = context;
@@ -60,9 +60,9 @@ public class HTTPWorker implements Runnable {
     this.listener = listener;
     this.throughput = throughput;
     this.buffers = new HTTPBuffers(configuration);
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPWorker.class);
+    this.logger = configuration.getLoggerFactory().getLogger(HTTP1Worker.class);
     this.inputStream = new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter);
-    this.state = State.Read;
+    this.workerState = WorkerState.Read;
     this.startInstant = System.currentTimeMillis();
     logger.trace("[{}] Starting HTTP worker.", Thread.currentThread().threadId());
   }
@@ -101,13 +101,13 @@ public class HTTPWorker implements Runnable {
         var throughputOutputStream = new ThroughputOutputStream(socket.getOutputStream(), throughput);
         response = new HTTPResponse();
 
-        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> state = State.Write);
+        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> workerState = WorkerState.Write);
         response.setOutputStream(outputStream);
 
         // Not this line of code will block
         // - When a client is using Keep-Alive - we will loop and block here while we wait for the client to send us bytes.
         byte[] requestBuffer = buffers.requestBuffer();
-        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> state = State.Read);
+        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> workerState = WorkerState.Read);
         if (logger.isTraceEnabled()) {
           int availableBufferedBytes = inputStream.getAvailableBufferedBytesRemaining();
           if (availableBufferedBytes != 0) {
@@ -147,7 +147,7 @@ public class HTTPWorker implements Runnable {
         String expect = request.getHeader(HTTPValues.Headers.Expect);
         if (expect != null) {
           if (expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
-            state = State.Write;
+            workerState = WorkerState.Write;
 
             boolean doContinue = handleExpectContinue(request);
             if (!doContinue) {
@@ -157,7 +157,7 @@ public class HTTPWorker implements Runnable {
             }
 
             // Otherwise, transition the state to Read
-            state = State.Read;
+            workerState = WorkerState.Read;
           } else {
             closeSocketOnError(response, HTTPValues.Status.ExpectationFailed);
             return;
@@ -171,8 +171,8 @@ public class HTTPWorker implements Runnable {
         }
 
         // Transition to processing
-        state = State.Process;
-        logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), state);
+        workerState = WorkerState.Process;
+        logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), workerState);
         try {
           configuration.getHandler().handle(request, response);
           logger.trace("[{}] Handler completed successfully", Thread.currentThread().threadId());
@@ -229,9 +229,9 @@ public class HTTPWorker implements Runnable {
         }
 
         // Transition to Keep-Alive state and reset the SO timeout
-        state = State.KeepAlive;
+        workerState = WorkerState.KeepAlive;
         int soTimeout = (int) configuration.getKeepAliveTimeoutDuration().toMillis();
-        logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), state, soTimeout);
+        logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), workerState, soTimeout);
         socket.setSoTimeout(soTimeout);
 
         // Drain the InputStream so we can complete this request
@@ -255,16 +255,16 @@ public class HTTPWorker implements Runnable {
       // - Close the connection, unless we drain it, the connection cannot be re-used.
       // - Treating this as an expected case because if we are in a keep-alive state, no big deal, the client can just re-open the request. If we
       //   are not ina keep alive state, the request does not need to be re-used anyway.
-      logger.debug("[{}] Closing socket [{}]. Too many bytes remaining in the InputStream. Drained [{}] bytes. Configured maximum bytes [{}].", Thread.currentThread().threadId(), state, e.getDrainedBytes(), e.getMaximumDrainedBytes());
+      logger.debug("[{}] Closing socket [{}]. Too many bytes remaining in the InputStream. Drained [{}] bytes. Configured maximum bytes [{}].", Thread.currentThread().threadId(), workerState, e.getDrainedBytes(), e.getMaximumDrainedBytes());
       closeSocketOnly(CloseSocketReason.Expected);
     } catch (SocketTimeoutException e) {
       // This might be a read timeout or a Keep-Alive timeout. The reason is based on the worker state.
-      CloseSocketReason reason = state == State.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
-      String message = state == State.Read ? "Initial read timeout" : "Keep-Alive expired";
+      CloseSocketReason reason = workerState == WorkerState.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
+      String message = workerState == WorkerState.Read ? "Initial read timeout" : "Keep-Alive expired";
       if (reason == CloseSocketReason.Expected) {
-        logger.trace("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), state, message);
+        logger.trace("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), workerState, message);
       } else {
-        logger.debug("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), state, message);
+        logger.debug("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), workerState, message);
       }
       closeSocketOnly(reason);
     } catch (ParseException e) {
@@ -298,8 +298,13 @@ public class HTTPWorker implements Runnable {
     }
   }
 
-  public State state() {
-    return state;
+  @Override
+  public ClientConnection.State state() {
+    return switch (workerState) {
+      case Read, KeepAlive -> ClientConnection.State.Read;
+      case Write -> ClientConnection.State.Write;
+      case Process -> ClientConnection.State.Process;
+    };
   }
 
   private void closeSocketOnError(HTTPResponse response, int status) {
@@ -507,11 +512,11 @@ public class HTTPWorker implements Runnable {
     Unexpected
   }
 
-  public enum State {
-    Read,
+  private enum WorkerState {
+    KeepAlive,
     Process,
-    Write,
-    KeepAlive
+    Read,
+    Write
   }
 
   private static class Status {

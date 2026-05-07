@@ -175,7 +175,7 @@ public class HTTPInputStream extends InputStream {
     if (hasBody) {
       Long contentLength = request.getContentLength();
       // Transfer-Encoding always takes precedence over Content-Length. In practice if they were to both be present on
-      // the request we would have removed Content-Length during validation to remove ambiguity. See HTTPWorker.validatePreamble.
+      // the request we would have removed Content-Length during validation to remove ambiguity. See HTTP1Worker.validatePreamble.
       if (request.isChunked()) {
         logger.trace("Client indicated it was sending an entity-body in the request. Handling body using chunked encoding.");
         ChunkedInputStream chunked = new ChunkedInputStream(pushbackInputStream, chunkedBufferSize, maxRequestChunkSize);
