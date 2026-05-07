@@ -41,14 +41,14 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Mode | Status | Notes |
 |---|---|---|
-| h2 over TLS via ALPN (RFC 7301) | ❌ | Default-on for TLS listeners. Server advertises `["h2", "http/1.1"]`. Off-switch: `HTTPListenerConfiguration.enableHTTP2 = false`. |
-| h2c prior-knowledge (cleartext) | ❌ | Opt-in: `HTTPListenerConfiguration.enableH2cPriorKnowledge = true`. Selector peeks the first 24 bytes for the connection preface. |
-| h2c via `Upgrade`/101 (cleartext) | ❌ | Default-on for cleartext listeners. Off-switch: `HTTPListenerConfiguration.enableH2cUpgrade = false`. Note: RFC 9113 deprecated the Upgrade flow; we ship it for back-compat with older clients. |
-| Connection preface validation | ❌ | Exact bytes `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n` required; mismatch → connection close. |
-| TLS 1.2 minimum (§9.2.1) | ❌ | JDK 21 disables TLSv1.0/1.1 by default. |
+| h2 over TLS via ALPN (RFC 7301) | ✅ | Default-on for TLS listeners. Server advertises `["h2", "http/1.1"]`. Off-switch: `HTTPListenerConfiguration.enableHTTP2 = false`. — `HTTP2BasicTest`, `HTTP2ALPNTest` |
+| h2c prior-knowledge (cleartext) | ✅ | Opt-in: `HTTPListenerConfiguration.enableH2cPriorKnowledge = true`. Selector peeks the first 24 bytes for the connection preface. — `HTTP2H2cPriorKnowledgeTest` |
+| h2c via `Upgrade`/101 (cleartext) | ✅ | Opt-in via `withH2cUpgradeEnabled`. Note: RFC 9113 deprecated the Upgrade flow; we ship it for back-compat with older clients. — `HTTP2H2cUpgradeTest` |
+| Connection preface validation | ✅ | Exact bytes `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n` required; mismatch → connection close. — `HTTP2ConnectionPrefaceTest` |
+| TLS 1.2 minimum (§9.2.1) | ✅ | JDK 21 disables TLSv1.0/1.1 by default. Implicit via JDK 21. |
 | TLS 1.2 cipher blocklist (§9.2.2) | ❌ | After ALPN selects `h2`, check `SSLSession.getCipherSuite()` against Appendix A blocklist; blocklisted → `GOAWAY(INADEQUATE_SECURITY)`. |
-| TLS-level compression forbidden (§9.2) | ❌ | JDK 21 doesn't expose TLS compression; implicit. |
-| TLS renegotiation forbidden (§9.2) | ❌ | Server never initiates. Client-initiated renegotiation rejected via JDK system property (deployment recommendation). |
+| TLS-level compression forbidden (§9.2) | ✅ | JDK 21 doesn't expose TLS compression; implicit via JDK 21. |
+| TLS renegotiation forbidden (§9.2) | ✅ | Server never initiates. Client-initiated renegotiation rejected via JDK system property (deployment recommendation). |
 
 ---
 
@@ -56,17 +56,17 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Frame | Status | Notes |
 |---|---|---|
-| `DATA` (0x0) | ❌ | Inbound: routed to stream input pipe; END_STREAM transitions stream state. Outbound: chunked from handler writes by `HTTP2OutputStream`; END_STREAM on close. |
-| `HEADERS` (0x1) | ❌ | Inbound: HPACK-decoded, builds HTTPRequest. Outbound: response headers + trailers emission. END_HEADERS, END_STREAM, PADDED, PRIORITY flags supported (PRIORITY parsed and discarded). |
-| `PRIORITY` (0x2) | ❌ | Parsed and discarded per RFC 9113 §5.3. RFC 7540's priority scheme is deprecated. |
-| `RST_STREAM` (0x3) | ❌ | Inbound: cancels stream handler thread, drops queued writes. Outbound: stream error responses. |
-| `SETTINGS` (0x4) | ❌ | Initial server settings sent on connection start; ACK on inbound. Settings flood mitigation (rate-limit). |
+| `DATA` (0x0) | ✅ | Inbound: routed to stream input pipe; END_STREAM transitions stream state. Outbound: chunked from handler writes by `HTTP2OutputStream`; END_STREAM on close. — `HTTP2FrameReaderTest`, `HTTP2BasicTest` |
+| `HEADERS` (0x1) | ✅ | Inbound: HPACK-decoded, builds HTTPRequest. Outbound: response headers + trailers emission. END_HEADERS, END_STREAM, PADDED, PRIORITY flags supported (PRIORITY parsed and discarded). — `HTTP2FrameReaderTest`, `HTTP2BasicTest` |
+| `PRIORITY` (0x2) | ✅ | Parsed and discarded per RFC 9113 §5.3. RFC 7540's priority scheme is deprecated. — `HTTP2FrameReaderTest` |
+| `RST_STREAM` (0x3) | ✅ | Inbound: cancels stream handler thread, drops queued writes. Outbound: stream error responses. — `HTTP2RawFrameTest`, `HTTP2BasicTest` |
+| `SETTINGS` (0x4) | ✅ | Initial server settings sent on connection start; ACK on inbound. Settings flood mitigation (rate-limit). — `HTTP2FrameReaderTest`, `HTTP2BasicTest` |
 | `PUSH_PROMISE` (0x5) | 🚫 | Not emitted (`SETTINGS_ENABLE_PUSH=0`). Inbound from client → connection error PROTOCOL_ERROR (clients must not push). |
-| `PING` (0x6) | ❌ | Inbound: respond with ACK. Outbound: optional server-initiated keepalive (`withHTTP2KeepAlivePingInterval`). Rate-limited. |
-| `GOAWAY` (0x7) | ❌ | Outbound on shutdown / protocol error / DoS threshold. Inbound: stop opening new streams; existing streams complete. Graceful shutdown after `GOAWAY(NO_ERROR)` waits up to `withShutdownDuration` (default 10s) for in-flight streams before forcing socket close. |
-| `WINDOW_UPDATE` (0x8) | ❌ | Inbound: extends a send-window. Outbound: replenishes our receive-window (replenish-when-half-empty strategy). Rate-limited. |
-| `CONTINUATION` (0x9) | ❌ | Continues a HEADERS or PUSH_PROMISE block when it exceeds MAX_FRAME_SIZE. Both directions supported. CONTINUATION-flood mitigation (CVE-2024-27316). |
-| Unknown frame types | ❌ | Ignored per RFC 9113 §5.5. |
+| `PING` (0x6) | ✅ | Inbound: respond with ACK. Outbound: optional server-initiated keepalive (`withHTTP2KeepAlivePingInterval`). Rate-limited. — `HTTP2FrameReaderTest`, `HTTP2BasicTest` |
+| `GOAWAY` (0x7) | ✅ | Outbound on shutdown / protocol error / DoS threshold. Inbound: stop opening new streams; existing streams complete. Graceful shutdown after `GOAWAY(NO_ERROR)` waits up to `withShutdownDuration` (default 10s) for in-flight streams before forcing socket close. — `HTTP2RawFrameTest`, `HTTP2BasicTest` |
+| `WINDOW_UPDATE` (0x8) | ✅ | Inbound: extends a send-window. Outbound: replenishes our receive-window (replenish-when-half-empty strategy). Rate-limited. — `HTTP2FrameReaderTest`, `HTTP2BasicTest` |
+| `CONTINUATION` (0x9) | ✅ | Continues a HEADERS or PUSH_PROMISE block when it exceeds MAX_FRAME_SIZE. Both directions supported. CONTINUATION-flood mitigation (CVE-2024-27316). — `HTTP2FrameReaderTest`, `HTTP2RawFrameTest` |
+| Unknown frame types | ✅ | Ignored per RFC 9113 §5.5. — `HTTP2RawFrameTest` |
 
 ---
 
@@ -74,17 +74,17 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Feature | Status | Notes |
 |---|---|---|
-| Static table (61 entries, Appendix A) | ❌ | |
-| Dynamic table | ❌ | Capped at `SETTINGS_HEADER_TABLE_SIZE` (default 4096, configurable). |
-| Dynamic-table-size-update signal (§6.3) | ❌ | Emitted on size-down acknowledgment. |
-| Indexed header field (§6.1) | ❌ | |
-| Literal with incremental indexing (§6.2.1) | ❌ | |
-| Literal without indexing (§6.2.2) | ❌ | Used for sensitive headers (Authorization, Set-Cookie). |
-| Literal never-indexed (§6.2.3) | ❌ | Available for handler-marked-sensitive headers (future API). |
-| Huffman coding (Appendix B) | ❌ | Static code table. |
-| Header-name validation | ❌ | RFC 9113 §8.2 — must be lowercase tchar. Rejection → stream error PROTOCOL_ERROR. Reuses `HTTPTools.isTokenCharacter`. |
-| Header-value validation | ❌ | Reuses `HTTPTools.isValueCharacter` — bare CR/LF/NUL rejected. |
-| `MAX_HEADER_LIST_SIZE` enforcement | ❌ | Cumulative across HEADERS + CONTINUATION; over-budget → connection error or stream rejection depending on when detected. |
+| Static table (61 entries, Appendix A) | ✅ | — `HPACKDecoderTest`, `HPACKEncoderTest` |
+| Dynamic table | ✅ | Capped at `SETTINGS_HEADER_TABLE_SIZE` (default 4096, configurable). — `HPACKDynamicTableTest` |
+| Dynamic-table-size-update signal (§6.3) | ✅ | Emitted on size-down acknowledgment. — `HPACKDynamicTableTest` |
+| Indexed header field (§6.1) | ✅ | — `HPACKDecoderTest`, `HPACKEncoderTest` |
+| Literal with incremental indexing (§6.2.1) | ✅ | — `HPACKDecoderTest`, `HPACKEncoderTest` |
+| Literal without indexing (§6.2.2) | ✅ | Used for sensitive headers (Authorization, Set-Cookie). — `HPACKDecoderTest`, `HPACKEncoderTest` |
+| Literal never-indexed (§6.2.3) | ✅ | Available for handler-marked-sensitive headers (future API). — `HPACKDecoderTest`, `HPACKEncoderTest` |
+| Huffman coding (Appendix B) | ✅ | Static code table. — `HPACKHuffmanTest` |
+| Header-name validation | ⚠️ | RFC 9113 §8.2 — HPACK decoder writes lowercase + ASCII; explicit validation (reject non-lowercase tchar → PROTOCOL_ERROR) deferred to Plan F. |
+| Header-value validation | ⚠️ | HPACK decoder writes ASCII; explicit bare CR/LF/NUL rejection deferred to Plan F. |
+| `MAX_HEADER_LIST_SIZE` enforcement | ⚠️ | SETTINGS field is parsed and sent; runtime cumulative-budget enforcement across HEADERS + CONTINUATION is incomplete. Plan F. |
 
 ---
 
@@ -92,12 +92,12 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Feature | Status | Notes |
 |---|---|---|
-| State machine: idle / open / half-closed (local) / half-closed (remote) / closed | ❌ | Encoded in `HTTP2Stream.applyEvent`. Reserved states unused (no push). |
-| `MAX_CONCURRENT_STREAMS` enforcement | ❌ | Default 100, configurable. New HEADERS over cap → `RST_STREAM(REFUSED_STREAM)`. |
-| Stream-id ordering (client odd, monotonic) | ❌ | Stream-id ≤ highest-seen → connection error PROTOCOL_ERROR. |
-| Stream-error vs connection-error classification (§5.4) | ❌ | Per-frame violation rules; connection-level errors → GOAWAY + close. |
-| Trailing HEADERS frame (request-side trailers) | ❌ | Detected as HEADERS-after-DATA on a stream; populates `HTTPRequest` trailer map. |
-| Trailing HEADERS frame (response-side trailers) | ❌ | Final HEADERS frame with END_STREAM, after final DATA, when handler set trailers. |
+| State machine: idle / open / half-closed (local) / half-closed (remote) / closed | ✅ | Encoded in `HTTP2Stream.applyEvent`. Reserved states unused (no push). — `HTTP2StreamStateMachineTest` |
+| `MAX_CONCURRENT_STREAMS` enforcement | ✅ | Default 100, configurable. New HEADERS over cap → `RST_STREAM(REFUSED_STREAM)`. — `HTTP2Connection.handleHeadersFrame` |
+| Stream-id ordering (client odd, monotonic) | ✅ | Stream-id ≤ highest-seen → connection error PROTOCOL_ERROR. — `HTTP2RawFrameTest.decreasing_stream_id_triggers_protocol_error` |
+| Stream-error vs connection-error classification (§5.4) | ✅ | Per-frame violation rules; connection-level errors → GOAWAY + close. Implicit in current handlers. |
+| Trailing HEADERS frame (request-side trailers) | ⚠️ | Detected as HEADERS-after-DATA on a stream; populates `HTTPRequest` trailer map. Plan F polish. |
+| Trailing HEADERS frame (response-side trailers) | ⚠️ | Final HEADERS frame with END_STREAM, after final DATA, when handler set trailers. Plan F polish. |
 
 ---
 
@@ -105,12 +105,12 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Feature | Status | Notes |
 |---|---|---|
-| Connection-level send-window | ❌ | Tracked by writer thread; gates DATA serialization. |
-| Per-stream send-window | ❌ | Tracked by writer thread; per-stream condition variable for handler unblock on WINDOW_UPDATE. |
-| Connection-level receive-window | ❌ | Tracked by reader thread; replenished via WINDOW_UPDATE when below half. |
-| Per-stream receive-window | ❌ | Same strategy. |
-| `SETTINGS_INITIAL_WINDOW_SIZE` | ❌ | Default 65535 (RFC default), configurable via `withHTTP2InitialWindowSize`. |
-| Window-size change retroactive adjustment (§6.9.2) | ❌ | When peer's `INITIAL_WINDOW_SIZE` changes mid-connection, all open streams' send-windows adjusted by the delta. |
+| Connection-level send-window | ✅ | Tracked by writer thread; gates DATA serialization. — `HTTP2Connection.handleData` |
+| Per-stream send-window | ✅ | Tracked by writer thread; per-stream condition variable for handler unblock on WINDOW_UPDATE. — `HTTP2Stream`, `HTTP2OutputStream` (signed comparison) |
+| Connection-level receive-window | ✅ | Tracked by reader thread; replenished via WINDOW_UPDATE when below half. — `HTTP2Connection.handleData` |
+| Per-stream receive-window | ✅ | Same replenish-when-half-empty strategy. |
+| `SETTINGS_INITIAL_WINDOW_SIZE` | ✅ | Default 65535 (RFC default), configurable via `withHTTP2InitialWindowSize`. |
+| Window-size change retroactive adjustment (§6.9.2) | ✅ | When peer's `INITIAL_WINDOW_SIZE` changes mid-connection, all open streams' send-windows adjusted by the delta. — `HTTP2Connection.handleSettings`, `HTTP2FlowControlTest.send_window_can_go_negative_after_settings_decrease` |
 | Flow-control disabled for DATA flag | 🚫 | RFC 9113 doesn't define a way to disable flow control. |
 
 ---
@@ -119,13 +119,13 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Feature | Status | Notes |
 |---|---|---|
-| `:method`, `:scheme`, `:path`, `:authority` required | ❌ | All four must be present and exactly once. Validation order: pseudo-headers must precede regular headers. |
-| Connection-specific headers forbidden (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) | ❌ | Stream error PROTOCOL_ERROR. |
-| Uppercase in header name forbidden | ❌ | Stream error PROTOCOL_ERROR. |
-| `Cookie` coalescing across multiple headers | ❌ | Per RFC 9113 §8.2.3, h2 splits Cookie across multiple headers; we coalesce with `; ` before exposure to the existing `HTTPRequest.getCookies()` parser. |
-| `getProtocol()` returns `"HTTP/2.0"` | ❌ | For handlers that need to discriminate. |
-| `isKeepAlive()` returns `true` on h2 | ❌ | Multiplexed h2 connections are persistent by definition; the per-request close concept doesn't apply. |
-| Strip h1.1-only response headers (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) on h2 emit | ❌ | Connection-specific headers forbidden on h2 (RFC 9113 §8.2.2). Stripped (logged at debug), not error-failed. |
+| `:method`, `:scheme`, `:path`, `:authority` required | ✅ | All four must be present and exactly once. Validation order: pseudo-headers must precede regular headers. |
+| Connection-specific headers forbidden (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) | ⚠️ | Stream error PROTOCOL_ERROR. Runtime check incomplete; Plan F polish. |
+| Uppercase in header name forbidden | ⚠️ | Stream error PROTOCOL_ERROR. Runtime check incomplete; Plan F polish. |
+| `Cookie` coalescing across multiple headers | ⚠️ | Per RFC 9113 §8.2.3, h2 splits Cookie across multiple headers; coalescing with `; ` not yet implemented. Plan F. |
+| `getProtocol()` returns `"HTTP/2.0"` | ✅ | For handlers that need to discriminate. — `HTTP2BasicTest.get_round_trip_h2` |
+| `isKeepAlive()` returns `true` on h2 | ✅ | Multiplexed h2 connections are persistent by definition; the per-request close concept doesn't apply. — `HTTPRequest.isKeepAlive` |
+| Strip h1.1-only response headers (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) on h2 emit | ✅ | Connection-specific headers forbidden on h2 (RFC 9113 §8.2.2). Stripped (logged at debug), not error-failed. — `HTTP2BasicTest.h1_only_response_headers_stripped_on_h2` |
 
 ---
 
@@ -133,28 +133,28 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Feature | Status | Notes |
 |---|---|---|
-| Response trailers — h2 | ❌ | `HTTPResponse.setTrailer/addTrailer/getTrailers`. Emitted as final HEADERS frame with END_STREAM after final DATA. |
-| Response trailers — h1.1 | ❌ | Same API. Forces `Transfer-Encoding: chunked`. Emitted after `0\r\n` per RFC 9112 §7.1.2. Auto-set `Trailer:` header. Honor `TE: trailers` request signaling. |
+| Response trailers — h2 | ⚠️ | `HTTPResponse.setTrailer/addTrailer/getTrailers`. Emitted as final HEADERS frame with END_STREAM after final DATA. h2-side emission path deferred to Plan F. |
+| Response trailers — h1.1 | ✅ | Same API. Forces `Transfer-Encoding: chunked`. Emitted after `0\r\n` per RFC 9112 §7.1.2. Auto-set `Trailer:` header. Honor `TE: trailers` request signaling. |
 | Trailers-only response (no body) | ❌ | gRPC failed-RPC pattern: HEADERS without END_STREAM (response headers) followed by HEADERS with END_STREAM (trailers). |
-| Request trailers — h2 | ❌ | `HTTPRequest.getTrailer/getTrailers/getTrailerMap/hasTrailers`. Available after request input EOF. |
-| Request trailers — h1.1 | ❌ | Same API. Populated from `ChunkedInputStream` trailer parse. |
-| Trailer-name deny-list (RFC 9110 §6.5.2) | ❌ | `setTrailer`/`addTrailer` throws `IllegalArgumentException` for forbidden names. Full enumerated list lives on `HTTPValues.ForbiddenTrailers` and covers framing, routing, request modifiers, authentication, response control, and connection management headers — see the dated design doc for the exact set. |
+| Request trailers — h2 | ⚠️ | `HTTPRequest.getTrailer/getTrailers/getTrailerMap/hasTrailers`. Available after request input EOF. h2-side wiring deferred to Plan F. |
+| Request trailers — h1.1 | ✅ | Same API. Populated from `ChunkedInputStream` trailer parse. |
+| Trailer-name deny-list (RFC 9110 §6.5.2) | ✅ | `setTrailer`/`addTrailer` throws `IllegalArgumentException` for forbidden names. Full enumerated list lives on `HTTPValues.ForbiddenTrailers` and covers framing, routing, request modifiers, authentication, response control, and connection management headers — see the dated design doc for the exact set. |
 
 ---
 
 ## 8. Settings (RFC 9113 §6.5.2)
 
-Initial server settings sent in the first SETTINGS frame after the connection preface (or after 101 for h2c-Upgrade).
+Initial server settings sent in the first SETTINGS frame after the connection preface (or after 101 for h2c-Upgrade). All 6 standard settings are configurable and sent on startup. — `HTTPServerConfigurationHTTP2Test`, `HTTP2ConnectionPrefaceTest`
 
 | Setting | Default | Configurable | Configuration knob |
 |---|---|---|---|
-| `SETTINGS_HEADER_TABLE_SIZE` | 4096 | yes | `withHTTP2HeaderTableSize(int)` |
+| `SETTINGS_HEADER_TABLE_SIZE` | 4096 | ✅ | `withHTTP2HeaderTableSize(int)` |
 | `SETTINGS_ENABLE_PUSH` | 0 (disabled) | no | Push is out of scope; advertise=0 always. |
-| `SETTINGS_MAX_CONCURRENT_STREAMS` | 100 | yes | `withHTTP2MaxConcurrentStreams(int)` |
-| `SETTINGS_INITIAL_WINDOW_SIZE` | 65535 | yes | `withHTTP2InitialWindowSize(int)` |
-| `SETTINGS_MAX_FRAME_SIZE` | 16384 | yes | `withHTTP2MaxFrameSize(int)` (max 16777215) |
-| `SETTINGS_MAX_HEADER_LIST_SIZE` | 8192 | yes | `withHTTP2MaxHeaderListSize(int)` |
-| `SETTINGS_TIMEOUT` (peer ACK deadline) | 10 s | yes | `withHTTP2SettingsAckTimeout(Duration)` — RFC 9113 §6.5.3; non-ACK → `GOAWAY(SETTINGS_TIMEOUT)`. |
+| `SETTINGS_MAX_CONCURRENT_STREAMS` | 100 | ✅ | `withHTTP2MaxConcurrentStreams(int)` |
+| `SETTINGS_INITIAL_WINDOW_SIZE` | 65535 | ✅ | `withHTTP2InitialWindowSize(int)` |
+| `SETTINGS_MAX_FRAME_SIZE` | 16384 | ✅ | `withHTTP2MaxFrameSize(int)` (max 16777215) |
+| `SETTINGS_MAX_HEADER_LIST_SIZE` | 8192 | ✅ | `withHTTP2MaxHeaderListSize(int)` |
+| `SETTINGS_TIMEOUT` (peer ACK deadline) | 10 s | ⚠️ | `withHTTP2SettingsAckTimeout(Duration)` — RFC 9113 §6.5.3; knob exists but ACK-deadline enforcement deferred to Plan F. |
 
 Inbound SETTINGS rate-limited (DoS protection); see §10.
 
@@ -187,16 +187,16 @@ All standard error codes implemented and emitted at the appropriate trigger:
 
 | Concern | Status | Notes |
 |---|---|---|
-| `MAX_CONCURRENT_STREAMS` enforcement | ❌ | See §4. |
-| Rapid Reset (CVE-2023-44487) | ❌ | Default: >100 client RST_STREAMs in 30 s → `GOAWAY(ENHANCE_YOUR_CALM)`. Configurable via `HTTP2RateLimits`. |
-| CONTINUATION flood (CVE-2024-27316) | ❌ | Per-block CONTINUATION cap (default 16); cumulative bytes capped at `MAX_HEADER_LIST_SIZE`. |
-| PING flood | ❌ | Default: >10 PING/s → `GOAWAY(ENHANCE_YOUR_CALM)`. |
-| SETTINGS flood | ❌ | Same shape. |
-| Empty-DATA flood (zero-length DATA without END_STREAM) | ❌ | Default: >100 in 30 s. |
-| WINDOW_UPDATE flood | ❌ | Default: >100/s. |
-| Slow-read | ❌ | Existing `MinimumWriteThroughput` instrumentation extended to writer thread. |
-| Header-name/value validation | ❌ | Reuses `HTTPTools.isTokenCharacter` and `isValueCharacter`. |
-| Response-splitting defense | ❌ | Reuses choke point at `HTTPResponse.setHeader/addHeader/sendRedirect/Cookie` (audit Vuln 4 fix). |
+| `MAX_CONCURRENT_STREAMS` enforcement | ✅ | See §4. |
+| Rapid Reset (CVE-2023-44487) | ✅ | Default: >100 client RST_STREAMs in 30 s → `GOAWAY(ENHANCE_YOUR_CALM)`. Configurable via `HTTP2RateLimits`. — `HTTP2SecurityTest.rapid_reset_triggers_goaway` |
+| CONTINUATION flood (CVE-2024-27316) | ⚠️ | Per-block CONTINUATION cap implicit via HEADER_LIST_SIZE-bounded accumulator; explicit per-block CONTINUATION-count cap deferred. Plan F. |
+| PING flood | ✅ | Default: >10 PING/s → `GOAWAY(ENHANCE_YOUR_CALM)`. — `HTTP2SecurityTest.ping_flood_triggers_goaway` |
+| SETTINGS flood | ✅ | Same shape. — `HTTP2SecurityTest.settings_flood_triggers_goaway` |
+| Empty-DATA flood (zero-length DATA without END_STREAM) | ⚠️ | Default: >100 in 30 s. Counter exists; dedicated test deferred (noted in `HTTP2SecurityTest`). |
+| WINDOW_UPDATE flood | ✅ | Default: >100/s. — `HTTP2SecurityTest.window_update_flood_triggers_goaway` |
+| Slow-read | ⚠️ | Existing `MinimumWriteThroughput` instrumentation flows through writer thread; dedicated test deferred. |
+| Header-name/value validation | ⚠️ | Reuses `HTTPTools.isTokenCharacter` and `isValueCharacter`. Explicit enforcement deferred to Plan F. |
+| Response-splitting defense | ✅ | Reuses choke point at `HTTPResponse.setHeader/addHeader/sendRedirect/Cookie` (audit Vuln 4 fix). Implicit via existing h1.1 defense. |
 
 ---
 
@@ -210,13 +210,17 @@ All standard error codes implemented and emitted at the appropriate trigger:
 
 ### `HTTPListenerConfiguration`
 
+✅ All three knobs shipped. — `HTTPListenerConfiguration`
+
 | Knob | Default | Notes |
 |---|---|---|
 | `enableHTTP2` | `true` (TLS only — ignored on cleartext) | Controls ALPN advertisement of `h2`. On cleartext, h2c is independently controlled by the two flags below. |
 | `enableH2cPriorKnowledge` | `false` (cleartext only — ignored on TLS) | Opt-in. Selector peeks first 24 bytes for the connection preface. Required for gRPC. |
-| `enableH2cUpgrade` | `true` (cleartext only — ignored on TLS) | Honored when client sends `Upgrade: h2c, HTTP2-Settings: ...` |
+| `enableH2cUpgrade` | `false` (cleartext only — ignored on TLS) | Opt-in (changed from planned default-on for safety). Honored when client sends `Upgrade: h2c, HTTP2-Settings: ...` |
 
 ### `HTTPServerConfiguration`
+
+✅ All `withHTTP2*` knobs shipped. — `HTTPServerConfigurationHTTP2Test`
 
 | Knob | Default | RFC reference |
 |---|---|---|
@@ -227,7 +231,7 @@ All standard error codes implemented and emitted at the appropriate trigger:
 | `withHTTP2MaxHeaderListSize(int)` | 8192 | §6.5.2 |
 | `withHTTP2RateLimits(HTTP2RateLimits)` | sensible defaults (see §10) | DoS counter bundle |
 | `withHTTP2KeepAlivePingInterval(Duration)` | disabled | Optional server-initiated PING |
-| `withHTTP2SettingsAckTimeout(Duration)` | 10 s | §6.5.3 — peer ACK deadline |
+| `withHTTP2SettingsAckTimeout(Duration)` | 10 s | §6.5.3 — peer ACK deadline (⚠️ knob exists; ACK enforcement deferred to Plan F) |
 
 `SETTINGS_ENABLE_PUSH` is fixed at 0 (push out of scope).
 
@@ -239,20 +243,20 @@ How latte-java's HTTP/2 surface compares against the Java ecosystem leaders. Cap
 
 | Feature | latte-java | Jetty 12 | Tomcat 11 | Netty 4 | Undertow 2 | Helidon Níma 4 |
 |---|---|---|---|---|---|---|
-| h2 over TLS-ALPN | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| h2c prior-knowledge | ❌ planned (opt-in) | ✅ (opt-in) | ✅ (opt-in) | ✅ | ✅ | ✅ |
-| h2c via Upgrade/101 | ❌ planned (default-on) | ✅ (opt-in) | ✅ (opt-in) | ✅ | ✅ | ✅ |
-| Default-on for TLS | ❌ planned | ✅ | ✅ | (config) | (config) | ✅ |
-| HPACK | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
+| h2 over TLS-ALPN | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| h2c prior-knowledge | ✅ (opt-in) | ✅ (opt-in) | ✅ (opt-in) | ✅ | ✅ | ✅ |
+| h2c via Upgrade/101 | ✅ (opt-in) | ✅ (opt-in) | ✅ (opt-in) | ✅ | ✅ | ✅ |
+| Default-on for TLS | ✅ | ✅ | ✅ | (config) | (config) | ✅ |
+| HPACK | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Server push | 🚫 (no API) | ⚠️ disabled-default | ⚠️ disabled-default | ⚠️ | ⚠️ | ❌ |
-| Response trailers | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Request trailers | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| gRPC interop tested | ❌ planned (in-tree) | ⚠️ via grpc-jetty | ⚠️ via servlet adapter | ✅ (native) | ⚠️ | ✅ |
-| Rapid Reset mitigation | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| CONTINUATION flood mitigation | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Configurable concurrency cap | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Configurable initial window | ❌ planned | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Virtual-thread per stream | ❌ planned | ⚠️ (config) | ⚠️ (config) | ❌ (event loop) | ❌ | ⚠️[^nima] |
+| Response trailers | ⚠️ (h2 deferred) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Request trailers | ⚠️ (h2 deferred) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| gRPC interop tested | ❌ (Plan E) | ⚠️ via grpc-jetty | ⚠️ via servlet adapter | ✅ (native) | ⚠️ | ✅ |
+| Rapid Reset mitigation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CONTINUATION flood mitigation | ⚠️ (partial) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Configurable concurrency cap | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Configurable initial window | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Virtual-thread per stream | ✅ | ⚠️ (config) | ⚠️ (config) | ❌ (event loop) | ❌ | ⚠️[^nima] |
 
 [^nima]: Helidon Níma uses virtual threads as carrier threads for its event loop, not strictly virtual-thread-per-stream the way latte-java does. End behavior is similar; the architectural shape differs. Worth a footnote so the comparison is honest.
 
@@ -262,7 +266,7 @@ The last row is our differentiator. Pure virtual-thread + blocking-I/O code is u
 
 ## Bug ledger
 
-No open issues yet — work has not begun.
+No open bugs. The writer-thread/socket-close race identified during Plan D was fixed before merge.
 
 ---
 
