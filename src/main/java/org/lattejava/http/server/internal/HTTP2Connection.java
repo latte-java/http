@@ -111,6 +111,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   @Override
   public void run() {
+    Thread writerThread = null;
     try {
       var in = new ThroughputInputStream(socket.getInputStream(), throughput);
       var out = new ThroughputOutputStream(socket.getOutputStream(), throughput);
@@ -161,9 +162,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       // Spawn the writer virtual-thread. It drains writerQueue and serializes frames to the socket.
       // It exits cleanly when it dequeues the writer-shutdown sentinel:
       //   a GoawayFrame with lastStreamId == -1 (negative, never valid for a real GOAWAY).
+      // The thread reference is stored so the reader thread can join it before closing the socket,
+      // guaranteeing that GOAWAY frames are fully flushed before the connection is torn down.
       HTTP2FrameWriter writerForThread = writer;
       OutputStream outForThread = out;
-      Thread.ofVirtual().name("h2-writer").start(() -> {
+      writerThread = Thread.ofVirtual().name("h2-writer").start(() -> {
         try {
           while (true) {
             HTTP2Frame f = writerQueue.take();
@@ -247,6 +250,16 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     } catch (Exception e) {
       logger.debug("HTTP/2 connection ended", e);
     } finally {
+      // Wait for the writer thread to finish flushing its queue (including any GOAWAY frames) before closing
+      // the socket. Without this join, the socket.close() can race with the GOAWAY write and the peer sees EOF
+      // instead of the GOAWAY frame.
+      try {
+        if (writerThread != null) {
+          writerThread.join(Duration.ofSeconds(5));
+        }
+      } catch (InterruptedException ignore) {
+        Thread.currentThread().interrupt();
+      }
       try {
         socket.close();
       } catch (IOException ignore) {
