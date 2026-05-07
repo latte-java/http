@@ -88,6 +88,9 @@ public class HTTPServerThread extends Thread {
         //   the server socket and fire up an HTTP worker, then we could consider seeing if we can improve performance here.
         Socket clientSocket = socket.accept();
         clientSocket.setSoTimeout((int) configuration.getInitialReadTimeoutDuration().toMillis());
+        if (clientSocket instanceof SSLSocket sslSocket) {
+          SecurityTools.configureALPN(sslSocket, listener);
+        }
         if (logger.isTraceEnabled()) {
           String listenerAddress = listener.getBindAddress().toString() + ":" + listener.getPort();
           logger.trace("[{}] Accepted inbound connection. [{}] existing connections.", listenerAddress, clients.size());

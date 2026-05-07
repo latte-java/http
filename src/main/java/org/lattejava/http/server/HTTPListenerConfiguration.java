@@ -26,14 +26,13 @@ import java.security.cert.Certificate;
  */
 public class HTTPListenerConfiguration {
   private final InetAddress bindAddress;
-
   private final Certificate[] certificateChain;
-
   private final int port;
-
   private final PrivateKey privateKey;
-
   private final boolean tls;
+  private boolean h2cPriorKnowledgeEnabled = false;
+  private boolean h2cUpgradeEnabled = true;
+  private boolean http2Enabled = false;
 
   /**
    * Stores the configuration for a single HTTP listener for the server. This constructor sets up a non-TLS based
@@ -189,8 +188,29 @@ public class HTTPListenerConfiguration {
     return privateKey;
   }
 
+  public boolean isH2cPriorKnowledgeEnabled() { return h2cPriorKnowledgeEnabled; }
+
+  public boolean isH2cUpgradeEnabled() { return h2cUpgradeEnabled; }
+
+  public boolean isHTTP2Enabled() { return http2Enabled; }
+
   public boolean isTLS() {
     return tls;
+  }
+
+  public HTTPListenerConfiguration withH2cPriorKnowledgeEnabled(boolean enabled) {
+    this.h2cPriorKnowledgeEnabled = enabled;
+    return this;
+  }
+
+  public HTTPListenerConfiguration withH2cUpgradeEnabled(boolean enabled) {
+    this.h2cUpgradeEnabled = enabled;
+    return this;
+  }
+
+  public HTTPListenerConfiguration withHTTP2Enabled(boolean enabled) {
+    this.http2Enabled = enabled;
+    return this;
   }
 
   private InetAddress allInterfaces() {

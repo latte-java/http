@@ -16,6 +16,8 @@
 package org.lattejava.http.security;
 
 import module java.base;
+import module org.lattejava.http;
+
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
@@ -54,6 +56,20 @@ public final class SecurityTools {
     SSLContext context = SSLContext.getInstance("TLS");
     context.init(null, tmf.getTrustManagers(), null);
     return context;
+  }
+
+  /**
+   * Configure ALPN on an accepted SSLSocket based on the listener config. Advertises ["h2", "http/1.1"] when HTTP/2 is enabled, ["http/1.1"] otherwise. Returns the same socket for chaining.
+   */
+  public static SSLSocket configureALPN(SSLSocket socket, HTTPListenerConfiguration listener) {
+    SSLParameters params = socket.getSSLParameters();
+    if (listener.isHTTP2Enabled()) {
+      params.setApplicationProtocols(new String[]{"h2", "http/1.1"});
+    } else {
+      params.setApplicationProtocols(new String[]{"http/1.1"});
+    }
+    socket.setSSLParameters(params);
+    return socket;
   }
 
   /**
