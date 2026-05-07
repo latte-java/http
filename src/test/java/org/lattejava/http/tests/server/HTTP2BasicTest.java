@@ -21,6 +21,38 @@ import static org.testng.Assert.*;
  */
 public class HTTP2BasicTest extends BaseTest {
   @Test
+  public void h1_only_response_headers_stripped_on_h2() throws Exception {
+    HTTPHandler handler = (req, res) -> {
+      // Handler ignorantly sets h1.1-only headers — the h2 emission path must strip them.
+      res.setHeader("Connection", "close");
+      res.setHeader("Transfer-Encoding", "chunked");
+      res.setStatus(200);
+      res.getOutputStream().close();
+    };
+
+    var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
+    var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
+    try (var server = makeServer("https", handler, listener).start()) {
+      int port = server.getActualPort();
+      var sslContext = SecurityTools.clientContext(rootCertificate);
+      var client = HttpClient.newBuilder()
+                             .sslContext(sslContext)
+                             .version(HttpClient.Version.HTTP_2)
+                             .build();
+      var resp = client.send(
+          HttpRequest.newBuilder(URI.create("https://local.lattejava.org:" + port + "/")).build(),
+          HttpResponse.BodyHandlers.discarding());
+      assertEquals(resp.statusCode(), 200);
+      assertEquals(resp.version(), HttpClient.Version.HTTP_2,
+          "JDK HttpClient silently downgrades to h1.1 on ALPN failure — assert h2 explicitly");
+      // The JDK h2 client would reject the response with a PROTOCOL_ERROR if the server actually sent these headers.
+      // The fact that the response succeeds proves they were stripped.
+      assertFalse(resp.headers().firstValue("connection").isPresent(), "Connection header must be absent in h2 response");
+      assertFalse(resp.headers().firstValue("transfer-encoding").isPresent(), "Transfer-Encoding header must be absent in h2 response");
+    }
+  }
+
+  @Test
   public void concurrent_streams_from_one_connection() throws Exception {
     var counter = new AtomicInteger();
     HTTPHandler handler = (req, res) -> {

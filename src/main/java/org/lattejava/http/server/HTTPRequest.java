@@ -813,6 +813,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @return True if the Connection header is missing or not `Close`.
    */
   public boolean isKeepAlive() {
+    if ("HTTP/2.0".equals(getProtocol())) {
+      return true;
+    }
+
     // Connection is a comma-separated token list per RFC 9110 §7.6.1, e.g. "close, upgrade". Exact equality misclassifies any
     // multi-token value, so split into tokens and check membership.
     var tokens = connectionTokens();

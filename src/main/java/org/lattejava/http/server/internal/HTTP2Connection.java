@@ -25,6 +25,9 @@ import org.lattejava.http.io.PushbackInputStream;
  * @author Daniel DeGroff
  */
 public class HTTP2Connection implements ClientConnection, Runnable {
+  private static final Set<String> H1_ONLY_HEADERS = Set.of(
+      "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"
+  );
   private static final byte[] PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
   private final HTTPBuffers buffers;
@@ -476,8 +479,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         List<HPACKDynamicTable.HeaderField> respFields = new ArrayList<>();
         respFields.add(new HPACKDynamicTable.HeaderField(":status", String.valueOf(response.getStatus())));
         for (var entry : response.getHeadersMap().entrySet()) {
+          String lowerKey = entry.getKey().toLowerCase(Locale.ROOT);
+          if (H1_ONLY_HEADERS.contains(lowerKey)) {
+            logger.debug("Stripping h1.1-only response header [{}] on h2 emission", entry.getKey());
+            continue;
+          }
           for (String v : entry.getValue()) {
-            respFields.add(new HPACKDynamicTable.HeaderField(entry.getKey().toLowerCase(Locale.ROOT), v));
+            respFields.add(new HPACKDynamicTable.HeaderField(lowerKey, v));
           }
         }
 
