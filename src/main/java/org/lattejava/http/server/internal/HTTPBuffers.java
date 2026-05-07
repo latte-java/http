@@ -24,6 +24,10 @@ import module org.lattejava.http;
  * @author Brian Pontarelli
  */
 public class HTTPBuffers {
+  // RFC 9113 §6.5.2: default max frame size and absolute ceiling.
+  private static final int DEFAULT_FRAME_BUFFER_SIZE = 16384;
+  private static final int MAX_FRAME_BUFFER_SIZE = 16777215;
+
   private final HTTPServerConfiguration configuration;
 
   private final byte[] requestBuffer;
@@ -85,8 +89,8 @@ public class HTTPBuffers {
    * @throws IllegalArgumentException if size exceeds the RFC 9113 ceiling.
    */
   public void ensureFrameReadCapacity(int size) {
-    if (size > 16777215) {
-      throw new IllegalArgumentException("Frame size [" + size + "] exceeds RFC 9113 ceiling of 16777215");
+    if (size > MAX_FRAME_BUFFER_SIZE) {
+      throw new IllegalArgumentException("Frame size [" + size + "] exceeds RFC 9113 ceiling of [" + MAX_FRAME_BUFFER_SIZE + "]");
     }
     if (frameReadBuffer == null || frameReadBuffer.length < size) {
       frameReadBuffer = new byte[size];
@@ -101,8 +105,8 @@ public class HTTPBuffers {
    * @throws IllegalArgumentException if payloadSize exceeds the RFC 9113 ceiling.
    */
   public void ensureFrameWriteCapacity(int payloadSize) {
-    if (payloadSize > 16777215) {
-      throw new IllegalArgumentException("Frame size [" + payloadSize + "] exceeds RFC 9113 ceiling");
+    if (payloadSize > MAX_FRAME_BUFFER_SIZE) {
+      throw new IllegalArgumentException("Frame size [" + payloadSize + "] exceeds RFC 9113 ceiling of [" + MAX_FRAME_BUFFER_SIZE + "]");
     }
     int needed = 9 + payloadSize;
     if (frameWriteBuffer == null || frameWriteBuffer.length < needed) {
@@ -112,23 +116,24 @@ public class HTTPBuffers {
 
   /**
    * @return A byte array that can be used for reading HTTP/2 frames. This uses the RFC 9113 default
-   *     {@link #MAX_FRAME_SIZE} (16384) and grows on demand up to the peer-negotiated cap. This is lazily created.
+   *     {@link #DEFAULT_FRAME_BUFFER_SIZE} (16384) and grows on demand up to the peer-negotiated cap. This is lazily
+   *     created.
    */
   public byte[] frameReadBuffer() {
     if (frameReadBuffer == null) {
-      frameReadBuffer = new byte[16384];
+      frameReadBuffer = new byte[DEFAULT_FRAME_BUFFER_SIZE];
     }
     return frameReadBuffer;
   }
 
   /**
    * @return A byte array that can be used for writing HTTP/2 frames. This uses the RFC 9113 default
-   *     {@link #MAX_FRAME_SIZE} (16384) plus 9 bytes for the frame header, and grows on demand up to the
+   *     {@link #DEFAULT_FRAME_BUFFER_SIZE} (16384) plus 9 bytes for the frame header, and grows on demand up to the
    *     peer-negotiated cap. This is lazily created.
    */
   public byte[] frameWriteBuffer() {
     if (frameWriteBuffer == null) {
-      frameWriteBuffer = new byte[9 + 16384];
+      frameWriteBuffer = new byte[9 + DEFAULT_FRAME_BUFFER_SIZE];
     }
     return frameWriteBuffer;
   }

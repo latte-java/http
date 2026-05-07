@@ -15,9 +15,7 @@ import java.util.ArrayDeque;
  */
 public class HPACKDynamicTable {
   private final ArrayDeque<HeaderField> entries = new ArrayDeque<>();
-
   private int maxSize;
-
   private int size;
 
   public HPACKDynamicTable(int maxSize) {

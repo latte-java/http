@@ -42,17 +42,11 @@ public class HTTP2FrameWriter {
         System.arraycopy(f.headerBlockFragment(), 0, payload, 4, f.headerBlockFragment().length);
         writeWithPayload(FRAME_TYPE_PUSH_PROMISE, f.flags(), f.streamId(), payload);
       }
-      case RSTStreamFrame f -> writeWithPayload(FRAME_TYPE_RST_STREAM, 0, f.streamId(), int32(f.errorCode()));
+      case RSTStreamFrame f -> writeFixedFourByte(FRAME_TYPE_RST_STREAM, 0, f.streamId(), f.errorCode());
       case SettingsFrame f -> writeWithPayload(FRAME_TYPE_SETTINGS, f.flags(), 0, f.payload());
       case UnknownFrame f -> writeWithPayload(f.type(), f.flags(), f.streamId(), f.payload());
-      case WindowUpdateFrame f -> writeWithPayload(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), int32(f.windowSizeIncrement() & 0x7FFFFFFF));
+      case WindowUpdateFrame f -> writeFixedFourByte(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), f.windowSizeIncrement() & 0x7FFFFFFF);
     }
-  }
-
-  private static byte[] int32(int v) {
-    byte[] b = new byte[4];
-    writeInt32(b, 0, v);
-    return b;
   }
 
   private static void writeInt32(byte[] dst, int off, int v) {
@@ -60,6 +54,20 @@ public class HTTP2FrameWriter {
     dst[off + 1] = (byte) ((v >> 16) & 0xFF);
     dst[off + 2] = (byte) ((v >> 8) & 0xFF);
     dst[off + 3] = (byte) (v & 0xFF);
+  }
+
+  // Writes a 4-byte fixed-length frame (RST_STREAM, WINDOW_UPDATE) directly into the shared buffer
+  // without allocating a payload byte[]. This is the hottest write path — every DATA frame received
+  // triggers a WINDOW_UPDATE — so keeping it allocation-free matters.
+  private void writeFixedFourByte(int type, int flags, int streamId, int value) throws IOException {
+    buffer[0] = 0;
+    buffer[1] = 0;
+    buffer[2] = 4;
+    buffer[3] = (byte) type;
+    buffer[4] = (byte) flags;
+    writeInt32(buffer, 5, streamId & 0x7FFFFFFF);
+    writeInt32(buffer, 9, value);
+    out.write(buffer, 0, 13);
   }
 
   private void writeWithPayload(int type, int flags, int streamId, byte[] payload) throws IOException {

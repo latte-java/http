@@ -26,27 +26,27 @@ public class HPACKDecoder {
       int b = block[i] & 0xFF;
       if ((b & 0x80) != 0) {
         // Indexed header field — §6.1; first bit 1
-        int[] r = decodeInt(block, i, 7);
-        fields.add(lookup(r[0]));
-        i = r[1];
+        long r = decodeInt(block, i, 7);
+        fields.add(lookup((int) (r >>> 32)));
+        i = (int) r;
       } else if ((b & 0x40) != 0) {
         // Literal with incremental indexing — §6.2.1; first two bits 01
-        int[] r = decodeInt(block, i, 6);
-        var pair = readNameValue(block, r[1], r[0]);
+        long r = decodeInt(block, i, 6);
+        var pair = readNameValue(block, (int) r, (int) (r >>> 32));
         fields.add(pair.field());
         dynamicTable.add(pair.field().name(), pair.field().value());
         i = pair.nextIndex();
       } else if ((b & 0x20) != 0) {
         // Dynamic table size update — §6.3; first three bits 001
-        int[] r = decodeInt(block, i, 5);
-        dynamicTable.setMaxSize(r[0]);
-        i = r[1];
+        long r = decodeInt(block, i, 5);
+        dynamicTable.setMaxSize((int) (r >>> 32));
+        i = (int) r;
       } else {
         // Literal without indexing (§6.2.2) — first four bits 0000
         // Literal never-indexed (§6.2.3) — first four bits 0001
         // Both are stored but not added to the dynamic table.
-        int[] r = decodeInt(block, i, 4);
-        var pair = readNameValue(block, r[1], r[0]);
+        long r = decodeInt(block, i, 4);
+        var pair = readNameValue(block, (int) r, (int) (r >>> 32));
         fields.add(pair.field());
         i = pair.nextIndex();
       }
@@ -54,13 +54,14 @@ public class HPACKDecoder {
     return fields;
   }
 
-  // Decodes an N-prefix integer per RFC 7541 §5.1; returns [value, nextIndex].
-  static int[] decodeInt(byte[] block, int i, int prefixBits) {
+  // Decodes an N-prefix integer per RFC 7541 §5.1.
+  // Returns a packed long: high 32 bits = decoded value, low 32 bits = nextIndex.
+  static long decodeInt(byte[] block, int i, int prefixBits) {
     int max = (1 << prefixBits) - 1;
     int v = block[i] & max;
     i++;
     if (v < max) {
-      return new int[]{v, i};
+      return ((long) v << 32) | (i & 0xFFFFFFFFL);
     }
     int m = 0;
     int b;
@@ -69,7 +70,7 @@ public class HPACKDecoder {
       v += (b & 0x7F) << m;
       m += 7;
     } while ((b & 0x80) != 0);
-    return new int[]{v, i};
+    return ((long) v << 32) | (i & 0xFFFFFFFFL);
   }
 
   private HPACKDynamicTable.HeaderField lookup(int index) {
@@ -98,12 +99,14 @@ public class HPACKDecoder {
 
   private StringResult readString(byte[] block, int i) {
     boolean huffman = (block[i] & 0x80) != 0;
-    int[] r = decodeInt(block, i, 7);
-    int len = r[0];
-    int start = r[1];
+    long r = decodeInt(block, i, 7);
+    int len = (int) (r >>> 32);
+    int start = (int) r;
     byte[] raw = new byte[len];
     System.arraycopy(block, start, raw, 0, len);
-    String s = huffman ? new String(HPACKHuffman.decode(raw)) : new String(raw);
+    String s = huffman
+        ? new String(HPACKHuffman.decode(raw), StandardCharsets.UTF_8)
+        : new String(raw, StandardCharsets.UTF_8);
     return new StringResult(s, start + len);
   }
 

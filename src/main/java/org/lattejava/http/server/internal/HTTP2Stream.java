@@ -11,11 +11,8 @@ package org.lattejava.http.server.internal;
  */
 public class HTTP2Stream {
   private final int streamId;
-
   private long receiveWindow;
-
   private long sendWindow;
-
   private State state = State.IDLE;
 
   public HTTP2Stream(int streamId, int initialReceiveWindow, int initialSendWindow) {

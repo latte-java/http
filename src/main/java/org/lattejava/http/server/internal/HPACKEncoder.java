@@ -65,7 +65,7 @@ public class HPACKEncoder {
 
   private static void writeString(ByteArrayOutputStream out, String s) {
     // v1: literal (no Huffman) for determinism. Plan F can add Huffman after benchmarking.
-    byte[] bytes = s.getBytes(StandardCharsets.US_ASCII);
+    byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
     encodeInt(out, bytes.length, 7, 0x00);
     out.write(bytes, 0, bytes.length);
   }
