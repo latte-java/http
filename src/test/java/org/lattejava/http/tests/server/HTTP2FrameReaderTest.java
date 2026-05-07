@@ -10,6 +10,7 @@ import module org.testng;
 
 import org.lattejava.http.server.internal.HTTP2Frame;
 import org.lattejava.http.server.internal.HTTP2FrameReader;
+import org.lattejava.http.server.internal.HTTP2FrameWriter;
 
 import static org.testng.Assert.*;
 
@@ -87,5 +88,78 @@ public class HTTP2FrameReaderTest {
 
     var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
     expectThrows(HTTP2FrameReader.FrameSizeException.class, reader::readFrame);
+  }
+
+  @Test
+  public void round_trip_data_frame() throws Exception {
+    var sink = new ByteArrayOutputStream();
+    var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
+    writer.writeFrame(new HTTP2Frame.DataFrame(7, 0x1, "hello".getBytes()));
+
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var frame = (HTTP2Frame.DataFrame) reader.readFrame();
+    assertEquals(frame.streamId(), 7);
+    assertEquals(frame.flags(), 0x1);
+    assertEquals(frame.payload(), "hello".getBytes());
+  }
+
+  @Test
+  public void round_trip_goaway() throws Exception {
+    var sink = new ByteArrayOutputStream();
+    var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
+    writer.writeFrame(new HTTP2Frame.GoawayFrame(13, 0x1, new byte[0]));
+
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var frame = (HTTP2Frame.GoawayFrame) reader.readFrame();
+    assertEquals(frame.lastStreamId(), 13);
+    assertEquals(frame.errorCode(), 0x1);
+  }
+
+  @Test
+  public void round_trip_ping() throws Exception {
+    var sink = new ByteArrayOutputStream();
+    var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
+    byte[] opaque = {1, 2, 3, 4, 5, 6, 7, 8};
+    writer.writeFrame(new HTTP2Frame.PingFrame(0, opaque));
+
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var frame = (HTTP2Frame.PingFrame) reader.readFrame();
+    assertEquals(frame.opaqueData(), opaque);
+  }
+
+  @Test
+  public void round_trip_rst_stream() throws Exception {
+    var sink = new ByteArrayOutputStream();
+    var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
+    writer.writeFrame(new HTTP2Frame.RSTStreamFrame(5, 0x3));
+
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var frame = (HTTP2Frame.RSTStreamFrame) reader.readFrame();
+    assertEquals(frame.streamId(), 5);
+    assertEquals(frame.errorCode(), 0x3);
+  }
+
+  @Test
+  public void round_trip_settings_with_payload() throws Exception {
+    byte[] payload = {0, 1, 0, 0, 0x10, 0}; // HEADER_TABLE_SIZE = 4096
+    var sink = new ByteArrayOutputStream();
+    var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
+    writer.writeFrame(new HTTP2Frame.SettingsFrame(0, payload));
+
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var frame = (HTTP2Frame.SettingsFrame) reader.readFrame();
+    assertEquals(frame.payload(), payload);
+  }
+
+  @Test
+  public void round_trip_window_update() throws Exception {
+    var sink = new ByteArrayOutputStream();
+    var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
+    writer.writeFrame(new HTTP2Frame.WindowUpdateFrame(11, 1024));
+
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var frame = (HTTP2Frame.WindowUpdateFrame) reader.readFrame();
+    assertEquals(frame.streamId(), 11);
+    assertEquals(frame.windowSizeIncrement(), 1024);
   }
 }
