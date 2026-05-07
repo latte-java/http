@@ -34,6 +34,12 @@ public class HTTPBuffers {
 
   private FastByteArrayOutputStream chunkOutputStream;
 
+  private byte[] frameReadBuffer;
+
+  private byte[] frameWriteBuffer;
+
+  private FastByteArrayOutputStream headerAccumulationBuffer;
+
   public HTTPBuffers(HTTPServerConfiguration configuration) {
     this.configuration = configuration;
     this.requestBuffer = new byte[configuration.getRequestBufferSize()];
@@ -69,6 +75,73 @@ public class HTTPBuffers {
     }
 
     return chunkBuffer;
+  }
+
+  /**
+   * Ensures the frame read buffer has capacity for at least the given size. Grows the buffer if needed up to the
+   * RFC 9113 ceiling of 16777215 bytes.
+   *
+   * @param size The required size in bytes.
+   * @throws IllegalArgumentException if size exceeds the RFC 9113 ceiling.
+   */
+  public void ensureFrameReadCapacity(int size) {
+    if (size > 16777215) {
+      throw new IllegalArgumentException("Frame size [" + size + "] exceeds RFC 9113 ceiling of 16777215");
+    }
+    if (frameReadBuffer == null || frameReadBuffer.length < size) {
+      frameReadBuffer = new byte[size];
+    }
+  }
+
+  /**
+   * Ensures the frame write buffer has capacity for the frame header plus the given payload size. Grows the buffer if
+   * needed up to the RFC 9113 ceiling of 16777215 bytes (plus 9 bytes for the frame header).
+   *
+   * @param payloadSize The required payload size in bytes.
+   * @throws IllegalArgumentException if payloadSize exceeds the RFC 9113 ceiling.
+   */
+  public void ensureFrameWriteCapacity(int payloadSize) {
+    if (payloadSize > 16777215) {
+      throw new IllegalArgumentException("Frame size [" + payloadSize + "] exceeds RFC 9113 ceiling");
+    }
+    int needed = 9 + payloadSize;
+    if (frameWriteBuffer == null || frameWriteBuffer.length < needed) {
+      frameWriteBuffer = new byte[needed];
+    }
+  }
+
+  /**
+   * @return A byte array that can be used for reading HTTP/2 frames. This uses the RFC 9113 default
+   *     {@link #MAX_FRAME_SIZE} (16384) and grows on demand up to the peer-negotiated cap. This is lazily created.
+   */
+  public byte[] frameReadBuffer() {
+    if (frameReadBuffer == null) {
+      frameReadBuffer = new byte[16384];
+    }
+    return frameReadBuffer;
+  }
+
+  /**
+   * @return A byte array that can be used for writing HTTP/2 frames. This uses the RFC 9113 default
+   *     {@link #MAX_FRAME_SIZE} (16384) plus 9 bytes for the frame header, and grows on demand up to the
+   *     peer-negotiated cap. This is lazily created.
+   */
+  public byte[] frameWriteBuffer() {
+    if (frameWriteBuffer == null) {
+      frameWriteBuffer = new byte[9 + 16384];
+    }
+    return frameWriteBuffer;
+  }
+
+  /**
+   * @return An output stream that can be used for accumulating HTTP/2 headers. This uses an initial capacity of 8192
+   *     bytes with a 8192-byte growth increment. This is lazily created.
+   */
+  public FastByteArrayOutputStream headerAccumulationBuffer() {
+    if (headerAccumulationBuffer == null) {
+      headerAccumulationBuffer = new FastByteArrayOutputStream(8192, 8192);
+    }
+    return headerAccumulationBuffer;
   }
 
   /**
