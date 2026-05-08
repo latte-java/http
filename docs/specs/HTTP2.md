@@ -2,6 +2,8 @@
 
 Tracking document for RFC 9113 (HTTP/2) and RFC 7541 (HPACK) conformance. This is the always-current reference for HTTP/2 in this codebase. The dated implementation history lives in `docs/superpowers/specs/2026-05-05-http2-design.md`.
 
+Conformance: h2spec sanity passes (generic/1); full suite run pending. gRPC interop verified for unary + server-streaming RPC patterns.
+
 ## Legend
 
 - ✅ **Implemented** — covered by code and tests
@@ -133,7 +135,7 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Feature | Status | Notes |
 |---|---|---|
-| Response trailers — h2 | ⚠️ | `HTTPResponse.setTrailer/addTrailer/getTrailers`. Emitted as final HEADERS frame with END_STREAM after final DATA. h2-side emission path deferred to Plan F. |
+| Response trailers — h2 | ✅ | `HTTPResponse.setTrailer/addTrailer/getTrailers`. Emitted as final HEADERS frame with END_STREAM after final DATA. Tested via gRPC unary and server-streaming routes (grpc-status trailer round-trips correctly). — `GRPCInteropTest` |
 | Response trailers — h1.1 | ✅ | Same API. Forces `Transfer-Encoding: chunked`. Emitted after `0\r\n` per RFC 9112 §7.1.2. Auto-set `Trailer:` header. Honor `TE: trailers` request signaling. |
 | Trailers-only response (no body) | ❌ | gRPC failed-RPC pattern: HEADERS without END_STREAM (response headers) followed by HEADERS with END_STREAM (trailers). |
 | Request trailers — h2 | ⚠️ | `HTTPRequest.getTrailer/getTrailers/getTrailerMap/hasTrailers`. Available after request input EOF. h2-side wiring deferred to Plan F. |
@@ -252,7 +254,7 @@ How latte-java's HTTP/2 surface compares against the Java ecosystem leaders. Cap
 | Server push | 🚫 (no API) | ⚠️ disabled-default | ⚠️ disabled-default | ⚠️ | ⚠️ | ❌ |
 | Response trailers | ⚠️ (h2 deferred) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Request trailers | ⚠️ (h2 deferred) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| gRPC interop tested | ❌ (Plan E) | ⚠️ via grpc-jetty | ⚠️ via servlet adapter | ✅ (native) | ⚠️ | ✅ |
+| gRPC interop tested | ⚠️ (sanity only) | ⚠️ via grpc-jetty | ⚠️ via servlet adapter | ✅ (native) | ⚠️ | ✅ |
 | Rapid Reset mitigation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | CONTINUATION flood mitigation | ⚠️ (partial) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Configurable concurrency cap | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -267,7 +269,10 @@ The last row is our differentiator. Pure virtual-thread + blocking-I/O code is u
 
 ## Bug ledger
 
-No open bugs. The writer-thread/socket-close race identified during Plan D was fixed before merge.
+No open bugs. The following production bugs were found by gRPC interop testing and fixed in commit `b316db7`:
+
+- **HTTP2FrameReader — PADDED and PRIORITY frame prefix stripping (RFC 9113 §6.2).** gRPC Netty sends HEADERS with the PRIORITY flag set (5 extra bytes before the HPACK block), which caused the HPACKDecoder to read past the end of the fragment and throw ArrayIndexOutOfBoundsException. DATA frames also get PADDED stripping. **Fixed.**
+- **HTTP2OutputStream — trailer emission ordering (RFC 9113 §8.1).** When trailers follow the response body, the final DATA frame must omit END_STREAM so the subsequent HEADERS (trailers) frame can carry it instead. **Fixed.**
 
 ---
 
