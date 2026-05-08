@@ -1,0 +1,15 @@
+syntax = "proto3";
+package latte.echo;
+
+option java_package = "org.lattejava.http.tests.grpc";
+option java_outer_classname = "EchoProto";
+
+service Echo {
+  rpc Unary(EchoRequest) returns (EchoResponse);
+  rpc ServerStream(EchoRequest) returns (stream EchoResponse);
+  rpc ClientStream(stream EchoRequest) returns (EchoResponse);
+  rpc BidiStream(stream EchoRequest) returns (stream EchoResponse);
+}
+
+message EchoRequest { string message = 1; }
+message EchoResponse { string message = 1; }

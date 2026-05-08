@@ -18,6 +18,8 @@ package org.lattejava.http.tests.server;
 import module java.base;
 import module org.lattejava.http;
 
+import java.time.Duration;
+
 import static org.testng.Assert.*;
 
 /**

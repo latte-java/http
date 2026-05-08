@@ -49,6 +49,7 @@ public class H2SpecHarnessTest extends BaseTest {
       String output = new String(p.getInputStream().readAllBytes());
       int exit = p.waitFor();
 
+      Files.writeString(Path.of("build/h2spec-output.txt"), output);
       System.out.println(output);
 
       if (exit != 0) {

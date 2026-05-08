@@ -2,7 +2,9 @@
  * Copyright (c) 2018-2025, The Lattte Project, All Rights Reserved
  * License: MIT (See LICENSE file in root)
  */
+grpcVersion = "1.63.2"
 jackson5Version = "3.0.1"
+protobufVersion = "3.25.5"
 restifyVersion = "4.2.1"
 slf4jVersion = "2.0.17"
 testngVersion = "7.11.0"
@@ -10,6 +12,36 @@ testngVersion = "7.11.0"
 project(group: "org.lattejava", name: "http", version: "0.1.4", licenses: ["MIT"]) {
   workflow {
     standard()
+
+    semanticVersions {
+      // Netty uses a four-part .Final qualifier that Latte cannot parse without an explicit mapping.
+      mapping(id: "io.netty:netty-bom:4.1.100.Final",                            version: "4.1.100")
+      mapping(id: "io.netty:netty-buffer:4.1.100.Final",                          version: "4.1.100")
+      mapping(id: "io.netty:netty-codec:4.1.100.Final",                           version: "4.1.100")
+      mapping(id: "io.netty:netty-codec-dns:4.1.100.Final",                       version: "4.1.100")
+      mapping(id: "io.netty:netty-codec-http:4.1.100.Final",                      version: "4.1.100")
+      mapping(id: "io.netty:netty-codec-http2:4.1.100.Final",                     version: "4.1.100")
+      mapping(id: "io.netty:netty-codec-socks:4.1.100.Final",                     version: "4.1.100")
+      mapping(id: "io.netty:netty-common:4.1.100.Final",                          version: "4.1.100")
+      mapping(id: "io.netty:netty-handler:4.1.100.Final",                         version: "4.1.100")
+      mapping(id: "io.netty:netty-handler-proxy:4.1.100.Final",                   version: "4.1.100")
+      mapping(id: "io.netty:netty-parent:4.1.100.Final",                          version: "4.1.100")
+      mapping(id: "io.netty:netty-resolver:4.1.100.Final",                        version: "4.1.100")
+      mapping(id: "io.netty:netty-resolver-dns:4.1.100.Final",                    version: "4.1.100")
+      mapping(id: "io.netty:netty-tcnative-classes:4.1.100.Final",                version: "4.1.100")
+      mapping(id: "io.netty:netty-transport:4.1.100.Final",                       version: "4.1.100")
+      mapping(id: "io.netty:netty-transport-native-epoll:4.1.100.Final",          version: "4.1.100")
+      mapping(id: "io.netty:netty-transport-native-kqueue:4.1.100.Final",         version: "4.1.100")
+      mapping(id: "io.netty:netty-transport-native-unix-common:4.1.100.Final",    version: "4.1.100")
+      // guava uses an -android qualifier
+      mapping(id: "com.google.guava:guava:32.1.3-android",                        version: "32.1.3")
+      // android annotations use a four-part version
+      mapping(id: "com.google.android:annotations:4.1.1.4",                       version: "4.1.1")
+      // javassist uses a -GA qualifier (transitive via Netty tests)
+      mapping(id: "org.javassist:javassist:3.28.0-GA",                            version: "3.28.0")
+      // JUnit version range in Netty transitive POMs
+      rangeMapping(id: "junit:junit:[4.13.1,)", version: "4.13.2")
+    }
   }
 
   publishWorkflow {
@@ -22,13 +54,20 @@ project(group: "org.lattejava", name: "http", version: "0.1.4", licenses: ["MIT"
       // Ha! Just kidding. This is pure Java - no deps!
     }
     group(name: "test-compile", export: false) {
+      dependency(id: "com.google.guava:guava:32.1.3-android")
+      dependency(id: "com.google.protobuf:protobuf-java:${protobufVersion}")
       dependency(id: "com.inversoft:jackson5:${jackson5Version}")
       dependency(id: "com.inversoft:restify:${restifyVersion}")
+      dependency(id: "io.grpc:grpc-api:${grpcVersion}")
+      dependency(id: "io.grpc:grpc-netty:${grpcVersion}")
+      dependency(id: "io.grpc:grpc-protobuf:${grpcVersion}")
+      dependency(id: "io.grpc:grpc-stub:${grpcVersion}")
       dependency(id: "org.testng:testng:${testngVersion}")
       // Gets rid of SLF warnings on test run
       //   SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
       //   SLF4J: Defaulting to no-operation (NOP) logger implementation
       //   SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+      dependency(id: "org.slf4j:slf4j-api:${slf4jVersion}", skipCompatibilityCheck: true)
       dependency(id: "org.slf4j:slf4j-nop:${slf4jVersion}")
     }
   }

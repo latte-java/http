@@ -19,6 +19,8 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
+import java.time.Duration;
+
 /**
  * Tests automatic HEAD request handling at the wire level. Uses raw sockets because the JDK HttpClient will not read
  * body bytes for HEAD responses (per RFC), making it impossible to verify that the server did not write any.
