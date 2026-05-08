@@ -67,7 +67,7 @@ target(name: "build", description: "Compiles the Java source files and creates a
 }
 
 target(name: "test", description: "Runs the project's tests", dependsOn: ["build"]) {
-  var exclude = []
+  var exclude = ["h2spec"]
   if (switches.has("excludePerformance")) {
     exclude << "performance"
   }
@@ -76,6 +76,11 @@ target(name: "test", description: "Runs the project's tests", dependsOn: ["build
   }
 
   javaTestNG.test(exclude: exclude)
+}
+
+target(name: "int-h2spec", description: "Runs the h2spec conformance suite", dependsOn: ["build"]) {
+  exec(["./tools/install-h2spec.sh"])
+  javaTestNG.test(groups: ["h2spec"])
 }
 
 target(name: "int", description: "Releases a local integration build of the project", dependsOn: ["test"]) {
