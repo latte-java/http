@@ -513,10 +513,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private void spawnHandlerThread(HTTPRequest request, HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder) {
     Thread.ofVirtual().name("h2-handler-" + stream.streamId()).start(() -> {
       try {
-        HTTP2OutputStream h2out = new HTTP2OutputStream(stream, writerQueue, peerSettings.maxFrameSize());
-        // Wire the response's raw output stream so handlers that call res.getOutputStream().write(...) send body bytes
-        // through the h2 DATA-frame path instead of the HTTP/1.1 path (option a from the task spec).
-        response.setRawOutputStream(h2out);
+        // Stage the response body during handler execution. The handler may call res.getOutputStream().close()
+        // before returning, but RFC 9113 §8.1 requires HEADERS to precede all DATA frames on a stream.
+        // Buffering here ensures we can emit HEADERS first, then the staged body bytes, in the correct order.
+        ByteArrayOutputStream stagingBuffer = new ByteArrayOutputStream();
+        response.setRawOutputStream(stagingBuffer);
 
         configuration.getHandler().handle(request, response);
 
@@ -549,8 +550,37 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         }
         stream.applyEvent(HTTP2Stream.Event.SEND_HEADERS_NO_END_STREAM);
 
-        // Close the output stream: emits any buffered body bytes + final END_STREAM DATA frame.
+        // Emit the staged body bytes as DATA frames, then the trailers HEADERS frame if present.
+        HTTP2OutputStream h2out = new HTTP2OutputStream(stream, writerQueue, peerSettings.maxFrameSize());
+        if (response.hasTrailers()) {
+          h2out.setTrailersFollow(true);
+        }
+        byte[] body = stagingBuffer.toByteArray();
+        if (body.length > 0) {
+          h2out.write(body);
+        }
         h2out.close();
+
+        if (response.hasTrailers()) {
+          // Build and emit the trailers HEADERS frame with END_STREAM (RFC 9113 §8.1).
+          List<HPACKDynamicTable.HeaderField> trailerFields = new ArrayList<>();
+          for (var entry : response.getTrailers().entrySet()) {
+            for (String v : entry.getValue()) {
+              trailerFields.add(new HPACKDynamicTable.HeaderField(entry.getKey(), v));
+            }
+          }
+          byte[] trailerBlock;
+          synchronized (encoder) {
+            trailerBlock = encoder.encode(trailerFields);
+          }
+          try {
+            writerQueue.put(new HTTP2Frame.HeadersFrame(stream.streamId(),
+                HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
+          } catch (InterruptedException ignore) {
+            Thread.currentThread().interrupt();
+          }
+        }
+
         stream.applyEvent(HTTP2Stream.Event.SEND_DATA_END_STREAM);
 
         streams.remove(stream.streamId());

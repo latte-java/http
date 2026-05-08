@@ -41,8 +41,29 @@ public class HTTP2FrameReader {
     }
 
     return switch (type) {
-      case FRAME_TYPE_DATA -> new DataFrame(streamId, flags, copyOf(buffer, length));
-      case FRAME_TYPE_HEADERS -> new HeadersFrame(streamId, flags, copyOf(buffer, length));
+      case FRAME_TYPE_DATA -> {
+        // RFC 9113 §6.1: DATA frames may be padded.
+        if ((flags & FLAG_PADDED) != 0) {
+          int padLen = buffer[0] & 0xFF;
+          int dataLen = length - 1 - padLen;
+          yield new DataFrame(streamId, flags, copyOfRange(buffer, 1, 1 + dataLen));
+        }
+        yield new DataFrame(streamId, flags, copyOf(buffer, length));
+      }
+      case FRAME_TYPE_HEADERS -> {
+        // RFC 9113 §6.2: HEADERS frame may have PADDED and/or PRIORITY prefix bytes before the fragment.
+        int hdrOff = 0;
+        int hdrEnd = length;
+        if ((flags & FLAG_PADDED) != 0) {
+          int padLen = buffer[hdrOff] & 0xFF;
+          hdrOff++;
+          hdrEnd -= padLen;
+        }
+        if ((flags & FLAG_PRIORITY) != 0) {
+          hdrOff += 5; // 4 bytes stream dependency + 1 byte weight
+        }
+        yield new HeadersFrame(streamId, flags, copyOfRange(buffer, hdrOff, hdrEnd));
+      }
       case FRAME_TYPE_PRIORITY -> {
         if (length != 5) throw new FrameSizeException("PRIORITY payload must be 5; got [" + length + "]");
         yield new PriorityFrame(streamId);

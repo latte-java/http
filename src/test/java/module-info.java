@@ -2,8 +2,10 @@ module org.lattejava.http.tests {
   requires com.google.common;
   requires com.google.protobuf;
   requires io.grpc;
+  requires io.grpc.netty;
   requires io.grpc.protobuf;
   requires io.grpc.stub;
+  requires io.netty.handler;
   requires jackson5;
   requires java.compiler;
   requires java.net.http;

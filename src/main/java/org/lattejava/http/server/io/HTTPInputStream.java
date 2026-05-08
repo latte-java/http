@@ -214,8 +214,14 @@ public class HTTPInputStream extends InputStream {
       //   read bytes until the end of the InputStream is reached. This would assume Connection: close was also sent because if we do not know
       //   how to delimit the request we cannot use a persistent connection.
       // - We aren't doing any of that - if the client wants to send bytes, it needs to send a Content-Length header, or specify Transfer-Encoding: chunked.
-      logger.trace("Client indicated it was NOT sending an entity-body in the request");
-      delegate = InputStream.nullInputStream();
+      // - HTTP/2 streams use maximumContentLength == -1 as a sentinel: gRPC and other h2 requests don't send Content-Length or Transfer-Encoding,
+      //   so hasBody() returns false. The underlying HTTP2InputStream signals EOF at END_STREAM, so delegate through to pushbackInputStream.
+      if (maximumContentLength == -1) {
+        delegate = pushbackInputStream;
+      } else {
+        logger.trace("Client indicated it was NOT sending an entity-body in the request");
+        delegate = InputStream.nullInputStream();
+      }
     }
   }
 }
