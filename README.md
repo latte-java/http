@@ -4,7 +4,7 @@
 
 * Latest stable version: `0.1.0`
 
-The goal of this project is to build a full-featured HTTP server and client in plain Java without the use of any libraries. The client and server will use Project Loom virtual threads and blocking I/O so that the Java VM will handle all the context switching between virtual threads as they block on I/O.
+The goal of this project is to build a full-featured HTTP server and client in plain Java without the use of any libraries. The server supports HTTP/1.1 and HTTP/2 (h2 over TLS via ALPN, h2c prior-knowledge or via Upgrade/101). The client and server will use Project Loom virtual threads and blocking I/O so that the Java VM will handle all the context switching between virtual threads as they block on I/O.
 
 For more information about Project Loom and virtual threads, please review the following link.
 * https://blogs.oracle.com/javamagazine/post/java-virtual-threads

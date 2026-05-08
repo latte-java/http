@@ -252,7 +252,7 @@ How latte-java's HTTP/2 surface compares against the Java ecosystem leaders. Cap
 | Default-on for TLS | ✅ | ✅ | ✅ | (config) | (config) | ✅ |
 | HPACK | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Server push | 🚫 (no API) | ⚠️ disabled-default | ⚠️ disabled-default | ⚠️ | ⚠️ | ❌ |
-| Response trailers | ⚠️ (h2 deferred) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Response trailers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Request trailers | ⚠️ (h2 deferred) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | gRPC interop tested | ⚠️ (sanity only) | ⚠️ via grpc-jetty | ⚠️ via servlet adapter | ✅ (native) | ⚠️ | ✅ |
 | Rapid Reset mitigation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -264,6 +264,19 @@ How latte-java's HTTP/2 surface compares against the Java ecosystem leaders. Cap
 [^nima]: Helidon Níma uses virtual threads as carrier threads for its event loop, not strictly virtual-thread-per-stream the way latte-java does. End behavior is similar; the architectural shape differs. Worth a footnote so the comparison is honest.
 
 The last row is our differentiator. Pure virtual-thread + blocking-I/O code is unique among Java performance leaders.
+
+---
+
+## Performance summary
+
+Benchmark suite: `benchmarks/h2load-scenarios/hello.sh` (sample). Full benchmark run gated on user approval — see `benchmarks/h2load-scenarios/README.md`.
+
+Performance follow-ups deferred until a baseline run is collected:
+- HPACK Huffman encoding on the encode path (decoder uses Huffman; encoder writes literal-only for v1 determinism)
+- HEAD method handling on h2 (current code rebuilds the request for HTTP/1.1; h2 can short-circuit)
+- DATA frame payload pooling (currently allocates a `byte[]` per frame in the writer queue)
+- HPACKDecoder.decodeInt long-pack already done; consider similar packing on encode path
+- Connection-level WINDOW_UPDATE strategy (current: per-DATA-frame; consider replenish-when-half-empty across connection)
 
 ---
 
