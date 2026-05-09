@@ -18,7 +18,7 @@ public class HTTP2SettingsTest {
     HTTP2Settings s = HTTP2Settings.defaults();
     assertEquals(s.headerTableSize(), 4096);
     assertEquals(s.enablePush(), 0);
-    assertEquals(s.maxConcurrentStreams(), Integer.MAX_VALUE); // RFC default = unlimited
+    assertEquals(s.maxConcurrentStreams(), 100); // Server default = 100 (RFC says unlimited, but conservative default)
     assertEquals(s.initialWindowSize(), 65535);
     assertEquals(s.maxFrameSize(), 16384);
     assertEquals(s.maxHeaderListSize(), Integer.MAX_VALUE);

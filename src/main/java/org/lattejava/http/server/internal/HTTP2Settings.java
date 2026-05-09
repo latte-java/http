@@ -20,7 +20,7 @@ public class HTTP2Settings {
   private int enablePush = 1;
   private int headerTableSize = 4096;
   private int initialWindowSize = 65535;
-  private int maxConcurrentStreams = Integer.MAX_VALUE;
+  private int maxConcurrentStreams = 100;
   private int maxFrameSize = 16384;
   private int maxHeaderListSize = Integer.MAX_VALUE;
 
