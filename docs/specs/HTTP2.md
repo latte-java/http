@@ -282,164 +282,53 @@ Performance follow-ups deferred until a baseline run is collected:
 
 ## Bug ledger
 
-Full h2spec v2.6.0 run on 2026-05-09: 147 tests, 70 passed, 77 failed, 0 skipped.
-Run method: section-by-section with `--strict --timeout 5`; per-section perl alarm to guard against hangs.
+Full h2spec v2.6.0 run on 2026-05-05: 147 tests, 138 passed, 8 failed, 1 skipped.
 
-Previously fixed (commit `b316db7`):
-- HTTP2FrameReader PADDED and PRIORITY frame prefix stripping (RFC 9113 §6.2).
-- HTTP2OutputStream trailer emission ordering (RFC 9113 §8.1).
+Improvement vs first run: 77 → 8 failures (-69).
 
-Recently fixed (commit `cad7b5f`):
-- HEADERS-flood OOM (h2spec §5.1.2/1) — connection now enforced, no longer unbounded.
-- Frames on recently-closed streams now emit STREAM_CLOSED (h2spec §5.1/5, §5.1/10–13).
+Recently fixed:
+- (commit b316db7) HTTP2FrameReader PADDED/PRIORITY prefix stripping; trailer emission ordering.
+- (commit cad7b5f) HEADERS-flood OOM; recently-closed stream tracking.
+- (commit 82b60b5) Per-frame validators (batch 1) — DATA/HEADERS/PRIORITY/RST_STREAM/SETTINGS/PING/GOAWAY/WINDOW_UPDATE/CONTINUATION zero-stream-id, length, parameter validation.
+- (commit f54282e) HPACK pseudo-header validation (batch 2) — §8.1.2.* uppercase/missing/duplicated/connection-specific/TE/empty-path; content-length matching.
+- (commit 2850597) Connection-error GOAWAY ordering (batch 3) — preface, oversized frames, second-HEADERS-after-END_STREAM, RST_STREAM idle stream.
+- (commit a5a0de6) MAX_CONCURRENT_STREAMS default capped at 100.
 
-**Dominant root cause (71 of 77 failures): server keeps the TCP connection open but sends no error frame.**
-When a client sends an invalid frame (wrong stream ID, wrong state, bad settings value, etc.), the RFC requires a GOAWAY (connection error) or RST_STREAM (stream error). Our server currently neither rejects nor responds — it drops the frame silently and keeps the connection alive. h2spec times out after 5 s waiting for the required error.
+### Remaining failures
 
-**Secondary root cause (4 failures): TCP RST instead of GOAWAY.**
-The server closes the TCP socket abruptly (RST) rather than sending GOAWAY + FIN first. h2spec sees "connection reset by peer" instead of the expected GOAWAY frame.
+**Root cause A (2 failures): WINDOW_UPDATE/PRIORITY accepted on half-closed (remote) streams closes connection instead.**
+RFC 9113 §5.1 requires the server to silently accept these frames after END_STREAM.
 
-**Other (2 failures): wrong behavior on half-closed (remote) streams.**
-h2spec §2/2–3 (generic): server rejects WINDOW_UPDATE and PRIORITY frames on a half-closed-remote stream by closing the connection. RFC 9113 §5.1 requires the server to accept these frames.
+**Root cause B (3 failures): TCP RST instead of GOAWAY.**
+The server closes the TCP socket abruptly (RST) rather than sending a GOAWAY frame first.
+h2spec sees "connection reset by peer" instead of the expected frame.
 
-Remaining failures:
+**Root cause C (3 failures): flow-control not implemented.**
+The server does not honour per-stream or connection-level flow-control window limits, so tests
+that depend on the server respecting a window size of 1 or a SETTINGS_INITIAL_WINDOW_SIZE
+change in-flight see "unexpected EOF" instead of a DATA frame.
 
-### §generic/2: Streams and Multiplexing (half-closed remote)
+#### §generic/2: Streams and Multiplexing (half-closed remote)
 - **[generic 2/2]** Sends a WINDOW_UPDATE frame on half-closed (remote) stream. **Expected:** DATA frame. **Actual:** Connection closed.
 - **[generic 2/3]** Sends a PRIORITY frame on half-closed (remote) stream. **Expected:** DATA frame. **Actual:** Connection closed.
 
-### §generic/3: GOAWAY acceptance
+#### §generic/3.8: GOAWAY acceptance
 - **[generic 3.8/1]** Sends a GOAWAY frame. **Expected:** Connection closed + PING ACK. **Actual:** connection reset by peer (TCP RST before GOAWAY).
 
-### §3.5: HTTP/2 Connection Preface
+#### §3.5: HTTP/2 Connection Preface
 - **[http2 3.5/2]** Sends invalid connection preface. **Expected:** GOAWAY(PROTOCOL_ERROR) + connection closed. **Actual:** connection reset by peer.
 
-### §4.2: Frame Size
-- **[http2 4.2/2]** Sends a large DATA frame exceeding SETTINGS_MAX_FRAME_SIZE. **Expected:** GOAWAY(FRAME_SIZE_ERROR) or RST_STREAM(FRAME_SIZE_ERROR). **Actual:** connection reset by peer.
-- **[http2 4.2/3]** Sends a large HEADERS frame exceeding SETTINGS_MAX_FRAME_SIZE. **Expected:** GOAWAY(FRAME_SIZE_ERROR). **Actual:** connection reset by peer.
+#### §6.5.3: Settings Synchronization
+- **[http2 6.5.3/1]** Sends multiple SETTINGS_INITIAL_WINDOW_SIZE values. **Expected:** DATA (flow-controlled). **Actual:** unexpected EOF (flow control not implemented).
 
-### §5.1.1: Stream Identifiers
-- **[http2 5.1.1/1]** Sends even-numbered stream identifier. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout (no response).
-- **[http2 5.1.1/2]** Sends stream identifier numerically smaller than previous. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
+#### §6.9.1: Flow-Control Window
+- **[http2 6.9.1/1]** Sends SETTINGS with initial window size 1 then HEADERS. **Expected:** DATA (flow-controlled). **Actual:** unexpected EOF.
 
-### §5.1.2: Stream Concurrency
-- **[http2 5.1.2/1]** Sends HEADERS frames exceeding advertised concurrent stream limit. **Expected:** RST_STREAM(REFUSED_STREAM) or GOAWAY. **Actual:** Timeout (server hangs connection).
+#### §6.9.2: Initial Flow-Control Window Size
+- **[http2 6.9.2/1]** Changes SETTINGS_INITIAL_WINDOW_SIZE after sending HEADERS frame. **Expected:** DATA. **Actual:** unexpected EOF.
 
-### §5.3: Stream Priority (self-dependency)
-- **[http2 5.3/1]** Sends HEADERS frame that depends on itself. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 5.3/2]** Sends PRIORITY frame that depends on itself. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §5.4: Error Handling
-- **[http2 5.4/1]** Sends invalid PING frame for connection close. **Expected:** GOAWAY. **Actual:** Timeout.
-- **[http2 5.4/2]** Sends invalid PING frame to receive GOAWAY. **Expected:** GOAWAY. **Actual:** Timeout.
-
-### §5.5: Extending HTTP/2
-- **[http2 5.5/1]** Sends an unknown extension frame. **Expected:** accepted (DATA response). **Actual:** Timeout.
-- **[http2 5.5/2]** Sends unknown extension frame in the middle of a header block. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §6.1: DATA Frame
-- **[http2 6.1/1]** Sends DATA frame with stream ID 0x0. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.1/2]** Sends DATA frame on stream not in open/half-closed-local. **Expected:** GOAWAY or RST_STREAM. **Actual:** Timeout.
-- **[http2 6.1/3]** Sends DATA frame with invalid pad length. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §6.2: HEADERS Frame
-- **[http2 6.2/1]** Sends HEADERS without END_HEADERS + a PRIORITY frame. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.2/2]** Sends HEADERS to another stream while sending a HEADERS frame. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.2/3]** Sends HEADERS with stream ID 0x0. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.2/4]** Sends HEADERS with invalid pad length. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §6.3: PRIORITY Frame
-- **[http2 6.3/1]** Sends PRIORITY frame with stream ID 0x0. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.3/2]** Sends PRIORITY frame with length other than 5 octets. **Expected:** GOAWAY(FRAME_SIZE_ERROR). **Actual:** Timeout.
-
-### §6.4: RST_STREAM Frame
-- **[http2 6.4/1]** Sends RST_STREAM with stream ID 0x0. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.4/2]** Sends RST_STREAM on idle stream. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.4/3]** Sends RST_STREAM with length other than 4 octets. **Expected:** GOAWAY(FRAME_SIZE_ERROR). **Actual:** Timeout.
-
-### §6.5: SETTINGS Frame
-- **[http2 6.5/1]** Sends SETTINGS with ACK flag and payload. **Expected:** GOAWAY(FRAME_SIZE_ERROR). **Actual:** Timeout.
-- **[http2 6.5/2]** Sends SETTINGS with non-zero stream ID. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.5/3]** Sends SETTINGS with length not multiple of 6. **Expected:** GOAWAY(FRAME_SIZE_ERROR). **Actual:** Timeout.
-
-### §6.5.2: Defined SETTINGS Parameters
-- **[http2 6.5.2/1]** SETTINGS_ENABLE_PUSH value other than 0 or 1. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.5.2/2]** SETTINGS_INITIAL_WINDOW_SIZE above 2^31-1. **Expected:** GOAWAY(FLOW_CONTROL_ERROR). **Actual:** Timeout.
-- **[http2 6.5.2/3]** SETTINGS_MAX_FRAME_SIZE below 2^14. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.5.2/4]** SETTINGS_MAX_FRAME_SIZE above 2^24-1. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.5.2/5]** Sends SETTINGS with unknown identifier. **Expected:** accepted (ignored). **Actual:** Timeout.
-
-### §6.5.3: Settings Synchronization
-- **[http2 6.5.3/1]** Sends multiple SETTINGS_INITIAL_WINDOW_SIZE values. **Expected:** DATA (accepted). **Actual:** Timeout.
-- **[http2 6.5.3/2]** Sends SETTINGS without ACK flag. **Expected:** SETTINGS ACK. **Actual:** Timeout.
-
-### §6.7: PING Frame
-- **[http2 6.7/1]** Sends PING frame (valid, non-ACK). **Expected:** PING ACK. **Actual:** Timeout.
-- **[http2 6.7/2]** Sends PING with ACK flag. **Expected:** accepted (no response). **Actual:** Timeout.
-- **[http2 6.7/3]** Sends PING with non-zero stream ID. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.7/4]** Sends PING with length other than 8. **Expected:** GOAWAY(FRAME_SIZE_ERROR). **Actual:** Timeout.
-
-### §6.8: GOAWAY Frame
-- **[http2 6.8/1]** Sends GOAWAY with non-zero stream ID. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §6.9: WINDOW_UPDATE Frame
-- **[http2 6.9/1]** Sends WINDOW_UPDATE with increment of 0 (connection). **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.9/2]** Sends WINDOW_UPDATE with increment of 0 (stream). **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.9/3]** Sends WINDOW_UPDATE with length other than 4. **Expected:** GOAWAY(FRAME_SIZE_ERROR). **Actual:** Timeout.
-
-### §6.9.1: Flow-Control Window
-- **[http2 6.9.1/1]** Sends SETTINGS with window size 1 then HEADERS. **Expected:** DATA (flow-controlled). **Actual:** Timeout.
-- **[http2 6.9.1/2]** Sends multiple WINDOW_UPDATEs exceeding 2^31-1 (connection). **Expected:** GOAWAY(FLOW_CONTROL_ERROR). **Actual:** Timeout.
-- **[http2 6.9.1/3]** Sends multiple WINDOW_UPDATEs exceeding 2^31-1 (stream). **Expected:** RST_STREAM(FLOW_CONTROL_ERROR). **Actual:** Timeout.
-
-### §6.9.2: Initial Flow-Control Window Size
-- **[http2 6.9.2/1]** Changes SETTINGS_INITIAL_WINDOW_SIZE after HEADERS. **Expected:** DATA. **Actual:** Timeout.
-- **[http2 6.9.2/2]** Sends SETTINGS making window size negative. **Expected:** GOAWAY(FLOW_CONTROL_ERROR). **Actual:** Timeout.
-- **[http2 6.9.2/3]** Sends SETTINGS_INITIAL_WINDOW_SIZE exceeding max. **Expected:** GOAWAY(FLOW_CONTROL_ERROR). **Actual:** Timeout.
-
-### §6.10: CONTINUATION Frame
-- **[http2 6.10/1]** Sends multiple CONTINUATION frames preceded by HEADERS. **Expected:** DATA response. **Actual:** Timeout.
-- **[http2 6.10/2]** Sends CONTINUATION followed by non-CONTINUATION. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.10/3]** Sends CONTINUATION with stream ID 0x0. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.10/4]** Sends CONTINUATION after HEADERS with END_HEADERS. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.10/5]** Sends CONTINUATION after CONTINUATION with END_HEADERS. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 6.10/6]** Sends CONTINUATION preceded by DATA. **Expected:** GOAWAY(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §7: Error Codes
-- **[http2 7/1]** Sends GOAWAY with unknown error code. **Expected:** accepted (DATA). **Actual:** Timeout.
-- **[http2 7/2]** Sends RST_STREAM with unknown error code. **Expected:** accepted (DATA). **Actual:** Timeout.
-
-### §8.1: HTTP Request/Response Exchange
-- **[http2 8.1/1]** Sends second HEADERS frame without END_STREAM. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §8.1.2: HTTP Header Fields
-- **[http2 8.1.2/1]** Sends HEADERS with uppercase header name. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §8.1.2.1: Pseudo-Header Fields
-- **[http2 8.1.2.1/1]** Sends HEADERS with unknown pseudo-header field. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.1/2]** Sends HEADERS with response pseudo-header in request. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.1/3]** Sends HEADERS with pseudo-header as trailer. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.1/4]** Sends HEADERS with pseudo-header after regular header. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §8.1.2.2: Connection-Specific Header Fields
-- **[http2 8.1.2.2/1]** Sends HEADERS with connection-specific header (e.g. Connection:). **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.2/2]** Sends HEADERS with TE header other than "trailers". **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §8.1.2.3: Request Pseudo-Header Fields
-- **[http2 8.1.2.3/1]** Sends HEADERS with empty :path pseudo-header. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.3/2]** Sends HEADERS omitting :method pseudo-header. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.3/3]** Sends HEADERS omitting :scheme pseudo-header. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.3/4]** Sends HEADERS omitting :path pseudo-header. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.3/5]** Sends HEADERS with duplicated :method. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.3/6]** Sends HEADERS with duplicated :scheme. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.3/7]** Sends HEADERS with duplicated :path. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §8.1.2.6: Malformed Requests and Responses
-- **[http2 8.1.2.6/1]** Sends HEADERS with content-length not matching DATA payload. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-- **[http2 8.1.2.6/2]** Sends HEADERS with content-length not matching sum of DATA payloads. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
-
-### §8.2: Server Push
-- **[http2 8.2/1]** Sends a PUSH_PROMISE frame. **Expected:** RST_STREAM(PROTOCOL_ERROR). **Actual:** Timeout.
+#### §7: Error Codes
+- **[http2 7/1]** Sends GOAWAY with unknown error code. **Expected:** accepted (DATA + PING ACK). **Actual:** connection reset by peer.
 
 ---
 
