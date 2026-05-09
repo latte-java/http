@@ -99,6 +99,14 @@ public class HTTPInputStream extends InputStream {
 
     drained = true;
 
+    // Fast-path: if the request carries no body, there is nothing to drain.
+    // This covers both the case where nobody called read() yet (!initialized) and the case where
+    // the handler called readAllBytes() / read() on a bodyless request (GET/HEAD) — both result in
+    // an empty underlying stream, so allocating the skip buffer and looping is pointless.
+    if (!request.hasBody()) {
+      return 0;
+    }
+
     int total = 0;
     byte[] skipBuffer = new byte[2048];
     while (true) {

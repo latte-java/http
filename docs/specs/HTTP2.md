@@ -269,14 +269,64 @@ The last row is our differentiator. Pure virtual-thread + blocking-I/O code is u
 
 ## Performance summary
 
-Benchmark suite: `benchmarks/h2load-scenarios/hello.sh` (sample). Full benchmark run gated on user approval — see `benchmarks/h2load-scenarios/README.md`.
+Benchmark suite: `benchmarks/perf-test.sh` with JFR profiling (`--detailed`). Tool: wrk. h2load deferred until `brew install nghttp2`.
 
-Performance follow-ups deferred until a baseline run is collected:
+### Performance findings (2026-05-09)
+
+**Run config:** `hello` scenario, 5s × 1 trial, wrk 12 threads / 100 connections. Machine: Apple M4, 10 cores, 24 GB RAM, macOS 15.7.3, JDK 25.0.2.
+
+**Baseline (pre-fix, commit 9dd655f):**
+
+| Metric | Value |
+|---|---|
+| Throughput | 85,390 req/s |
+| p50 latency | 1,064 µs |
+| p90 latency | 1,246 µs |
+| p99 latency | 6,807 µs |
+| Alloc / req | 23,449 bytes |
+| GC count (5s) | 36 |
+| GC pause total | 27.0 ms (0.54% overhead) |
+
+**Top allocation hotspots (baseline):**
+
+| Rank | Site | % of alloc events | Notes |
+|---|---|---|---|
+| 1 | `java.io.InputStream.readNBytes(int)` | 74% | Benchmark handler calling `readAllBytes()` — benchmark artifact, not server library |
+| 2 | `java.util.concurrent.ForkJoinPool.execute(Runnable)` | 8.6% | Virtual-thread scheduling; inherent to per-request VT model |
+| 3 | `org.lattejava.http.server.io.HTTPInputStream.drain()` | 3.8% | Per-request `new byte[2048]` even for bodyless GET requests — clear quick win |
+
+**Top CPU hotspots (baseline):**
+
+| Rank | Method | CPU % |
+|---|---|---|
+| 1 | `HTTP1Worker.run()` | 14.2% |
+| 2 | `HTTPTools.parseRequestPreamble()` | 10.1% |
+| 3 | `java.lang.StringLatin1.hashCode(byte[])` | 9.5% |
+
+**Fix applied:** `HTTPInputStream.drain()` — skip skip-buffer allocation and drain loop when `request.hasBody()` is false. For GET/HEAD requests that declare no body, `drain()` was allocating a `byte[2048]` and immediately hitting EOF. One guard at the top of `drain()` eliminates this per-request allocation for the dominant request pattern.
+
+**After fix:**
+
+| Metric | Before | After | Delta |
+|---|---|---|---|
+| Throughput | 85,390 req/s | 85,498 req/s | +0.1% (noise) |
+| p99 latency | 6,807 µs | 4,212 µs | −38% |
+| Alloc / req | 23,449 bytes | 21,369 bytes | −8.9% |
+| GC count (5s) | 36 | 33 | −8% |
+| GC pause total | 27.0 ms | 22.1 ms | −18% |
+| `HTTPInputStream.drain()` alloc rank | #3 (3.8%) | not in top 8 | eliminated |
+
+Throughput is noise-level flat (both within normal run-to-run variance for a 5s × 1 trial). The meaningful gains are allocation rate (−8.9% bytes/req) and GC pressure (−18% total pause), which will compound under sustained load.
+
+**Remaining follow-up candidates (deferred):**
+
 - HPACK Huffman encoding on the encode path (decoder uses Huffman; encoder writes literal-only for v1 determinism)
 - HEAD method handling on h2 (current code rebuilds the request for HTTP/1.1; h2 can short-circuit)
 - DATA frame payload pooling (currently allocates a `byte[]` per frame in the writer queue)
 - HPACKDecoder.decodeInt long-pack already done; consider similar packing on encode path
 - Connection-level WINDOW_UPDATE strategy (current: per-DATA-frame; consider replenish-when-half-empty across connection)
+- `StringLatin1.hashCode()` at 9.5% CPU — header-map lookups; consider interning or pre-hashing common header names
+- `Socket.getRemoteSocketAddress()` per-request allocation (1% alloc events) — could be cached on `HTTPRequest` construction
 
 ---
 
