@@ -282,53 +282,28 @@ Performance follow-ups deferred until a baseline run is collected:
 
 ## Bug ledger
 
-Full h2spec v2.6.0 run on 2026-05-05: 147 tests, 138 passed, 8 failed, 1 skipped.
+Full h2spec v2.6.0 run on 2026-05-05: 147 tests, 143 passed, 1 skipped, 3 failed.
 
-Improvement vs first run: 77 → 8 failures (-69).
+Improvement over campaign: 77 → 3 failures (-74).
 
-Recently fixed:
-- (commit b316db7) HTTP2FrameReader PADDED/PRIORITY prefix stripping; trailer emission ordering.
-- (commit cad7b5f) HEADERS-flood OOM; recently-closed stream tracking.
-- (commit 82b60b5) Per-frame validators (batch 1) — DATA/HEADERS/PRIORITY/RST_STREAM/SETTINGS/PING/GOAWAY/WINDOW_UPDATE/CONTINUATION zero-stream-id, length, parameter validation.
-- (commit f54282e) HPACK pseudo-header validation (batch 2) — §8.1.2.* uppercase/missing/duplicated/connection-specific/TE/empty-path; content-length matching.
-- (commit 2850597) Connection-error GOAWAY ordering (batch 3) — preface, oversized frames, second-HEADERS-after-END_STREAM, RST_STREAM idle stream.
-- (commit a5a0de6) MAX_CONCURRENT_STREAMS default capped at 100.
+Closed by 2026-05-09 cleanup campaign (commits b316db7, cad7b5f, 82b60b5, f54282e, 2850597, a5a0de6, 2829cc4): 77 failures → 3.
 
 ### Remaining failures
 
-**Root cause A (2 failures): WINDOW_UPDATE/PRIORITY accepted on half-closed (remote) streams closes connection instead.**
-RFC 9113 §5.1 requires the server to silently accept these frames after END_STREAM.
-
-**Root cause B (3 failures): TCP RST instead of GOAWAY.**
-The server closes the TCP socket abruptly (RST) rather than sending a GOAWAY frame first.
-h2spec sees "connection reset by peer" instead of the expected frame.
-
-**Root cause C (3 failures): flow-control not implemented.**
-The server does not honour per-stream or connection-level flow-control window limits, so tests
-that depend on the server respecting a window size of 1 or a SETTINGS_INITIAL_WINDOW_SIZE
-change in-flight see "unexpected EOF" instead of a DATA frame.
-
-#### §generic/2: Streams and Multiplexing (half-closed remote)
-- **[generic 2/2]** Sends a WINDOW_UPDATE frame on half-closed (remote) stream. **Expected:** DATA frame. **Actual:** Connection closed.
-- **[generic 2/3]** Sends a PRIORITY frame on half-closed (remote) stream. **Expected:** DATA frame. **Actual:** Connection closed.
-
-#### §generic/3.8: GOAWAY acceptance
-- **[generic 3.8/1]** Sends a GOAWAY frame. **Expected:** Connection closed + PING ACK. **Actual:** connection reset by peer (TCP RST before GOAWAY).
-
-#### §3.5: HTTP/2 Connection Preface
-- **[http2 3.5/2]** Sends invalid connection preface. **Expected:** GOAWAY(PROTOCOL_ERROR) + connection closed. **Actual:** connection reset by peer.
+**Root cause: SETTINGS_INITIAL_WINDOW_SIZE flow-control (3 failures).**
+The server does not honor per-stream or connection-level flow-control window limits when
+`SETTINGS_INITIAL_WINDOW_SIZE` is used to constrain send windows. Tests that depend on the
+server respecting a window size of 1 or a mid-connection `SETTINGS_INITIAL_WINDOW_SIZE`
+change see "unexpected EOF" instead of a DATA frame.
 
 #### §6.5.3: Settings Synchronization
-- **[http2 6.5.3/1]** Sends multiple SETTINGS_INITIAL_WINDOW_SIZE values. **Expected:** DATA (flow-controlled). **Actual:** unexpected EOF (flow control not implemented).
+- **[http2 6.5.3/1]** Sends multiple SETTINGS_INITIAL_WINDOW_SIZE values. **Expected:** DATA (flow-controlled). **Actual:** unexpected EOF.
 
 #### §6.9.1: Flow-Control Window
 - **[http2 6.9.1/1]** Sends SETTINGS with initial window size 1 then HEADERS. **Expected:** DATA (flow-controlled). **Actual:** unexpected EOF.
 
 #### §6.9.2: Initial Flow-Control Window Size
 - **[http2 6.9.2/1]** Changes SETTINGS_INITIAL_WINDOW_SIZE after sending HEADERS frame. **Expected:** DATA. **Actual:** unexpected EOF.
-
-#### §7: Error Codes
-- **[http2 7/1]** Sends GOAWAY with unknown error code. **Expected:** accepted (DATA + PING ACK). **Actual:** connection reset by peer.
 
 ---
 
