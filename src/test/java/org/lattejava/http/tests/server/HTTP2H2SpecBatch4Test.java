@@ -16,7 +16,7 @@ import static org.testng.Assert.*;
  *   <li>generic §2/2 — WINDOW_UPDATE on half-closed (remote) stream must be accepted</li>
  *   <li>generic §2/3 — PRIORITY on half-closed (remote) stream must be accepted</li>
  *   <li>generic §3.8/1 — GOAWAY from peer: server sends PING ACK then closes cleanly (no TCP RST)</li>
- *   <li>http2 §3.5/2 — invalid h2c preface: server sends GOAWAY(PROTOCOL_ERROR) before close</li>
+ *   <li>http2 §3.5/2 — invalid h2c preface: dual-protocol listener falls back to HTTP/1.1</li>
  *   <li>http2 §7/1 — GOAWAY with unknown error code accepted (connection continues)</li>
  *   <li>http2 §6.9.1/1 — flow-control window=1: DATA sent byte-by-byte via WINDOW_UPDATE</li>
  * </ul>
@@ -140,56 +140,40 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────────────────────
-  // Root Cause B — invalid h2c preface: GOAWAY(PROTOCOL_ERROR) before TCP close
+  // Root Cause B — invalid h2c preface: fall back to HTTP/1.1 (dual-protocol behavior)
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §3.5 — when a client connects to an h2c prior-knowledge endpoint and sends an invalid
-   * connection preface, the server MUST emit SETTINGS + GOAWAY(PROTOCOL_ERROR) before closing the
-   * TCP connection. Previously the server dispatched to HTTP/1.1 handling, which TCP-RST'd.
+   * {@code withH2cPriorKnowledgeEnabled(true)} acts as a dual-protocol listener: it peeks the first 24 bytes
+   * and routes to HTTP/2 if they match the connection preface, or falls back to HTTP/1.1 otherwise. This allows
+   * the same port to serve both wrk (HTTP/1.1) and h2load (h2c) traffic in benchmark scenarios.
+   *
+   * <p>A client that sends a non-preface opening (e.g. a plain {@code GET} request) receives a normal
+   * HTTP/1.1 response rather than a GOAWAY, because the peeked bytes are pushed back into the stream
+   * and the connection is handed off to {@link org.lattejava.http.server.internal.HTTP1Worker}.
    */
   @Test
-  public void invalid_h2c_preface_emits_goaway_protocol_error() throws Exception {
+  public void invalid_h2c_preface_falls_back_to_http1() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      res.getOutputStream().write("ok".getBytes());
+      res.getOutputStream().close();
+    };
     try (var server = makeServer("http", handler, listener).start()) {
       int port = server.getActualPort();
 
       try (var sock = new Socket("127.0.0.1", port)) {
         sock.setSoTimeout(5000);
-        var out = sock.getOutputStream();
-        // Send an invalid preface (wrong bytes, same length as valid preface).
-        out.write("INVALID * HTTP/2.0\r\n\r\nXX\r\n\r\n".getBytes()); // 24 bytes, wrong content
+        var out = new java.io.PrintWriter(sock.getOutputStream(), false, StandardCharsets.US_ASCII);
+        // Send a plain HTTP/1.1 request — the 24-byte peek will not match the h2 preface.
+        out.print("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
         out.flush();
 
         var in = sock.getInputStream();
-        // Drain until GOAWAY (type 0x7) or EOF.
-        boolean sawSettings = false;
-        boolean sawGoaway = false;
-        int goawayErrorCode = -1;
-        outer:
-        while (true) {
-          int b0 = in.read();
-          if (b0 == -1) break;
-          byte[] rest = new byte[8];
-          if (in.readNBytes(rest, 0, 8) != 8) break;
-          int frameLength = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-          int frameType = rest[2] & 0xFF;
-          byte[] payload = in.readNBytes(frameLength);
-          if (frameType == 0x4) { // SETTINGS
-            sawSettings = true;
-          } else if (frameType == 0x7) { // GOAWAY
-            if (payload.length >= 8) {
-              goawayErrorCode = ((payload[4] & 0xFF) << 24) | ((payload[5] & 0xFF) << 16)
-                  | ((payload[6] & 0xFF) << 8) | (payload[7] & 0xFF);
-            }
-            sawGoaway = true;
-            break outer;
-          }
-        }
-        assertTrue(sawSettings, "Server must send SETTINGS before GOAWAY on invalid h2c preface");
-        assertTrue(sawGoaway, "Server must send GOAWAY on invalid h2c preface");
-        assertEquals(goawayErrorCode, 0x1, "GOAWAY error code must be PROTOCOL_ERROR(0x1); got: " + goawayErrorCode);
+        var response = new String(in.readAllBytes(), StandardCharsets.US_ASCII);
+        assertTrue(response.startsWith("HTTP/1.1 200"), "Expected HTTP/1.1 200 fallback but got: [" + response.substring(0, Math.min(response.length(), 80)) + "]");
+        assertTrue(response.contains("ok"), "Expected body [ok] in response: [" + response + "]");
       }
     }
   }
