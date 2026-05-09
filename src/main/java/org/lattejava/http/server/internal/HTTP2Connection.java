@@ -336,18 +336,19 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       } catch (InterruptedException ignore) {
         Thread.currentThread().interrupt();
       }
-      // Graceful TCP teardown: shut down the output side (sends FIN to peer) then drain any remaining
-      // inbound bytes. Without draining, close() on a socket with unread receive-buffer data causes the OS
-      // to emit a TCP RST instead of a clean FIN — h2spec sees "connection reset by peer".
+      // Graceful TCP teardown: shut down the output side (sends FIN to peer), drain any already-buffered
+      // inbound bytes, then close. Without draining, close() on a socket with unread receive-buffer data
+      // causes the OS to emit a TCP RST instead of a clean FIN — the peer sees "connection reset by peer".
       // SSLSocket.shutdownOutput() is not supported (throws UnsupportedOperationException) — suppress it.
+      // The 50 ms SO_TIMEOUT limits the drain to already-buffered data: if no bytes are pending, skip()
+      // returns after one 50 ms poll and terminates cleanly without blocking test shutdown paths.
       try {
         socket.shutdownOutput();
       } catch (Exception ignore) {
       }
       if (socketIn != null) {
         try {
-          // Brief timeout so the drain doesn't hang if the peer keeps the connection open.
-          socket.setSoTimeout(500);
+          socket.setSoTimeout(50);
           socketIn.skip(Long.MAX_VALUE);
         } catch (IOException ignore) {
         }
