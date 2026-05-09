@@ -130,8 +130,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   @Override
   public void run() {
     Thread writerThread = null;
+    InputStream socketIn = null;
     try {
       var in = new ThroughputInputStream(socket.getInputStream(), throughput);
+      socketIn = in;
       var out = new ThroughputOutputStream(socket.getOutputStream(), throughput);
 
       var writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
@@ -333,6 +335,22 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         }
       } catch (InterruptedException ignore) {
         Thread.currentThread().interrupt();
+      }
+      // Graceful TCP teardown: shut down the output side (sends FIN to peer) then drain any remaining
+      // inbound bytes. Without draining, close() on a socket with unread receive-buffer data causes the OS
+      // to emit a TCP RST instead of a clean FIN — h2spec sees "connection reset by peer".
+      // SSLSocket.shutdownOutput() is not supported (throws UnsupportedOperationException) — suppress it.
+      try {
+        socket.shutdownOutput();
+      } catch (Exception ignore) {
+      }
+      if (socketIn != null) {
+        try {
+          // Brief timeout so the drain doesn't hang if the peer keeps the connection open.
+          socket.setSoTimeout(500);
+          socketIn.skip(Long.MAX_VALUE);
+        } catch (IOException ignore) {
+        }
       }
       try {
         socket.close();
@@ -801,7 +819,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         // Ensure the output is closed even if the handler did not call out.close() explicitly.
         lazyOut.close();
 
-        stream.applyEvent(HTTP2Stream.Event.SEND_DATA_END_STREAM);
+        try {
+          stream.applyEvent(HTTP2Stream.Event.SEND_DATA_END_STREAM);
+        } catch (IllegalStateException ignored) {
+          // Stream was reset by the client (RECV_RST_STREAM) between our last write and now.
+          // The DATA frame is already in the writer queue; the RST_STREAM from the client implicitly
+          // cancels it. Not an error — this is normal during graceful teardown or test probing.
+        }
 
         streams.remove(stream.streamId());
         streamPipes.remove(stream.streamId());
@@ -832,6 +856,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     private final HPACKEncoder encoder;
     private HTTP2OutputStream delegate;
     private boolean closed;
+    // Set when the client RST'd the stream before we sent headers. Subsequent writes and closes are no-ops.
+    private boolean streamReset;
 
     LazyHeaderOutputStream(HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder) {
       this.response = response;
@@ -842,18 +868,21 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     @Override
     public void write(int b) throws IOException {
       ensureHeadersSent();
+      if (streamReset) return;
       delegate.write(b);
     }
 
     @Override
     public void write(byte[] b, int off, int len) throws IOException {
       ensureHeadersSent();
+      if (streamReset) return;
       delegate.write(b, off, len);
     }
 
     @Override
     public void flush() throws IOException {
       ensureHeadersSent();
+      if (streamReset) return;
       delegate.flush();
     }
 
@@ -862,6 +891,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       if (closed) return;
       closed = true;
       ensureHeadersSent();
+      if (streamReset) return;
       if (response.hasTrailers()) {
         delegate.setTrailersFollow(true);
       }
@@ -872,7 +902,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     }
 
     private void ensureHeadersSent() throws IOException {
-      if (delegate != null) return;
+      if (delegate != null || streamReset) return;
       // Build response HEADERS field list from the response state at the time of first write.
       List<HPACKDynamicTable.HeaderField> respFields = new ArrayList<>();
       respFields.add(new HPACKDynamicTable.HeaderField(":status", String.valueOf(response.getStatus())));
@@ -893,12 +923,27 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       synchronized (encoder) {
         headerBlock = encoder.encode(respFields);
       }
+      // If the client RST'd the stream, applyEvent(SEND_HEADERS_NO_END_STREAM) would throw because the
+      // state is CLOSED. Mark the stream as reset so the handler finishes without further errors.
+      // Do not enqueue the HEADERS frame — the stream was cancelled by the client.
+      if (stream.state() == HTTP2Stream.State.CLOSED) {
+        streamReset = true;
+        return;
+      }
       try {
         writerQueue.put(new HTTP2Frame.HeadersFrame(stream.streamId(), HTTP2Frame.FLAG_END_HEADERS, headerBlock));
       } catch (InterruptedException ignore) {
         Thread.currentThread().interrupt();
       }
-      stream.applyEvent(HTTP2Stream.Event.SEND_HEADERS_NO_END_STREAM);
+      try {
+        stream.applyEvent(HTTP2Stream.Event.SEND_HEADERS_NO_END_STREAM);
+      } catch (IllegalStateException ignored) {
+        // Race: client sent RST_STREAM between the state check above and the applyEvent call.
+        // The HEADERS frame was already enqueued (writer will discard it per RFC 9113 §5.1).
+        // Mark stream as reset so subsequent handler writes go to /dev/null.
+        streamReset = true;
+        return;
+      }
       delegate = new HTTP2OutputStream(stream, writerQueue, peerSettings.maxFrameSize());
     }
 

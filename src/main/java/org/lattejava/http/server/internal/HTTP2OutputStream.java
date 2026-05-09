@@ -70,9 +70,9 @@ public class HTTP2OutputStream extends OutputStream {
     buffer.reset();
     int off = 0;
     while (off < all.length) {
-      int chunk = Math.min(peerMaxFrameSize, all.length - off);
-      // Block on flow-control if needed. Signed comparison: window may be negative after SETTINGS-induced decrease.
-      while (stream.sendWindow() < chunk) {
+      // Block on flow-control if the send window is exhausted. Signed comparison: window may be negative after a
+      // SETTINGS-induced decrease (RFC 9113 §6.9.2). Block until at least 1 byte of credit is available.
+      while (stream.sendWindow() <= 0) {
         try {
           synchronized (stream) {
             stream.wait(100);
@@ -82,6 +82,10 @@ public class HTTP2OutputStream extends OutputStream {
           throw new InterruptedIOException();
         }
       }
+      // Cap the chunk to the current send window so we never wait when we have any credit.
+      // This is the RFC 9113 §6.9.1 flow: send up to min(window, maxFrameSize, remaining) bytes at a time.
+      int remaining = all.length - off;
+      int chunk = Math.min(Math.min(peerMaxFrameSize, remaining), (int) Math.min(stream.sendWindow(), Integer.MAX_VALUE));
       stream.consumeSendWindow(chunk);
       byte[] piece = new byte[chunk];
       System.arraycopy(all, off, piece, 0, chunk);
