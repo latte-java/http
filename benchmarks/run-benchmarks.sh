@@ -214,7 +214,7 @@ scenario_config() {
     high-concurrency)    echo "wrk    12 1000   /" ;;
     mixed)               echo "wrk    12 100    /" ;;
     browser-headers)     echo "wrk    12 100    /" ;;
-    h2-hello)            echo "h2load 4  1   100 /hello" ;;   # 4 threads, 1 TCP connection, 100 streams
+    h2-hello)            echo "h2load 1  1   100 /hello" ;;   # 1 thread, 1 TCP connection, 100 streams
     h2-high-concurrency) echo "h2load 4  10  100 /hello" ;;   # 4 threads, 10 TCP connections, 100 streams each
     *)                   echo ""; return 1 ;;
   esac
@@ -247,10 +247,17 @@ start_server() {
 }
 
 wait_for_server() {
+  local server="$1"
   local timeout=30
   local elapsed=0
+  # The "self" server uses h2c prior-knowledge; plain HTTP/1.1 curl will fail.
+  # Use --http2-prior-knowledge for that server so the health-check actually connects.
+  local curl_extra_flags=""
+  if [[ "${server}" == "self" ]]; then
+    curl_extra_flags="--http2-prior-knowledge"
+  fi
   while [[ ${elapsed} -lt ${timeout} ]]; do
-    if curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null | grep -q "200"; then
+    if curl ${curl_extra_flags} -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/ 2>/dev/null | grep -q "200"; then
       return 0
     fi
     sleep 1
@@ -365,14 +372,17 @@ run_h2load_benchmark() {
   stop_timer
 
   # Parse h2load text output.
-  # "finished in Xs, NNN req/s, ..." -> rps
-  # "time for request: min Xus, max Xus, mean Xus, sd Xus, cv ..." -> latency
+  # h2load summary line: "finished in Xs, NNN.NN req/s, ..." -> rps
+  # h2load per-stat table columns: min, max, median, p95, p99, mean, sd, +/- sd
+  #   "request     :       81us     39.12ms       685us     1.45ms     2.12ms      792us   ..."
   # "status codes: N 2xx, ..." -> errors = total - 2xx
   local rps avg_lat_us p99_us errors total_req succeeded
 
   rps="$(echo "${h2load_output}" | grep -E 'req/s' | grep -oE '[0-9]+(\.[0-9]+)?\s+req/s' | grep -oE '^[0-9]+(\.[0-9]+)?' | head -1)"
-  avg_lat_us="$(echo "${h2load_output}" | grep 'time for request' | grep -oE 'mean\s+[0-9.]+[a-z]+' | grep -oE '[0-9.]+[a-z]+$' | head -1)"
-  p99_us="$(echo "${h2load_output}" | grep -E '99th|p99' | grep -oE '[0-9.]+[a-z]+' | head -1)"
+  # Extract the p99 (5th time value) and mean (6th time value) from the "request     :" row.
+  # awk reads the row: fields are "request", ":", min, max, median, p95, p99, mean, ...
+  avg_lat_us="$(echo "${h2load_output}" | grep 'request' | grep -v 'requests:' | awk 'NR==1 {print $8}')"
+  p99_us="$(echo "${h2load_output}" | grep 'request' | grep -v 'requests:' | awk 'NR==1 {print $7}')"
 
   # Convert latency strings like "1.23ms" or "456us" to microseconds
   convert_to_us() {
@@ -477,7 +487,7 @@ for server in ${SERVERS}; do
   stop_server
   start_server "${server}"
 
-  if ! wait_for_server; then
+  if ! wait_for_server "${server}"; then
     echo "ERROR: ${server} failed to start, skipping."
     stop_server
     continue

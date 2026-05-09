@@ -104,7 +104,9 @@ generate_h1_table() {
     fi
 
     # Normalized performance vs Latte http
-    if [[ -n "${self_rps}" && "${self_rps}" != "0" && "${self_rps}" != "null" ]]; then
+    # Use bc for numeric zero-check since jq may output "0.00" rather than "0".
+    if [[ -n "${self_rps}" && "${self_rps}" != "null" ]] && \
+       [[ "$(echo "${self_rps} > 0" | bc -l 2>/dev/null)" == "1" ]]; then
       normalized="$(echo "scale=1; ${rps} * 100 / ${self_rps}" | bc)"
     else
       normalized="?"
@@ -140,7 +142,9 @@ generate_h2_table() {
     p99_lat_ms="$(printf "%.2f" "$(echo "scale=4; ${p99_lat} / 1000" | bc)")"
 
     # Normalized performance vs Latte http
-    if [[ -n "${self_rps}" && "${self_rps}" != "0" && "${self_rps}" != "null" ]]; then
+    # Use bc for numeric zero-check since jq may output "0.00" rather than "0".
+    if [[ -n "${self_rps}" && "${self_rps}" != "null" ]] && \
+       [[ "$(echo "${self_rps} > 0" | bc -l 2>/dev/null)" == "1" ]]; then
       normalized="$(echo "scale=1; ${rps} * 100 / ${self_rps}" | bc)"
     else
       normalized="?"
