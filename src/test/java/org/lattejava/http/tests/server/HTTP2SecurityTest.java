@@ -143,13 +143,25 @@ public class HTTP2SecurityTest extends BaseTest {
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2cConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
-        // Rapid Reset (CVE-2023-44487): send RST_STREAM frames in excess of the 100/30s threshold.
-        // RST_STREAM on streams that were never opened is still counted by the rate limiter.
-        // Odd stream IDs per RFC 9113 §5.1.1 (client-initiated).
-        // 105 iterations × step 2 = stream IDs 1, 3, 5, ..., 209 → 105 RST_STREAM frames (> threshold of 100).
+        // Rapid Reset (CVE-2023-44487): send HEADERS immediately followed by RST_STREAM, repeating with
+        // monotonically increasing stream IDs. This models the real attack pattern where each RST targets
+        // a previously-opened stream (not an idle stream). 105 iterations × step 2 = stream IDs 1..209,
+        // producing 105 RST_STREAM frames — exceeding the 100/30s threshold.
+        // Minimal HPACK block: :method=GET, :path=/, :scheme=http, :authority=localhost
+        byte[] minimalHeaders = {
+            (byte) 0x82,                                    // :method: GET
+            (byte) 0x84,                                    // :path: /
+            (byte) 0x86,                                    // :scheme: https
+            (byte) 0x41, 0x09,                              // :authority: localhost (literal)
+            'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
+        };
         for (int i = 1; i <= 210; i += 2) {
-          writeFrameHeader(out, 4, 0x3, 0, i);   // RST_STREAM, length 4
-          out.write(new byte[]{0, 0, 0, 0x8});   // CANCEL (0x8)
+          // HEADERS frame with END_HEADERS | END_STREAM so no body is expected.
+          writeFrameHeader(out, minimalHeaders.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, i);
+          out.write(minimalHeaders);
+          // RST_STREAM on the same stream ID (Rapid Reset attack pattern).
+          writeFrameHeader(out, 4, 0x3, 0, i);
+          out.write(new byte[]{0, 0, 0, 0x8}); // CANCEL (0x8)
         }
         out.flush();
         sock.setSoTimeout(5000);

@@ -147,6 +147,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         byte[] received = in.readNBytes(PREFACE.length);
         if (!Arrays.equals(received, PREFACE)) {
           logger.debug("Invalid HTTP/2 connection preface after h2c upgrade");
+          // RFC 9113 §3.5: server has already sent SETTINGS; emit GOAWAY(PROTOCOL_ERROR) before closing.
+          sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
           return;
         }
       } else {
@@ -156,6 +158,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
           byte[] received = in.readNBytes(PREFACE.length);
           if (!Arrays.equals(received, PREFACE)) {
             logger.debug("Invalid HTTP/2 connection preface");
+            // RFC 9113 §3.5: emit SETTINGS + GOAWAY(PROTOCOL_ERROR) so peer can observe the error before TCP close.
+            writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
+            sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
             return;
           }
         }
@@ -169,6 +174,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       var firstFrame = reader.readFrame();
       if (!(firstFrame instanceof HTTP2Frame.SettingsFrame settings) || (settings.flags() & HTTP2Frame.FLAG_ACK) != 0) {
         logger.debug("Expected client SETTINGS frame after preface");
+        // RFC 9113 §3.5 / §5.4.1: emit GOAWAY(PROTOCOL_ERROR) before closing.
+        sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
         return;
       }
       peerSettings.applyPayload(settings.payload());
@@ -255,6 +262,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
               if (isRecentlyClosed(f.streamId())) {
                 goAway(HTTP2ErrorCode.STREAM_CLOSED);
                 return;
+              }
+              // RFC 9113 §5.1 — HEADERS on an already-open stream (e.g. HALF_CLOSED_REMOTE) is a stream error
+              // STREAM_CLOSED, not a connection error. Emit RST_STREAM and continue serving the connection.
+              if (streams.containsKey(f.streamId())) {
+                rstStream(f.streamId(), HTTP2ErrorCode.STREAM_CLOSED);
+                break;
               }
               if (f.streamId() <= highestSeenStreamId) {
                 goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
@@ -350,10 +363,17 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       }
     }
 
-    if ((flags & HTTP2Frame.FLAG_END_STREAM) != 0) {
-      stream.applyEvent(HTTP2Stream.Event.RECV_HEADERS_END_STREAM);
-    } else {
-      stream.applyEvent(HTTP2Stream.Event.RECV_HEADERS_NO_END_STREAM);
+    try {
+      if ((flags & HTTP2Frame.FLAG_END_STREAM) != 0) {
+        stream.applyEvent(HTTP2Stream.Event.RECV_HEADERS_END_STREAM);
+      } else {
+        stream.applyEvent(HTTP2Stream.Event.RECV_HEADERS_NO_END_STREAM);
+      }
+    } catch (IllegalStateException e) {
+      // RFC 9113 §8.1 — HEADERS received in a state where the stream cannot accept them (e.g. HALF_CLOSED_REMOTE)
+      // is a stream error, not a connection error. Emit RST_STREAM(STREAM_CLOSED) and discard this stream.
+      rstStream(streamId, HTTP2ErrorCode.STREAM_CLOSED);
+      return;
     }
     streams.put(streamId, stream);
 
@@ -391,6 +411,20 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       writerQueue.put(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
     } catch (InterruptedException ignore) {
       Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * Writes a GOAWAY frame directly to the wire — bypassing the writer queue. Used only during the connection
+   * preamble phase (before the writer virtual-thread is started) to ensure the peer receives the error frame
+   * before the TCP connection is closed.
+   */
+  private void sendGoAwayDirect(HTTP2FrameWriter writer, OutputStream out, HTTP2ErrorCode code) {
+    try {
+      writer.writeFrame(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
+      out.flush();
+    } catch (IOException ignore) {
+      // Best-effort: if the peer already closed, suppress the write error.
     }
   }
 
@@ -534,11 +568,18 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   private void handleRSTStream(HTTP2Frame.RSTStreamFrame f) {
+    // Rate-limit check first: the rapid-reset attack sends many RST_STREAMs in rapid succession.
     if (rateLimits.recordRstStream()) {
       goAway(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
       return;
     }
+    // RFC 9113 §6.4 — RST_STREAM on an idle stream (never opened, not recently closed) is a connection error.
+    // An "idle" stream is one with an ID we have never seen (beyond highestSeenStreamId and not in any table).
     HTTP2Stream stream = streams.get(f.streamId());
+    if (stream == null && !isRecentlyClosed(f.streamId()) && f.streamId() > highestSeenStreamId) {
+      goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+      return;
+    }
     if (stream != null) {
       stream.applyEvent(HTTP2Stream.Event.RECV_RST_STREAM);
       streams.remove(f.streamId());

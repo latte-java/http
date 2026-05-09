@@ -19,10 +19,13 @@ import static org.testng.Assert.*;
 public class HTTP2ConnectionPrefaceTest extends BaseTest {
   /**
    * TLS-ALPN path: server negotiates h2, then reads the preface itself. An invalid preface must cause the server to
-   * close the connection (EOF from the client's perspective).
+   * send GOAWAY(PROTOCOL_ERROR) and then close the connection — not an abrupt TCP RST.
+   *
+   * <p>RFC 9113 §3.5 requires the server to emit SETTINGS (and optionally GOAWAY) before closing so the client
+   * can observe the protocol error. This was previously a TCP close with no GOAWAY frame.
    */
   @Test
-  public void invalid_preface_closes_connection() throws Exception {
+  public void invalid_preface_emits_goaway_before_close() throws Exception {
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
     var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
@@ -40,6 +43,7 @@ public class HTTP2ConnectionPrefaceTest extends BaseTest {
 
       try (sslSocket) {
         sslSocket.startHandshake();
+        sslSocket.setSoTimeout(5000);
 
         var out = sslSocket.getOutputStream();
         // Send a corrupt preface — correct length but wrong content.
@@ -47,9 +51,30 @@ public class HTTP2ConnectionPrefaceTest extends BaseTest {
         out.flush();
 
         var in = sslSocket.getInputStream();
-        // Server should close. Read should hit EOF.
-        int firstByte = in.read();
-        assertEquals(firstByte, -1, "Server should close on invalid preface");
+        // Server must send GOAWAY(PROTOCOL_ERROR) before closing.
+        // Drain frames until GOAWAY or EOF.
+        boolean sawGoaway = false;
+        int goawayErrorCode = -1;
+        outer:
+        while (true) {
+          int b0 = in.read();
+          if (b0 == -1) break;
+          byte[] rest = new byte[8];
+          if (in.readNBytes(rest, 0, 8) != 8) break;
+          int frameLength = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
+          int frameType = rest[2] & 0xFF;
+          byte[] payload = in.readNBytes(frameLength);
+          if (frameType == 0x7) { // GOAWAY
+            if (payload.length >= 8) {
+              goawayErrorCode = ((payload[4] & 0xFF) << 24) | ((payload[5] & 0xFF) << 16)
+                  | ((payload[6] & 0xFF) << 8) | (payload[7] & 0xFF);
+            }
+            sawGoaway = true;
+            break outer;
+          }
+        }
+        assertTrue(sawGoaway, "Server must send GOAWAY before closing on invalid preface");
+        assertEquals(goawayErrorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1); got: " + goawayErrorCode);
       }
     }
   }
