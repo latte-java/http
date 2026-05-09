@@ -35,6 +35,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   private final HTTPBuffers buffers;
   private final HTTPServerConfiguration configuration;
+  // Lock object used to notify handler threads waiting on connection-level send-window credit.
+  private final Object connectionSendWindowLock = new Object();
   private final HTTPContext context;
   private final Instrumenter instrumenter;
   private final HTTPListenerConfiguration listener;
@@ -55,6 +57,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final Map<Integer, BlockingQueue<byte[]>> streamPipes = new ConcurrentHashMap<>();
   private final Throughput throughput;
   private final BlockingQueue<HTTP2Frame> writerQueue = new LinkedBlockingQueue<>(128);
+  // Connection-level send window (RFC 9113 §6.9). Initial value is the HTTP/2 default (65535).
+  // Tracked only for overflow detection; not yet used to throttle outbound DATA frames.
+  private int connectionSendWindow = 65535;
   private volatile boolean goawaySent;
   private long handledRequests;
   private volatile int highestSeenStreamId = 0;
@@ -201,7 +206,18 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       try {
         while (true) {
           state = ClientConnection.State.Read;
-          HTTP2Frame frame = reader.readFrame();
+          HTTP2Frame frame;
+          try {
+            frame = reader.readFrame();
+          } catch (HTTP2FrameReader.FrameSizeException e) {
+            // RFC 9113 §4.2: frame size violations are a connection error of type FRAME_SIZE_ERROR.
+            goAway(HTTP2ErrorCode.FRAME_SIZE_ERROR);
+            break;
+          } catch (HTTP2FrameReader.ProtocolException e) {
+            // RFC 9113 §5.4.1: protocol violations detected during frame parsing are PROTOCOL_ERROR.
+            goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+            break;
+          }
 
           // RFC 9113 §6.10 — once HEADERS without END_HEADERS has been received, the next frame
           // MUST be CONTINUATION on the same stream. Anything else is a connection error PROTOCOL_ERROR.
@@ -223,6 +239,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
               return; // Peer is shutting down — drain and exit.
             }
             case HTTP2Frame.HeadersFrame f -> {
+              // RFC 9113 §5.1.1: client-initiated streams must use odd stream IDs (§5.1.1).
+              if (f.streamId() == 0 || (f.streamId() & 1) == 0) {
+                goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+                return;
+              }
               // RFC 9113 §5.1 — HEADERS on a recently-closed stream is STREAM_CLOSED, not PROTOCOL_ERROR.
               // Must be checked before the monotonicity guard (which would fire PROTOCOL_ERROR instead).
               if (isRecentlyClosed(f.streamId())) {
@@ -238,13 +259,26 @@ public class HTTP2Connection implements ClientConnection, Runnable {
               headerBlockStreamId = (f.flags() & HTTP2Frame.FLAG_END_HEADERS) == 0 ? f.streamId() : null;
             }
             case HTTP2Frame.ContinuationFrame f -> {
+              // RFC 9113 §6.10: CONTINUATION with no preceding HEADERS (headerBlockStreamId == null) is
+              // a PROTOCOL_ERROR regardless of whether the previous header block ended with END_HEADERS or
+              // the preceding frame was not a HEADERS/CONTINUATION at all.
+              // (The headerBlockStreamId != null guard above already rejects interleaved non-CONTINUATION frames,
+              // but we also need to reject CONTINUATION when no header block is open at all.)
+              if (headerBlockStreamId == null) {
+                goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+                return;
+              }
               handleContinuationFrame(f, headerAccum, decoder, encoder);
               if ((f.flags() & HTTP2Frame.FLAG_END_HEADERS) != 0) {
                 headerBlockStreamId = null;
               }
             }
             case HTTP2Frame.DataFrame f -> handleData(f);
-            case HTTP2Frame.PriorityFrame ignored -> {} // §5.3 — parse and discard
+            case HTTP2Frame.PriorityFrame f -> {
+              // §5.3 — PRIORITY frames are advisory; parse and discard.
+              // Half-closed-remote and open streams both accept PRIORITY (not a state error).
+              // Zero stream ID is already rejected by the reader (ProtocolException).
+            }
             case HTTP2Frame.PushPromiseFrame ignored -> {
               goAway(HTTP2ErrorCode.PROTOCOL_ERROR); // Clients must not push.
               return;
@@ -257,6 +291,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
             break;
           }
         }
+      } catch (HTTP2Settings.HTTP2SettingsException e) {
+        // SETTINGS parameter validation failures bubble up from handleSettings(); convert to GOAWAY.
+        goAway(e.errorCode);
       } finally {
         // Signal writer thread to exit cleanly.
         try {
@@ -334,6 +371,18 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     }
   }
 
+  /**
+   * Sends a stream-level error by enqueueing an RST_STREAM frame for {@code streamId}.
+   * Use this for stream errors (RFC 9113 §5.4.2), not connection errors.
+   */
+  private void rstStream(int streamId, HTTP2ErrorCode code) {
+    try {
+      writerQueue.put(new HTTP2Frame.RSTStreamFrame(streamId, code.value));
+    } catch (InterruptedException ignore) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
   private void handleContinuationFrame(HTTP2Frame.ContinuationFrame f, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
     // RFC 9113 §5.1 — frames on recently-closed streams are a STREAM_CLOSED connection error.
     if (isRecentlyClosed(f.streamId())) {
@@ -352,6 +401,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   private void handleData(HTTP2Frame.DataFrame f) {
+    // RFC 9113 §6.1: DATA on stream 0 is a connection error PROTOCOL_ERROR.
+    if (f.streamId() == 0) {
+      goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+      return;
+    }
     // Rate limit: empty DATA without END_STREAM.
     if (f.payload().length == 0 && (f.flags() & HTTP2Frame.FLAG_END_STREAM) == 0) {
       if (rateLimits.recordEmptyData()) {
@@ -503,11 +557,34 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       return;
     }
     if (f.streamId() == 0) {
-      // Connection-level window update — no per-connection window tracking yet. Plan F can refine.
+      // RFC 9113 §6.9: zero increment on the connection window is a connection error PROTOCOL_ERROR.
+      if (f.windowSizeIncrement() == 0) {
+        goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+        return;
+      }
+      // RFC 9113 §6.9.1: connection send-window overflow is a FLOW_CONTROL_ERROR.
+      if ((long) connectionSendWindow + f.windowSizeIncrement() > Integer.MAX_VALUE) {
+        goAway(HTTP2ErrorCode.FLOW_CONTROL_ERROR);
+        return;
+      }
+      connectionSendWindow += f.windowSizeIncrement();
+      synchronized (connectionSendWindowLock) {
+        connectionSendWindowLock.notifyAll();
+      }
+      return;
+    }
+    // RFC 9113 §6.9: zero increment on a stream window is a stream error PROTOCOL_ERROR.
+    if (f.windowSizeIncrement() == 0) {
+      rstStream(f.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
       return;
     }
     HTTP2Stream stream = streams.get(f.streamId());
     if (stream != null) {
+      // RFC 9113 §6.9.1: per-stream send-window overflow is a stream error FLOW_CONTROL_ERROR.
+      if ((long) stream.sendWindow() + f.windowSizeIncrement() > Integer.MAX_VALUE) {
+        rstStream(f.streamId(), HTTP2ErrorCode.FLOW_CONTROL_ERROR);
+        return;
+      }
       stream.incrementSendWindow(f.windowSizeIncrement());
       synchronized (stream) {
         stream.notifyAll();

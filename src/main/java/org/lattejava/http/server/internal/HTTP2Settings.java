@@ -32,7 +32,7 @@ public class HTTP2Settings {
 
   public void applyPayload(byte[] payload) {
     if (payload.length % 6 != 0) {
-      throw new HTTP2SettingsException("SETTINGS payload length [" + payload.length + "] is not a multiple of 6");
+      throw new HTTP2SettingsException("SETTINGS payload length [" + payload.length + "] is not a multiple of 6", HTTP2ErrorCode.FRAME_SIZE_ERROR);
     }
     for (int i = 0; i < payload.length; i += 6) {
       int id = ((payload[i] & 0xFF) << 8) | (payload[i + 1] & 0xFF);
@@ -42,21 +42,25 @@ public class HTTP2Settings {
       switch (id) {
         case SETTINGS_HEADER_TABLE_SIZE -> headerTableSize = value;
         case SETTINGS_ENABLE_PUSH -> {
+          // RFC 9113 §6.5.2: ENABLE_PUSH must be 0 or 1; any other value is a PROTOCOL_ERROR.
           if (value != 0 && value != 1) {
-            throw new HTTP2SettingsException("ENABLE_PUSH must be 0 or 1; got [" + value + "]");
+            throw new HTTP2SettingsException("ENABLE_PUSH must be 0 or 1; got [" + value + "]", HTTP2ErrorCode.PROTOCOL_ERROR);
           }
           enablePush = value;
         }
         case SETTINGS_MAX_CONCURRENT_STREAMS -> maxConcurrentStreams = value;
         case SETTINGS_INITIAL_WINDOW_SIZE -> {
+          // RFC 9113 §6.5.2: values above 2^31-1 are a FLOW_CONTROL_ERROR.
+          // Java interprets the 4-byte unsigned value as signed; values > 2^31-1 appear negative.
           if (value < 0) {
-            throw new HTTP2SettingsException("INITIAL_WINDOW_SIZE exceeds 2^31-1");
+            throw new HTTP2SettingsException("INITIAL_WINDOW_SIZE exceeds 2^31-1", HTTP2ErrorCode.FLOW_CONTROL_ERROR);
           }
           initialWindowSize = value;
         }
         case SETTINGS_MAX_FRAME_SIZE -> {
+          // RFC 9113 §6.5.2: MAX_FRAME_SIZE must be in [2^14, 2^24-1]; values outside are PROTOCOL_ERROR.
           if (value < 16384 || value > 16777215) {
-            throw new HTTP2SettingsException("MAX_FRAME_SIZE [" + value + "] out of range [16384, 16777215]");
+            throw new HTTP2SettingsException("MAX_FRAME_SIZE [" + value + "] out of range [16384, 16777215]", HTTP2ErrorCode.PROTOCOL_ERROR);
           }
           maxFrameSize = value;
         }
@@ -99,6 +103,11 @@ public class HTTP2Settings {
   }
 
   public static class HTTP2SettingsException extends RuntimeException {
-    public HTTP2SettingsException(String message) { super(message); }
+    public final HTTP2ErrorCode errorCode;
+
+    public HTTP2SettingsException(String message, HTTP2ErrorCode errorCode) {
+      super(message);
+      this.errorCode = errorCode;
+    }
   }
 }

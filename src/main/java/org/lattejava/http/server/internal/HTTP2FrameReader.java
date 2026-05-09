@@ -46,6 +46,11 @@ public class HTTP2FrameReader {
         if ((flags & FLAG_PADDED) != 0) {
           int padLen = buffer[0] & 0xFF;
           int dataLen = length - 1 - padLen;
+          // RFC 9113 §6.1: "If the length of the padding is the length of the frame payload or greater, the
+          // recipient MUST treat this as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+          if (dataLen < 0) {
+            throw new ProtocolException("DATA pad length [" + padLen + "] exceeds frame payload length [" + length + "]");
+          }
           yield new DataFrame(streamId, flags, copyOfRange(buffer, 1, 1 + dataLen));
         }
         yield new DataFrame(streamId, flags, copyOf(buffer, length));
@@ -58,22 +63,32 @@ public class HTTP2FrameReader {
           int padLen = buffer[hdrOff] & 0xFF;
           hdrOff++;
           hdrEnd -= padLen;
+          // RFC 9113 §6.2: invalid pad length is a connection error PROTOCOL_ERROR.
+          if (hdrEnd < hdrOff) {
+            throw new ProtocolException("HEADERS pad length exceeds frame payload length [" + length + "]");
+          }
         }
         if ((flags & FLAG_PRIORITY) != 0) {
           hdrOff += 5; // 4 bytes stream dependency + 1 byte weight
         }
-        yield new HeadersFrame(streamId, flags, copyOfRange(buffer, hdrOff, hdrEnd));
+        yield new HeadersFrame(streamId, flags, copyOfRange(buffer, hdrOff, Math.max(hdrOff, hdrEnd)));
       }
       case FRAME_TYPE_PRIORITY -> {
         if (length != 5) throw new FrameSizeException("PRIORITY payload must be 5; got [" + length + "]");
+        // RFC 9113 §6.3: PRIORITY must have a non-zero stream ID.
+        if (streamId == 0) throw new ProtocolException("PRIORITY frame with stream ID 0");
         yield new PriorityFrame(streamId);
       }
       case FRAME_TYPE_RST_STREAM -> {
         if (length != 4) throw new FrameSizeException("RST_STREAM payload must be 4; got [" + length + "]");
+        // RFC 9113 §6.4: RST_STREAM must have a non-zero stream ID.
+        if (streamId == 0) throw new ProtocolException("RST_STREAM frame with stream ID 0");
         int code = ((buffer[0] & 0xFF) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
         yield new RSTStreamFrame(streamId, code);
       }
       case FRAME_TYPE_SETTINGS -> {
+        // RFC 9113 §6.5: SETTINGS must have stream ID 0.
+        if (streamId != 0) throw new ProtocolException("SETTINGS frame with non-zero stream ID [" + streamId + "]");
         if ((flags & FLAG_ACK) != 0 && length != 0) throw new FrameSizeException("SETTINGS ACK must have empty payload");
         if (length % 6 != 0) throw new FrameSizeException("SETTINGS payload length [" + length + "] not multiple of 6");
         yield new SettingsFrame(flags, copyOf(buffer, length));
@@ -84,10 +99,14 @@ public class HTTP2FrameReader {
       }
       case FRAME_TYPE_PING -> {
         if (length != 8) throw new FrameSizeException("PING payload must be 8; got [" + length + "]");
+        // RFC 9113 §6.7: PING must have stream ID 0.
+        if (streamId != 0) throw new ProtocolException("PING frame with non-zero stream ID [" + streamId + "]");
         yield new PingFrame(flags, copyOf(buffer, 8));
       }
       case FRAME_TYPE_GOAWAY -> {
         if (length < 8) throw new FrameSizeException("GOAWAY payload must be >= 8; got [" + length + "]");
+        // RFC 9113 §6.8: GOAWAY must have stream ID 0.
+        if (streamId != 0) throw new ProtocolException("GOAWAY frame with non-zero stream ID [" + streamId + "]");
         int last = ((buffer[0] & 0x7F) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
         int code = ((buffer[4] & 0xFF) << 24) | ((buffer[5] & 0xFF) << 16) | ((buffer[6] & 0xFF) << 8) | (buffer[7] & 0xFF);
         yield new GoawayFrame(last, code, copyOfRange(buffer, 8, length));
@@ -97,7 +116,11 @@ public class HTTP2FrameReader {
         int inc = ((buffer[0] & 0x7F) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
         yield new WindowUpdateFrame(streamId, inc);
       }
-      case FRAME_TYPE_CONTINUATION -> new ContinuationFrame(streamId, flags, copyOf(buffer, length));
+      case FRAME_TYPE_CONTINUATION -> {
+        // RFC 9113 §6.10: CONTINUATION must have a non-zero stream ID.
+        if (streamId == 0) throw new ProtocolException("CONTINUATION frame with stream ID 0");
+        yield new ContinuationFrame(streamId, flags, copyOf(buffer, length));
+      }
       default -> new UnknownFrame(streamId, flags, type, copyOf(buffer, length));
     };
   }
@@ -114,8 +137,22 @@ public class HTTP2FrameReader {
     return dst;
   }
 
+  /**
+   * Thrown when the frame reader detects a FRAME_SIZE_ERROR condition (RFC 9113 §6, §7).
+   * The connection handler must respond with GOAWAY(FRAME_SIZE_ERROR).
+   */
   public static class FrameSizeException extends IOException {
     public FrameSizeException(String message) {
+      super(message);
+    }
+  }
+
+  /**
+   * Thrown when the frame reader detects a PROTOCOL_ERROR condition (RFC 9113 §5.4.1, §7).
+   * The connection handler must respond with GOAWAY(PROTOCOL_ERROR).
+   */
+  public static class ProtocolException extends IOException {
+    public ProtocolException(String message) {
       super(message);
     }
   }
