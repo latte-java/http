@@ -174,19 +174,19 @@ All servers implement the same request handler that reads the request body and r
 
 | Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |            0 |      31080.2 |              0.00 |              0.00 |            ?% |
-| Jetty          |      107,526 |            0 |              1.35 |             17.84 |            ?% |
-| Netty          |      104,461 |            0 |              3.02 |             77.25 |            ?% |
-| Apache Tomcat  |      102,208 |            0 |              1.02 |              6.32 |            ?% |
+| Latte http     |       87,075 |            0 |              1.34 |             12.86 |        100.0% |
+| Jetty          |      107,526 |            0 |              1.35 |             17.84 |        123.4% |
+| Netty          |      104,461 |            0 |              3.02 |             77.25 |        119.9% |
+| Apache Tomcat  |      102,208 |            0 |              1.02 |              6.32 |        117.3% |
 
 #### Under stress (1,000 concurrent connections)
 
 | Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |            0 |      23517.8 |              0.00 |              0.00 |            ?% |
-| Jetty          |      109,041 |            0 |              9.11 |             31.58 |            ?% |
-| Netty          |      105,667 |            0 |              9.19 |             25.33 |            ?% |
-| Apache Tomcat  |      106,486 |            0 |              9.22 |             28.18 |            ?% |
+| Latte http     |       82,254 |        554.4 |             11.56 |             30.93 |        100.0% |
+| Jetty          |      109,041 |            0 |              9.11 |             31.58 |        132.5% |
+| Netty          |      105,667 |            0 |              9.19 |             25.33 |        128.4% |
+| Apache Tomcat  |      106,486 |            0 |              9.22 |             28.18 |        129.4% |
 
 _JDK HttpServer (`com.sun.net.httpserver`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._
 

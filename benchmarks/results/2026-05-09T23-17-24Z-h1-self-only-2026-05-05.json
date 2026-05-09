@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "timestamp": "2026-05-09T23:17:24Z",
+  "system": {
+    "os": "Darwin",
+    "arch": "arm64",
+    "osVersion": "macOS 15.7.3",
+    "machineModel": "MacBook Air",
+    "cpuModel": "Apple M4",
+    "cpuCores": 10,
+    "ramGB": 24,
+    "javaVersion": "openjdk version \"25.0.2\" 2026-01-20 LTS",
+    "description": "Local benchmark"
+  },
+  "tools": {
+    "wrkVersion": "wrk 4.2.0 [kqueue] Copyright (C) 2012 Will Glozer",
+    "h2loadVersion": "h2load nghttp2/1.69.0"
+  },
+  "results": [
+    {
+      "server": "self",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "hello",
+      "config": {
+        "threads": 12,
+        "connections": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 444018,
+        "duration_us": 5099244,
+        "rps": 87075.26,
+        "avg_latency_us": 1339.83,
+        "p50_us": 1037,
+        "p90_us": 1135,
+        "p99_us": 12858,
+        "max_us": 64697,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "self",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "high-concurrency",
+      "config": {
+        "threads": 12,
+        "connections": 1000,
+        "duration": "5s",
+        "endpoint": "/",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 414956,
+        "duration_us": 5044813,
+        "rps": 82253.99,
+        "avg_latency_us": 11559.16,
+        "p50_us": 11271,
+        "p90_us": 11894,
+        "p99_us": 30931,
+        "max_us": 67574,
+        "errors_connect": 0,
+        "errors_read": 2797,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    }
+  ]
+}
