@@ -11,6 +11,7 @@ import module org.testng;
 import io.grpc.ManagedChannel;
 import io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.NettyChannelBuilder;
+import io.grpc.stub.StreamObserver;
 
 import org.lattejava.http.tests.grpc.EchoGrpc;
 import org.lattejava.http.tests.grpc.EchoProto.EchoRequest;
@@ -22,10 +23,9 @@ import static org.testng.Assert.*;
  * Hand-rolled gRPC interop tests that verify HTTP/2 framing, trailer emission, and the gRPC wire
  * format end-to-end using the grpc-java Netty client against our HTTPServer.
  *
- * <p>Each test boots a server on an OS-assigned port, executes one or two RPCs, and tears down.
- * Client-streaming and bidirectional-streaming RPCs are deferred to a future plan — the unary and
- * server-streaming pair is sufficient to prove that single-message and multi-message response paths
- * (including grpc-status trailers) both work correctly.
+ * <p>Each test boots a server on an OS-assigned port, exercises one RPC pattern, and tears down.
+ * All four gRPC streaming variants are covered: unary, server-streaming, client-streaming, and
+ * bidirectional-streaming.
  *
  * @author Daniel DeGroff
  */
@@ -83,6 +83,93 @@ public class GRPCInteropTest extends BaseTest {
   }
 
   // ============================================================
+  // Bidi-streaming RPC over h2c
+  // ============================================================
+  @Test
+  public void bidi_stream_h2c() throws Exception {
+    // Client sends 3 messages, server replies to each with "echo: <msg>", interleaved.
+    HTTPHandler handler = grpcBidiStreamAdapter(req ->
+        EchoResponse.newBuilder().setMessage("echo: " + req.getMessage()).build()
+    );
+
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    try (var server = makeServer("http", handler, listener).start()) {
+      ManagedChannel channel = NettyChannelBuilder.forAddress("127.0.0.1", server.getActualPort())
+          .usePlaintext()
+          .build();
+      try {
+        var stub = EchoGrpc.newStub(channel);
+        var responseLatch = new CountDownLatch(1);
+        var received = new ArrayList<String>();
+        var error = new AtomicReference<Throwable>();
+        StreamObserver<EchoResponse> respObserver = new StreamObserver<>() {
+          public void onNext(EchoResponse value) { synchronized (received) { received.add(value.getMessage()); } }
+          public void onError(Throwable t) { error.set(t); responseLatch.countDown(); }
+          public void onCompleted() { responseLatch.countDown(); }
+        };
+        var requestObserver = stub.bidiStream(respObserver);
+        requestObserver.onNext(EchoRequest.newBuilder().setMessage("a").build());
+        requestObserver.onNext(EchoRequest.newBuilder().setMessage("b").build());
+        requestObserver.onNext(EchoRequest.newBuilder().setMessage("c").build());
+        requestObserver.onCompleted();
+        assertTrue(responseLatch.await(5, TimeUnit.SECONDS), "Timeout waiting for stream completion");
+        if (error.get() != null) {
+          fail("gRPC error: " + error.get(), error.get());
+        }
+        assertEquals(received, List.of("echo: a", "echo: b", "echo: c"));
+      } finally {
+        channel.shutdown().awaitTermination(2, TimeUnit.SECONDS);
+      }
+    }
+  }
+
+  // ============================================================
+  // Client-streaming RPC over h2c
+  // ============================================================
+  @Test
+  public void client_stream_h2c() throws Exception {
+    // Client sends 3 messages, server returns one combined response.
+    HTTPHandler handler = grpcClientStreamAdapter(reqs -> {
+      StringBuilder combined = new StringBuilder();
+      for (var r : reqs) {
+        if (combined.length() > 0) combined.append("|");
+        combined.append(r.getMessage());
+      }
+      return EchoResponse.newBuilder().setMessage("collected: " + combined).build();
+    });
+
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    try (var server = makeServer("http", handler, listener).start()) {
+      ManagedChannel channel = NettyChannelBuilder.forAddress("127.0.0.1", server.getActualPort())
+          .usePlaintext()
+          .build();
+      try {
+        var stub = EchoGrpc.newStub(channel);  // async stub for client-streaming
+        var responseLatch = new CountDownLatch(1);
+        var receivedResponse = new AtomicReference<EchoResponse>();
+        var error = new AtomicReference<Throwable>();
+        StreamObserver<EchoResponse> respObserver = new StreamObserver<>() {
+          public void onNext(EchoResponse value) { receivedResponse.set(value); }
+          public void onError(Throwable t) { error.set(t); responseLatch.countDown(); }
+          public void onCompleted() { responseLatch.countDown(); }
+        };
+        var requestObserver = stub.clientStream(respObserver);
+        requestObserver.onNext(EchoRequest.newBuilder().setMessage("a").build());
+        requestObserver.onNext(EchoRequest.newBuilder().setMessage("b").build());
+        requestObserver.onNext(EchoRequest.newBuilder().setMessage("c").build());
+        requestObserver.onCompleted();
+        assertTrue(responseLatch.await(5, TimeUnit.SECONDS), "Timeout waiting for response");
+        if (error.get() != null) {
+          fail("gRPC error: " + error.get(), error.get());
+        }
+        assertEquals(receivedResponse.get().getMessage(), "collected: a|b|c");
+      } finally {
+        channel.shutdown().awaitTermination(2, TimeUnit.SECONDS);
+      }
+    }
+  }
+
+  // ============================================================
   // Unary RPC over TLS+h2 (ALPN)
   // ============================================================
   @Test
@@ -115,6 +202,80 @@ public class GRPCInteropTest extends BaseTest {
   // ============================================================
   // Hand-rolled gRPC adapter helpers
   // ============================================================
+
+  /**
+   * Bidi-streaming HTTPHandler. Reads framed requests one at a time, applies impl, emits framed responses
+   * as each request arrives (interleaved). Ends with {@code grpc-status: 0}.
+   *
+   * @param impl the function mapping an EchoRequest to an EchoResponse for each message.
+   * @return an HTTPHandler suitable for a gRPC bidi-streaming method.
+   */
+  private static HTTPHandler grpcBidiStreamAdapter(java.util.function.Function<EchoRequest, EchoResponse> impl) {
+    return (req, res) -> {
+      var in = req.getInputStream();
+
+      res.setStatus(200);
+      res.setHeader("content-type", "application/grpc");
+      res.setTrailer("grpc-status", "0");
+
+      var out = res.getOutputStream();
+      while (true) {
+        int compressed = in.read();
+        if (compressed == -1) break;
+        assertEquals(compressed, 0);
+        int len = ((in.read() & 0xFF) << 24) | ((in.read() & 0xFF) << 16) | ((in.read() & 0xFF) << 8) | (in.read() & 0xFF);
+        byte[] payload = in.readNBytes(len);
+        EchoRequest grpcReq = EchoRequest.parseFrom(payload);
+        EchoResponse resp = impl.apply(grpcReq);
+        byte[] respBytes = resp.toByteArray();
+        out.write(0);
+        out.write((respBytes.length >> 24) & 0xFF);
+        out.write((respBytes.length >> 16) & 0xFF);
+        out.write((respBytes.length >> 8) & 0xFF);
+        out.write(respBytes.length & 0xFF);
+        out.write(respBytes);
+        out.flush();  // bidi: emit the DATA frame before reading the next request
+      }
+      out.close();
+    };
+  }
+
+  /**
+   * Client-streaming HTTPHandler. Reads all framed protobuf request messages from the input stream,
+   * passes the collected list to impl, writes a single framed response, ends with {@code grpc-status: 0}.
+   *
+   * @param impl the function mapping a list of EchoRequests to a single EchoResponse.
+   * @return an HTTPHandler suitable for a gRPC client-streaming method.
+   */
+  private static HTTPHandler grpcClientStreamAdapter(java.util.function.Function<List<EchoRequest>, EchoResponse> impl) {
+    return (req, res) -> {
+      var in = req.getInputStream();
+      List<EchoRequest> requests = new ArrayList<>();
+      while (true) {
+        int compressed = in.read();
+        if (compressed == -1) break;
+        assertEquals(compressed, 0);
+        int len = ((in.read() & 0xFF) << 24) | ((in.read() & 0xFF) << 16) | ((in.read() & 0xFF) << 8) | (in.read() & 0xFF);
+        byte[] payload = in.readNBytes(len);
+        requests.add(EchoRequest.parseFrom(payload));
+      }
+      EchoResponse resp = impl.apply(requests);
+      byte[] respBytes = resp.toByteArray();
+
+      res.setStatus(200);
+      res.setHeader("content-type", "application/grpc");
+      res.setTrailer("grpc-status", "0");
+
+      var out = res.getOutputStream();
+      out.write(0);
+      out.write((respBytes.length >> 24) & 0xFF);
+      out.write((respBytes.length >> 16) & 0xFF);
+      out.write((respBytes.length >> 8) & 0xFF);
+      out.write(respBytes.length & 0xFF);
+      out.write(respBytes);
+      out.close();
+    };
+  }
 
   /**
    * Builds a unary HTTPHandler that reads one length-prefixed protobuf request, invokes the supplied
