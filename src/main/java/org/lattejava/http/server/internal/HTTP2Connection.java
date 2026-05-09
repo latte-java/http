@@ -30,6 +30,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   );
   private static final byte[] PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
+  // Maximum number of recently-closed stream IDs to remember for §5.1 STREAM_CLOSED detection.
+  private static final int MAX_RECENTLY_CLOSED = 100;
+
   private final HTTPBuffers buffers;
   private final HTTPServerConfiguration configuration;
   private final HTTPContext context;
@@ -40,6 +43,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
   private final boolean prefaceAlreadyConsumed;
   private final HTTP2RateLimits rateLimits;
+  // Bounded deque of recently-closed stream IDs for RFC 9113 §5.1 STREAM_CLOSED error detection.
+  // Access is confined to the reader thread, so no synchronization is needed.
+  private final Deque<Integer> recentlyClosedStreams = new ArrayDeque<>();
   // True for the h2c Upgrade/101 path: server sends its SETTINGS frame immediately after the 101, before reading the
   // client connection preface. All other paths (ALPN, prior-knowledge) leave this false.
   private final boolean serverSendsFirst;
@@ -217,6 +223,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
               return; // Peer is shutting down — drain and exit.
             }
             case HTTP2Frame.HeadersFrame f -> {
+              // RFC 9113 §5.1 — HEADERS on a recently-closed stream is STREAM_CLOSED, not PROTOCOL_ERROR.
+              // Must be checked before the monotonicity guard (which would fire PROTOCOL_ERROR instead).
+              if (isRecentlyClosed(f.streamId())) {
+                goAway(HTTP2ErrorCode.STREAM_CLOSED);
+                return;
+              }
               if (f.streamId() <= highestSeenStreamId) {
                 goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
                 return;
@@ -323,6 +335,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   private void handleContinuationFrame(HTTP2Frame.ContinuationFrame f, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
+    // RFC 9113 §5.1 — frames on recently-closed streams are a STREAM_CLOSED connection error.
+    if (isRecentlyClosed(f.streamId())) {
+      goAway(HTTP2ErrorCode.STREAM_CLOSED);
+      return;
+    }
     headerAccum.write(f.headerBlockFragment());
     // CVE-2024-27316: bound cumulative HEADERS+CONTINUATION accumulator to MAX_HEADER_LIST_SIZE.
     if (headerAccum.size() > localSettings.maxHeaderListSize()) {
@@ -345,7 +362,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     HTTP2Stream stream = streams.get(f.streamId());
     BlockingQueue<byte[]> pipe = streamPipes.get(f.streamId());
     if (stream == null || pipe == null) {
-      return; // Unknown stream; ignore.
+      // RFC 9113 §5.1 — DATA on a recently-closed stream is a STREAM_CLOSED connection error.
+      if (isRecentlyClosed(f.streamId())) {
+        goAway(HTTP2ErrorCode.STREAM_CLOSED);
+      }
+      // Truly unknown stream ID: ignore per §6.1.
+      return;
     }
     if (f.payload().length > 0) {
       stream.consumeReceiveWindow(f.payload().length);
@@ -387,6 +409,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   private void handleHeadersFrame(HTTP2Frame.HeadersFrame f, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
+    // Enforce MAX_CONCURRENT_STREAMS before any per-stream allocation (headerAccum, ArrayBlockingQueue, etc.).
+    // This ensures a HEADERS flood cannot exhaust heap even if the cap is reached.
     if (streams.size() >= localSettings.maxConcurrentStreams()) {
       try {
         writerQueue.put(new HTTP2Frame.RSTStreamFrame(f.streamId(), HTTP2ErrorCode.REFUSED_STREAM.value));
@@ -432,6 +456,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       stream.applyEvent(HTTP2Stream.Event.RECV_RST_STREAM);
       streams.remove(f.streamId());
       BlockingQueue<byte[]> pipe = streamPipes.remove(f.streamId());
+      markClosed(f.streamId());
       if (pipe != null) {
         try {
           pipe.put(HTTP2InputStream.eofSentinel());
@@ -487,6 +512,24 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       synchronized (stream) {
         stream.notifyAll();
       }
+    }
+  }
+
+  /**
+   * Returns {@code true} if {@code streamId} is in the recently-closed set. Call only from the reader thread.
+   */
+  private boolean isRecentlyClosed(int streamId) {
+    return recentlyClosedStreams.contains(streamId);
+  }
+
+  /**
+   * Records {@code streamId} as recently closed. Evicts the oldest entry when the deque exceeds
+   * {@link #MAX_RECENTLY_CLOSED}. Call only from the reader thread.
+   */
+  private void markClosed(int streamId) {
+    recentlyClosedStreams.addLast(streamId);
+    if (recentlyClosedStreams.size() > MAX_RECENTLY_CLOSED) {
+      recentlyClosedStreams.removeFirst();
     }
   }
 

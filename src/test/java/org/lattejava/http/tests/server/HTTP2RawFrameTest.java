@@ -205,6 +205,35 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
+   * RFC 9113 §5.1 — a DATA frame on a recently-closed stream (one the client just RST'd) must produce
+   * {@code GOAWAY(STREAM_CLOSED)} (error code {@code 0x5}).
+   */
+  @Test
+  public void data_on_recently_closed_stream_triggers_stream_closed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 with END_STREAM (no body — handler completes immediately).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // RST stream 1 — server marks stream 1 as recently closed.
+        writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0x8}); // error code = CANCEL (0x8)
+        // Send DATA on stream 1 — must produce GOAWAY(STREAM_CLOSED=0x5).
+        writeFrameHeader(out, 5, 0x0 /* DATA */, 0x1 /* END_STREAM */, 1);
+        out.write(new byte[]{1, 2, 3, 4, 5});
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x5, "Expected GOAWAY(STREAM_CLOSED=0x5) for DATA on recently-closed stream; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
    * RFC 9113 §5.1.1 — stream IDs MUST be strictly monotonically increasing. Sending a HEADERS on a stream
    * whose ID is lower than a previously seen stream ID must result in {@code GOAWAY(PROTOCOL_ERROR)} (error code
    * {@code 0x1}).
@@ -227,6 +256,35 @@ public class HTTP2RawFrameTest extends BaseTest {
         sock.setSoTimeout(5000);
         int errorCode = readUntilGoaway(sock.getInputStream());
         assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for decreasing stream ID; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §5.1 — a HEADERS frame on a recently-closed stream (one the client just RST'd) must produce
+   * {@code GOAWAY(STREAM_CLOSED)} (error code {@code 0x5}).
+   */
+  @Test
+  public void headers_on_recently_closed_stream_triggers_stream_closed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 with END_STREAM (no body — handler completes immediately).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // RST stream 1 — server marks stream 1 as recently closed.
+        writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0x8}); // error code = CANCEL (0x8)
+        // Send HEADERS on stream 1 again — must produce GOAWAY(STREAM_CLOSED=0x5).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x5, "Expected GOAWAY(STREAM_CLOSED=0x5) for HEADERS on recently-closed stream; got: " + errorCode);
       }
     }
   }
