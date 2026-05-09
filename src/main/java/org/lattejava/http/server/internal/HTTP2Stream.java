@@ -11,7 +11,9 @@ package org.lattejava.http.server.internal;
  */
 public class HTTP2Stream {
   private final int streamId;
+  private long declaredContentLength = -1; // -1 means unset
   private long receiveWindow;
+  private long receivedDataBytes;
   private long sendWindow;
   private State state = State.IDLE;
 
@@ -23,6 +25,25 @@ public class HTTP2Stream {
 
   public synchronized void applyEvent(Event event) {
     state = transition(state, event);
+  }
+
+  /**
+   * Accumulates the number of DATA bytes received on this stream and checks against the declared
+   * content-length (RFC 9113 §8.1.2.6). Returns {@code true} if the running total does not
+   * exceed the declared length; returns {@code false} if the declared length has been exceeded
+   * (caller must RST_STREAM immediately).
+   */
+  public synchronized boolean appendDataBytes(int n) {
+    receivedDataBytes += n;
+    return declaredContentLength == -1 || receivedDataBytes <= declaredContentLength;
+  }
+
+  /**
+   * Returns {@code true} if the total received DATA bytes match the declared content-length
+   * (or no content-length was declared). Called when END_STREAM arrives to detect under-delivery.
+   */
+  public synchronized boolean dataLengthMatches() {
+    return declaredContentLength == -1 || receivedDataBytes == declaredContentLength;
   }
 
   public synchronized void consumeReceiveWindow(int bytes) {
@@ -54,6 +75,8 @@ public class HTTP2Stream {
   public synchronized long receiveWindow() { return receiveWindow; }
 
   public synchronized long sendWindow() { return sendWindow; }
+
+  public synchronized void setDeclaredContentLength(long value) { declaredContentLength = value; }
 
   public synchronized State state() { return state; }
 

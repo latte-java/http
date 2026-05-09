@@ -25,10 +25,16 @@ import org.lattejava.http.io.PushbackInputStream;
  * @author Daniel DeGroff
  */
 public class HTTP2Connection implements ClientConnection, Runnable {
+  // RFC 9113 §8.1.2.2: headers that are connection-specific and forbidden in HTTP/2.
+  private static final Set<String> CONNECTION_SPECIFIC_HEADERS = Set.of(
+      "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"
+  );
   private static final Set<String> H1_ONLY_HEADERS = Set.of(
       "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"
   );
   private static final byte[] PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+  // RFC 9113 §8.1.2.1: the only pseudo-headers valid in a client request.
+  private static final Set<String> REQUEST_PSEUDO_HEADERS = Set.of(":authority", ":method", ":path", ":scheme");
 
   // Maximum number of recently-closed stream IDs to remember for §5.1 STREAM_CLOSED detection.
   private static final int MAX_RECENTLY_CLOSED = 100;
@@ -325,8 +331,25 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private void finalizeHeaderBlock(int streamId, int flags, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
     List<HPACKDynamicTable.HeaderField> fields = decoder.decode(headerAccum.toByteArray());
 
+    if (!validateHeaders(fields, streamId, false)) {
+      return;
+    }
+
     HTTPRequest request = buildRequestFromHeaders(fields, streamId);
     HTTP2Stream stream = new HTTP2Stream(streamId, localSettings.initialWindowSize(), peerSettings.initialWindowSize());
+
+    // §8.1.2.6: track declared content-length for DATA frame validation.
+    for (var f : fields) {
+      if (f.name().equals("content-length")) {
+        try {
+          stream.setDeclaredContentLength(Long.parseLong(f.value()));
+        } catch (NumberFormatException ignore) {
+          // Malformed content-length — let handler deal with it.
+        }
+        break;
+      }
+    }
+
     if ((flags & HTTP2Frame.FLAG_END_STREAM) != 0) {
       stream.applyEvent(HTTP2Stream.Event.RECV_HEADERS_END_STREAM);
     } else {
@@ -424,6 +447,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       return;
     }
     if (f.payload().length > 0) {
+      // §8.1.2.6: check that running DATA total does not exceed declared content-length.
+      if (!stream.appendDataBytes(f.payload().length)) {
+        rstStream(f.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
+        return;
+      }
       stream.consumeReceiveWindow(f.payload().length);
       try {
         pipe.put(f.payload());
@@ -432,6 +460,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       }
     }
     if ((f.flags() & HTTP2Frame.FLAG_END_STREAM) != 0) {
+      // §8.1.2.6: when END_STREAM arrives, verify total DATA matches declared content-length.
+      if (!stream.dataLengthMatches()) {
+        rstStream(f.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
+        return;
+      }
       try {
         pipe.put(HTTP2InputStream.eofSentinel());
       } catch (InterruptedException e) {
@@ -608,6 +641,89 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     if (recentlyClosedStreams.size() > MAX_RECENTLY_CLOSED) {
       recentlyClosedStreams.removeFirst();
     }
+  }
+
+  /**
+   * Validates the decoded header list per RFC 9113 §8.1.2.*. Returns {@code true} if valid.
+   * On any violation, enqueues RST_STREAM(PROTOCOL_ERROR) for {@code streamId} and returns {@code false}.
+   */
+  private boolean validateHeaders(List<HPACKDynamicTable.HeaderField> fields, int streamId, boolean isTrailer) {
+    boolean seenRegularHeader = false;
+    Set<String> seenPseudo = new HashSet<>();
+
+    for (var f : fields) {
+      String name = f.name();
+
+      // §8.1.2/1: header names MUST be lowercase.
+      for (int i = 0; i < name.length(); i++) {
+        char c = name.charAt(i);
+        if (c >= 'A' && c <= 'Z') {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      }
+
+      boolean isPseudo = name.startsWith(":");
+      if (isPseudo) {
+        // §8.1.2.1/3: pseudo-headers are forbidden in trailers.
+        if (isTrailer) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.1/4: pseudo-header after a regular header.
+        if (seenRegularHeader) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.1/1 + §8.1.2.1/2: unknown pseudo-header or response pseudo-header in request.
+        if (!REQUEST_PSEUDO_HEADERS.contains(name)) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.3/5–7: pseudo-headers MUST NOT appear more than once.
+        if (!seenPseudo.add(name)) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      } else {
+        seenRegularHeader = true;
+        // §8.1.2.2/1: connection-specific headers are forbidden.
+        if (CONNECTION_SPECIFIC_HEADERS.contains(name)) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.2/2: TE header may only contain "trailers".
+        if (name.equals("te") && !f.value().equalsIgnoreCase("trailers")) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      }
+    }
+
+    if (!isTrailer) {
+      // §8.1.2.3/2,3,4: required request pseudo-headers must be present.
+      if (!seenPseudo.contains(":method")) {
+        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+        return false;
+      }
+      if (!seenPseudo.contains(":scheme")) {
+        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+        return false;
+      }
+      if (!seenPseudo.contains(":path")) {
+        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+        return false;
+      }
+      // §8.1.2.3/1: :path must not be empty.
+      for (var f : fields) {
+        if (f.name().equals(":path") && f.value().isEmpty()) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   private HTTPRequest buildRequestFromHeaders(List<HPACKDynamicTable.HeaderField> fields, int streamId) {
