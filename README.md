@@ -165,7 +165,12 @@ A key purpose for this project is to obtain screaming performance. Here are benc
 
 These benchmarks ensure `http` stays near the top in raw throughput, and we'll be working on claiming the top position -- even if only for bragging rights, since in practice your database and application code will be the bottleneck long before the HTTP server.
 
-All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over HTTP (no TLS) to isolate server performance.
+All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over plain HTTP (no TLS) to isolate server performance.
+
+<!-- H1-BENCHMARK-START -->
+### HTTP/1.1 (wrk)
+
+#### Hello scenario (low concurrency, baseline)
 
 | Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
@@ -197,6 +202,40 @@ cd benchmarks
 ./run-benchmarks.sh --scenarios hello,high-concurrency
 ./update-readme.sh
 ```
+<!-- H1-BENCHMARK-END -->
+
+<!-- H2-BENCHMARK-START -->
+### HTTP/2 (h2load)
+
+_h2 numbers will be populated from a real benchmark run once `brew install nghttp2` is in place. Until then this table shows the structure._
+
+#### h2-hello (1 connection × 100 streams)
+
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |          TBD |    TBD |              TBD |              TBD |        100.0% |
+| Jetty         |          TBD |    TBD |              TBD |              TBD |           TBD |
+| Netty         |          TBD |    TBD |              TBD |              TBD |           TBD |
+| Apache Tomcat |          TBD |    TBD |              TBD |              TBD |           TBD |
+
+#### h2-high-concurrency (10 connections × 100 streams each)
+
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |          TBD |    TBD |              TBD |              TBD |        100.0% |
+| Jetty         |          TBD |    TBD |              TBD |              TBD |           TBD |
+| Netty         |          TBD |    TBD |              TBD |              TBD |           TBD |
+| Apache Tomcat |          TBD |    TBD |              TBD |              TBD |           TBD |
+
+_JDK HttpServer does not support HTTP/2 and is excluded from h2 results._
+
+To reproduce (requires `brew install nghttp2`):
+```bash
+cd benchmarks
+./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency
+./update-readme.sh
+```
+<!-- H2-BENCHMARK-END -->
 
 See [benchmarks/README.md](benchmarks/README.md) for full usage and options.
 

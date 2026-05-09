@@ -47,11 +47,21 @@ RAM_GB="$(jq -r '.system.ramGB' "${LATEST}")"
 JAVA_VERSION="$(jq -r '.system.javaVersion' "${LATEST}")"
 MACHINE_MODEL="$(jq -r '.system.machineModel // "unknown"' "${LATEST}")"
 OS_VERSION="$(jq -r '.system.osVersion // ""' "${LATEST}")"
+DATE_FORMATTED="$(echo "${TIMESTAMP}" | cut -d'T' -f1)"
+
+MACHINE_LINE=""
+if [[ "${MACHINE_MODEL}" != "unknown" && -n "${MACHINE_MODEL}" ]]; then
+  MACHINE_LINE=" (${MACHINE_MODEL})"
+fi
+OS_LINE=""
+if [[ -n "${OS_VERSION}" && "${OS_VERSION}" != "null" ]]; then
+  OS_LINE=$'\n'"_OS: ${OS_VERSION}._"
+fi
 
 # Server display name mapping
 server_display_name() {
   case "$1" in
-    self)            echo "latte-java http" ;;
+    self)            echo "Latte http" ;;
     jdk-httpserver)  echo "JDK HttpServer" ;;
     jetty)           echo "Jetty" ;;
     netty)           echo "Netty" ;;
@@ -60,46 +70,19 @@ server_display_name() {
   esac
 }
 
-# Pick scenario — prefer hello, fall back to baseline
-SCENARIO="hello"
-if ! jq -e ".results[] | select(.scenario == \"${SCENARIO}\")" "${LATEST}" &>/dev/null; then
-  SCENARIO="baseline"
-fi
+# ---------------------------------------------------------------------------
+# HTTP/1.1 helpers
+# ---------------------------------------------------------------------------
 
-# Check if high-concurrency data is available
-HAS_HIGH_CONCURRENCY=false
-if jq -e '.results[] | select(.scenario == "high-concurrency")' "${LATEST}" &>/dev/null; then
-  HAS_HIGH_CONCURRENCY=true
-fi
-
-TOOL_FILTER="wrk"
-
-# Get java-http RPS as the normalization baseline
-SELF_RPS="$(jq -r ".results[] | select(.server == \"self\" and .scenario == \"${SCENARIO}\" and .tool == \"${TOOL_FILTER}\") | .metrics.rps" "${LATEST}" 2>/dev/null || echo "0")"
-if [[ -z "${SELF_RPS}" || "${SELF_RPS}" == "null" ]]; then
-  SELF_RPS="$(jq -r ".results[] | select(.server == \"self\" and .scenario == \"${SCENARIO}\") | .metrics.rps" "${LATEST}" 2>/dev/null | head -1 || echo "0")"
-fi
-
-# Extract scenario config for reproducibility
-SCENARIO_CONFIG="$(jq -r --arg scenario "${SCENARIO}" --arg tool "${TOOL_FILTER}" \
-  '.results[] | select(.scenario == $scenario and .tool == $tool) | .config | "\(.threads)t, \(.connections)c, \(.duration)"' \
-  "${LATEST}" 2>/dev/null | head -1)"
-
-# Build the performance section into a temp file
-PERF_FILE="$(mktemp)"
-trap 'rm -f "${PERF_FILE}"' EXIT
-
-DATE_FORMATTED="$(echo "${TIMESTAMP}" | cut -d'T' -f1)"
-
-# Helper function: generate a results table for a given scenario
+# Generate an HTTP/1.1 wrk results table for a given scenario.
 # Args: $1=scenario, $2=tool_filter, $3=self_rps
-generate_table() {
+generate_h1_table() {
   local scenario="$1"
   local tool="$2"
   local self_rps="$3"
 
-  echo "| Server | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs java-http |"
-  echo "|--------|-------------:|-------------:|------------------:|------------------:|-------------:|"
+  echo "| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |"
+  echo "|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|"
 
   jq -r --arg scenario "${scenario}" --arg tool "${tool}" \
     '[.results[] | select(.scenario == $scenario and .tool == $tool)] | sort_by(if .server == "self" then "" else .server end) | .[] | [.server, (.metrics.rps | tostring), ((.metrics.errors_connect + .metrics.errors_read + .metrics.errors_write + .metrics.errors_timeout) | tostring), (.metrics.avg_latency_us | tostring), (.metrics.p99_us | tostring)] | @tsv' \
@@ -107,7 +90,7 @@ generate_table() {
 
     display_name="$(server_display_name "${server}")"
 
-    # Convert microseconds to milliseconds (printf ensures leading zero)
+    # Convert microseconds to milliseconds
     avg_lat_ms="$(printf "%.2f" "$(echo "scale=4; ${avg_lat} / 1000" | bc)")"
     p99_lat_ms="$(printf "%.2f" "$(echo "scale=4; ${p99_lat} / 1000" | bc)")"
 
@@ -120,7 +103,7 @@ generate_table() {
       fps="0"
     fi
 
-    # Normalized performance vs java-http
+    # Normalized performance vs Latte http
     if [[ -n "${self_rps}" && "${self_rps}" != "0" && "${self_rps}" != "null" ]]; then
       normalized="$(echo "scale=1; ${rps} * 100 / ${self_rps}" | bc)"
     else
@@ -128,93 +111,214 @@ generate_table() {
     fi
 
     rps_formatted="$(printf "%'.0f" "${rps}")"
-    printf "| %-14s | %12s | %12s | %17s | %17s | %11s%% |\n" \
+    printf "| %-14s | %12s | %12s | %17s | %17s | %12s%% |\n" \
       "${display_name}" "${rps_formatted}" "${fps}" "${avg_lat_ms}" "${p99_lat_ms}" "${normalized}"
   done
 }
 
-cat > "${PERF_FILE}" << 'HEADER'
-## Performance
+# ---------------------------------------------------------------------------
+# HTTP/2 helpers
+# ---------------------------------------------------------------------------
 
-A key purpose for this project is to obtain screaming performance. Here are benchmark results comparing `java-http` against other Java HTTP servers.
+# Generate an HTTP/2 h2load results table for a given scenario.
+# Args: $1=scenario, $2=self_rps
+generate_h2_table() {
+  local scenario="$1"
+  local self_rps="$2"
 
-These benchmarks ensure `java-http` stays near the top in raw throughput, and we'll be working on claiming the top position -- even if only for bragging rights, since in practice your database and application code will be the bottleneck long before the HTTP server.
+  echo "| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |"
+  echo "|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|"
 
-All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over HTTP (no TLS) to isolate server performance.
+  jq -r --arg scenario "${scenario}" \
+    '[.results[] | select(.scenario == $scenario and .tool == "h2load")] | sort_by(if .server == "self" then "" else .server end) | .[] | [.server, (.metrics.rps | tostring), (.metrics.errors_other | tostring), (.metrics.avg_latency_us | tostring), (.metrics.p99_us | tostring)] | @tsv' \
+    "${LATEST}" | while IFS=$'\t' read -r server rps errors avg_lat p99_lat; do
 
-HEADER
+    display_name="$(server_display_name "${server}")"
 
-# Add the primary table (hello or baseline)
-generate_table "${SCENARIO}" "${TOOL_FILTER}" "${SELF_RPS}" >> "${PERF_FILE}"
+    # Convert microseconds to milliseconds
+    avg_lat_ms="$(printf "%.2f" "$(echo "scale=4; ${avg_lat} / 1000" | bc)")"
+    p99_lat_ms="$(printf "%.2f" "$(echo "scale=4; ${p99_lat} / 1000" | bc)")"
 
-# Add high-concurrency table if available
-if [[ "${HAS_HIGH_CONCURRENCY}" == "true" ]]; then
-  HC_SELF_RPS="$(jq -r ".results[] | select(.server == \"self\" and .scenario == \"high-concurrency\" and .tool == \"${TOOL_FILTER}\") | .metrics.rps" "${LATEST}" 2>/dev/null || echo "0")"
+    # Normalized performance vs Latte http
+    if [[ -n "${self_rps}" && "${self_rps}" != "0" && "${self_rps}" != "null" ]]; then
+      normalized="$(echo "scale=1; ${rps} * 100 / ${self_rps}" | bc)"
+    else
+      normalized="?"
+    fi
 
-  cat >> "${PERF_FILE}" << 'HC_HEADER'
+    rps_formatted="$(printf "%'.0f" "${rps}")"
+    printf "| %-13s | %12s | %6s | %17s | %17s | %12s%% |\n" \
+      "${display_name}" "${rps_formatted}" "${errors}" "${avg_lat_ms}" "${p99_lat_ms}" "${normalized}"
+  done
+}
 
-#### Under stress (1,000 concurrent connections)
+# ---------------------------------------------------------------------------
+# Inject a block of content between two HTML comment markers in README.md.
+# The markers themselves are preserved; only the content between them is replaced.
+# Args: $1=start_marker, $2=end_marker, $3=content_file
+# ---------------------------------------------------------------------------
+inject_section() {
+  local start_marker="$1"
+  local end_marker="$2"
+  local content_file="$3"
 
-HC_HEADER
-  generate_table "high-concurrency" "${TOOL_FILTER}" "${HC_SELF_RPS}" >> "${PERF_FILE}"
+  python3 - "${README}" "${start_marker}" "${end_marker}" "${content_file}" << 'PYEOF'
+import sys, re
 
-  cat >> "${PERF_FILE}" << 'HC_NOTE'
+readme_path, start_marker, end_marker, content_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
-_JDK HttpServer (`com.sun.net.httpserver`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._
-HC_NOTE
+with open(readme_path, 'r') as f:
+    text = f.read()
+
+with open(content_path, 'r') as f:
+    new_content = f.read().rstrip('\n')
+
+# Escape markers for use as literal strings in regex
+sm = re.escape(start_marker)
+em = re.escape(end_marker)
+
+pattern = rf'({sm})\n.*?({em})'
+replacement = rf'\1\n{new_content}\n\2'
+
+new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)
+if n == 0:
+    print(f"ERROR: Could not find markers '{start_marker}' ... '{end_marker}' in README.md", file=sys.stderr)
+    sys.exit(1)
+
+with open(readme_path, 'w') as f:
+    f.write(new_text)
+PYEOF
+}
+
+# ---------------------------------------------------------------------------
+# Build HTTP/1.1 section content
+# ---------------------------------------------------------------------------
+
+# Pick primary h1.1 scenario — prefer hello, fall back to baseline
+H1_SCENARIO="hello"
+if ! jq -e '.results[] | select(.scenario == "hello" and .tool == "wrk")' "${LATEST}" &>/dev/null; then
+  H1_SCENARIO="baseline"
 fi
 
-# Add footer with machine specs and reproducibility info
-MACHINE_LINE=""
-if [[ "${MACHINE_MODEL}" != "unknown" && -n "${MACHINE_MODEL}" ]]; then
-  MACHINE_LINE=" (${MACHINE_MODEL})"
-fi
-OS_LINE=""
-if [[ -n "${OS_VERSION}" && "${OS_VERSION}" != "null" ]]; then
-  OS_LINE=$'\n'"_OS: ${OS_VERSION}._"
+HAS_H1_DATA=false
+if jq -e --arg s "${H1_SCENARIO}" '.results[] | select(.scenario == $s and .tool == "wrk")' "${LATEST}" &>/dev/null; then
+  HAS_H1_DATA=true
 fi
 
-cat >> "${PERF_FILE}" << EOF
-
-_Benchmark performed ${DATE_FORMATTED} on ${SYSTEM_DESC}, ${RAM_GB}GB RAM${MACHINE_LINE}._${OS_LINE}
-_Java: ${JAVA_VERSION}._
-
-To reproduce:
-\`\`\`bash
-cd benchmarks
-./run-benchmarks.sh --scenarios ${SCENARIO}$(if [[ "${HAS_HIGH_CONCURRENCY}" == "true" ]]; then echo ",high-concurrency"; fi)
-./update-readme.sh
-\`\`\`
-
-See [benchmarks/README.md](benchmarks/README.md) for full usage and options.
-EOF
-
-# Verify README has the Performance section
-if ! grep -q "^## Performance" "${README}"; then
-  echo "ERROR: Could not find '## Performance' section in README.md"
-  echo "       Add a '## Performance' heading to README.md first."
-  exit 1
+HAS_HIGH_CONCURRENCY=false
+if jq -e '.results[] | select(.scenario == "high-concurrency" and .tool == "wrk")' "${LATEST}" &>/dev/null; then
+  HAS_HIGH_CONCURRENCY=true
 fi
 
-# Replace the Performance section using line-based processing
-# Strategy: print everything before "## Performance", then our new content,
-# then skip until the next "## " heading and print the rest.
-{
-  # Print lines before ## Performance
-  sed -n '1,/^## Performance/{ /^## Performance/!p; }' "${README}"
+H1_FILE="$(mktemp)"
+trap 'rm -f "${H1_FILE}"' EXIT
 
-  # Print our new performance section
-  cat "${PERF_FILE}"
+if [[ "${HAS_H1_DATA}" == "true" ]]; then
+  SELF_RPS="$(jq -r --arg s "${H1_SCENARIO}" '.results[] | select(.server == "self" and .scenario == $s and .tool == "wrk") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+  [[ -z "${SELF_RPS}" || "${SELF_RPS}" == "null" ]] && SELF_RPS="0"
 
-  # Print lines after the next ## heading (after Performance)
-  awk '
-    BEGIN { in_perf = 0; past_perf = 0 }
-    /^## Performance/ { in_perf = 1; next }
-    in_perf && /^## [^#]/ { in_perf = 0; past_perf = 1; print "" }
-    past_perf { print }
-  ' "${README}"
-} > "${README}.tmp"
+  {
+    echo "### HTTP/1.1 (wrk)"
+    echo ""
+    echo "#### Hello scenario (low concurrency, baseline)"
+    echo ""
+    generate_h1_table "${H1_SCENARIO}" "wrk" "${SELF_RPS}"
 
-mv "${README}.tmp" "${README}"
+    if [[ "${HAS_HIGH_CONCURRENCY}" == "true" ]]; then
+      HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "high-concurrency" and .tool == "wrk") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+      [[ -z "${HC_SELF_RPS}" || "${HC_SELF_RPS}" == "null" ]] && HC_SELF_RPS="0"
 
-echo "README.md updated with latest benchmark results."
+      echo ""
+      echo "#### Under stress (1,000 concurrent connections)"
+      echo ""
+      generate_h1_table "high-concurrency" "wrk" "${HC_SELF_RPS}"
+      echo ""
+      echo "_JDK HttpServer (\`com.sun.net.httpserver\`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._"
+    fi
+
+    echo ""
+    printf "_Benchmark performed %s on %s, %sGB RAM%s._%s\n" \
+      "${DATE_FORMATTED}" "${SYSTEM_DESC}" "${RAM_GB}" "${MACHINE_LINE}" "${OS_LINE}"
+    echo "_Java: ${JAVA_VERSION}._"
+    echo ""
+    echo "To reproduce:"
+    echo '```bash'
+    echo "cd benchmarks"
+    if [[ "${HAS_HIGH_CONCURRENCY}" == "true" ]]; then
+      echo "./run-benchmarks.sh --scenarios ${H1_SCENARIO},high-concurrency"
+    else
+      echo "./run-benchmarks.sh --scenarios ${H1_SCENARIO}"
+    fi
+    echo "./update-readme.sh"
+    echo '```'
+  } > "${H1_FILE}"
+
+  inject_section "<!-- H1-BENCHMARK-START -->" "<!-- H1-BENCHMARK-END -->" "${H1_FILE}"
+  echo "README.md HTTP/1.1 section updated."
+else
+  echo "No HTTP/1.1 wrk results found — skipping H1 section update."
+fi
+
+# ---------------------------------------------------------------------------
+# Build HTTP/2 section content
+# ---------------------------------------------------------------------------
+
+HAS_H2_HELLO=false
+if jq -e '.results[] | select(.scenario == "h2-hello" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+  HAS_H2_HELLO=true
+fi
+
+HAS_H2_HC=false
+if jq -e '.results[] | select(.scenario == "h2-high-concurrency" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+  HAS_H2_HC=true
+fi
+
+H2_FILE="$(mktemp)"
+trap 'rm -f "${H1_FILE}" "${H2_FILE}"' EXIT
+
+if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" ]]; then
+  H2_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-hello" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+  [[ -z "${H2_SELF_RPS}" || "${H2_SELF_RPS}" == "null" ]] && H2_SELF_RPS="0"
+
+  H2_HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-high-concurrency" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+  [[ -z "${H2_HC_SELF_RPS}" || "${H2_HC_SELF_RPS}" == "null" ]] && H2_HC_SELF_RPS="0"
+
+  {
+    echo "### HTTP/2 (h2load)"
+    echo ""
+
+    if [[ "${HAS_H2_HELLO}" == "true" ]]; then
+      echo "#### h2-hello (1 connection × 100 streams)"
+      echo ""
+      generate_h2_table "h2-hello" "${H2_SELF_RPS}"
+    fi
+
+    if [[ "${HAS_H2_HC}" == "true" ]]; then
+      echo ""
+      echo "#### h2-high-concurrency (10 connections × 100 streams each)"
+      echo ""
+      generate_h2_table "h2-high-concurrency" "${H2_HC_SELF_RPS}"
+    fi
+
+    echo ""
+    echo "_JDK HttpServer does not support HTTP/2 and is excluded from h2 results._"
+    echo ""
+    printf "_Benchmark performed %s on %s, %sGB RAM%s._%s\n" \
+      "${DATE_FORMATTED}" "${SYSTEM_DESC}" "${RAM_GB}" "${MACHINE_LINE}" "${OS_LINE}"
+    echo "_Java: ${JAVA_VERSION}._"
+    echo ""
+    echo "To reproduce (requires \`brew install nghttp2\`):"
+    echo '```bash'
+    echo "cd benchmarks"
+    echo "./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency"
+    echo "./update-readme.sh"
+    echo '```'
+  } > "${H2_FILE}"
+
+  inject_section "<!-- H2-BENCHMARK-START -->" "<!-- H2-BENCHMARK-END -->" "${H2_FILE}"
+  echo "README.md HTTP/2 section updated."
+else
+  echo "No HTTP/2 h2load results found — skipping H2 section update (placeholder table preserved)."
+fi
+
+echo "Done."
