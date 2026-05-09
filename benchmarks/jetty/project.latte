@@ -30,6 +30,7 @@ project(group: "org.lattejava", name: "jetty", version: "0.1.0", licenses: ["Apa
 
   dependencies {
     group(name: "compile") {
+      dependency(id: "org.eclipse.jetty.http2:jetty-http2-server:${jettyVersion}", skipCompatibilityCheck: true)
       dependency(id: "org.eclipse.jetty:jetty-server:${jettyVersion}", skipCompatibilityCheck: true)
       dependency(id: "org.slf4j:slf4j-api:${slf4jVersion}", skipCompatibilityCheck: true)
     }

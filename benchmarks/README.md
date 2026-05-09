@@ -90,7 +90,15 @@ h2load uses h2c prior-knowledge (plaintext HTTP/2 without an upgrade handshake).
 | `h2-hello` | `GET /hello` | 4 | 1 | 100 | 100 | Baseline h2 throughput — single connection, many streams |
 | `h2-high-concurrency` | `GET /hello` | 4 | 10 | 100 | 1000 | Showcases h2 multiplexing (1000 in-flight over 10 TCP connections vs 1000 for h1.1) |
 
-The Latte (`self`) benchmark server enables h2c prior-knowledge by default. Per-vendor h2 enablement (Jetty, Tomcat, Netty) is a separate follow-up task.
+Per-vendor h2c support:
+
+| Server | HTTP/2 support | Notes |
+|--------|----------------|-------|
+| `self` (Latte) | h2c prior-knowledge on port 8080 | Enabled in the HTTP/2 implementation branch |
+| `jetty` | h2c prior-knowledge on port 8080 | `HTTP2CServerConnectionFactory` alongside `HttpConnectionFactory` on the same `ServerConnector` |
+| `tomcat` | h2c prior-knowledge + Upgrade on port 8080 | `<UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol"/>` in `server.xml`; Tomcat 11 handles both the `PRI *` preface and the `Upgrade: h2c` header |
+| `netty` | h2c prior-knowledge + Upgrade on port 8080 | `CleartextHttp2ServerUpgradeHandler` detects h2c preface, h1.1 Upgrade, or plain h1.1 — all on one port |
+| `jdk-httpserver` | HTTP/1.1 only — h2-* scenarios skipped | `com.sun.net.httpserver.HttpServer` has no HTTP/2 support; `run-benchmarks.sh` skips h2-* scenarios for this server |
 
 ## Results
 

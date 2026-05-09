@@ -27,6 +27,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -40,9 +41,16 @@ import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpServerUpgradeHandler;
 import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.QueryStringDecoder;
+import io.netty.handler.codec.http2.CleartextHttp2ServerUpgradeHandler;
+import io.netty.handler.codec.http2.Http2FrameCodecBuilder;
+import io.netty.handler.codec.http2.Http2MultiplexHandler;
+import io.netty.handler.codec.http2.Http2ServerUpgradeCodec;
+import io.netty.handler.codec.http2.Http2StreamChannel;
+import io.netty.handler.codec.http2.Http2StreamFrameToHttpObjectCodec;
 
 public class NettyLoadServer {
   private static final Map<Integer, byte[]> Blobs = new HashMap<>();
@@ -59,11 +67,7 @@ public class NettyLoadServer {
        .childHandler(new ChannelInitializer<SocketChannel>() {
          @Override
          protected void initChannel(SocketChannel ch) {
-           ch.pipeline().addLast(
-               new HttpServerCodec(),
-               new HttpObjectAggregator(10 * 1024 * 1024),
-               new LoadHandler()
-           );
+           configurePipeline(ch.pipeline());
          }
        });
 
@@ -74,6 +78,66 @@ public class NettyLoadServer {
       bossGroup.shutdownGracefully();
       workerGroup.shutdownGracefully();
     }
+  }
+
+  /**
+   * Configures the channel pipeline to accept both HTTP/1.1 (wrk) and h2c-prior-knowledge (h2load)
+   * on the same port 8080.
+   *
+   * <p>The {@link CleartextHttp2ServerUpgradeHandler} inspects the first bytes of each connection:
+   * <ul>
+   *   <li>If it sees the h2c PRI preface, it fires a {@code PriorKnowledgeUpgradeEvent} and hands off
+   *       to the h2 multiplexer pipeline.</li>
+   *   <li>If it sees an HTTP/1.1 Upgrade: h2c request, it performs the upgrade handshake.</li>
+   *   <li>Otherwise (plain HTTP/1.1), it falls through to the HTTP/1.1 codec + handler chain.</li>
+   * </ul>
+   */
+  private static void configurePipeline(ChannelPipeline p) {
+    // h2c-prior-knowledge: Http2FrameCodec decodes frames, Http2MultiplexHandler
+    // creates one child channel per stream, the stream initializer adds the
+    // HTTP-object codec + aggregator + shared LoadHandler.
+    var http2FrameCodec = Http2FrameCodecBuilder.forServer().build();
+    var http2Multiplexer = new Http2MultiplexHandler(new ChannelInitializer<Http2StreamChannel>() {
+      @Override
+      protected void initChannel(Http2StreamChannel streamCh) {
+        streamCh.pipeline().addLast(
+            new Http2StreamFrameToHttpObjectCodec(true),
+            new HttpObjectAggregator(10 * 1024 * 1024),
+            new LoadHandler()
+        );
+      }
+    });
+
+    // HTTP/1.1 side: reused as the source codec for the upgrade handler.
+    // After a successful h2c upgrade or prior-knowledge detection the h1 codec is
+    // removed from the pipeline by Netty automatically.
+    HttpServerCodec sourceCodec = new HttpServerCodec();
+
+    // Upgrade factory: when Upgrade: h2c header is seen on an HTTP/1.1 request,
+    // install the h2 frame codec + multiplexer.
+    HttpServerUpgradeHandler.UpgradeCodecFactory upgradeCodecFactory =
+        protocol -> "h2c".equals(protocol.toString())
+            ? new Http2ServerUpgradeCodec(http2FrameCodec, http2Multiplexer)
+            : null;
+    HttpServerUpgradeHandler upgradeHandler = new HttpServerUpgradeHandler(sourceCodec, upgradeCodecFactory);
+
+    // The cleartext upgrade handler auto-detects h2c preface vs h1.1 upgrade vs plain h1.1.
+    // The third argument (http2FrameCodec + http2Multiplexer) is added to the pipeline on
+    // prior-knowledge detection; a PriorKnowledgeUpgradeEvent is fired so handlers downstream
+    // know the protocol has been switched.
+    CleartextHttp2ServerUpgradeHandler cleartextHandler = new CleartextHttp2ServerUpgradeHandler(
+        sourceCodec, upgradeHandler, new ChannelInitializer<SocketChannel>() {
+          @Override
+          protected void initChannel(SocketChannel ch) {
+            ch.pipeline().addLast(http2FrameCodec, http2Multiplexer);
+          }
+        }
+    );
+
+    p.addLast(cleartextHandler);
+    // Fallback: plain HTTP/1.1 traffic that did not trigger any upgrade.
+    p.addLast(new HttpObjectAggregator(10 * 1024 * 1024));
+    p.addLast(new LoadHandler());
   }
 
   static class LoadHandler extends SimpleChannelInboundHandler<FullHttpRequest> {

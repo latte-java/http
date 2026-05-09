@@ -25,6 +25,7 @@ project(group: "org.lattejava", name: "netty", version: "0.1.0", licenses: ["Apa
       mapping(id: "io.netty:netty-buffer:${nettyVersion}", version: "4.1.118")
       mapping(id: "io.netty:netty-codec:${nettyVersion}", version: "4.1.118")
       mapping(id: "io.netty:netty-codec-http:${nettyVersion}", version: "4.1.118")
+      mapping(id: "io.netty:netty-codec-http2:${nettyVersion}", version: "4.1.118")
       mapping(id: "io.netty:netty-common:${nettyVersion}", version: "4.1.118")
       mapping(id: "io.netty:netty-handler:${nettyVersion}", version: "4.1.118")
       mapping(id: "io.netty:netty-parent:${nettyVersion}", version: "4.1.118")
@@ -44,6 +45,7 @@ project(group: "org.lattejava", name: "netty", version: "0.1.0", licenses: ["Apa
   dependencies {
     group(name: "compile") {
       dependency(id: "io.netty:netty-codec-http:${nettyVersion}", skipCompatibilityCheck: true)
+      dependency(id: "io.netty:netty-codec-http2:${nettyVersion}", skipCompatibilityCheck: true)
       dependency(id: "io.netty:netty-handler:${nettyVersion}", skipCompatibilityCheck: true)
     }
   }

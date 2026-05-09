@@ -23,8 +23,11 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
 import org.eclipse.jetty.io.Content;
 import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Response;
 import org.eclipse.jetty.server.Server;
@@ -36,7 +39,12 @@ public class JettyLoadServer {
 
   public static void main(String[] args) throws Exception {
     Server server = new Server();
-    ServerConnector connector = new ServerConnector(server);
+    // Enable both HTTP/1.1 and h2c-prior-knowledge on the same port.
+    // wrk uses HTTP/1.1; h2load uses h2c prior-knowledge.
+    HttpConfiguration httpConfig = new HttpConfiguration();
+    HttpConnectionFactory http1 = new HttpConnectionFactory(httpConfig);
+    HTTP2CServerConnectionFactory h2c = new HTTP2CServerConnectionFactory(httpConfig);
+    ServerConnector connector = new ServerConnector(server, http1, h2c);
     connector.setPort(8080);
     connector.setAcceptQueueSize(200);
     server.addConnector(connector);

@@ -500,6 +500,11 @@ for server in ${SERVERS}; do
         echo "    SKIPPED — h2load not installed (brew install nghttp2)"
         continue
       fi
+      # jdk-httpserver is HTTP/1.1-only; h2-* scenarios are not supported.
+      if [[ "${server}" == "jdk-httpserver" ]]; then
+        echo "  [h2load] SKIPPED — jdk-httpserver does not support HTTP/2"
+        continue
+      fi
       read -r threads connections streams endpoint <<< "${rest_config}"
       for trial in $(seq 1 "${TRIALS}"); do
         run_h2load_benchmark "${server}" "${scenario}" "${threads}" "${connections}" "${streams}" "${endpoint}" "${trial}"

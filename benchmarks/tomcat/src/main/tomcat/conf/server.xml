@@ -26,7 +26,13 @@
                acceptCount="200"
                maxConnections="1000"
                maxThreads="200"
-               URIEncoding="UTF-8"/>
+               URIEncoding="UTF-8">
+      <!-- Enable h2c (HTTP/2 cleartext) on the same port as HTTP/1.1.
+           Tomcat's Http2Protocol handles both the HTTP/1.1 Upgrade flow and
+           h2c-prior-knowledge (the PRI * HTTP/2.0 preface). h2load uses
+           prior-knowledge by default; wrk uses HTTP/1.1. -->
+      <UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol"/>
+    </Connector>
     <Engine name="Catalina" defaultHost="localhost">
       <Host name="localhost" autoDeploy="false" unpackWARs="false">
         <Context path="" docBase="${catalina.base}/../web">
