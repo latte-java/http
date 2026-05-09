@@ -8,6 +8,7 @@ Automated benchmarking framework for comparing java-http against other Java HTTP
 - **Latte** build tool (`latte` on PATH)
 - **wrk** HTTP benchmark tool (`brew install wrk` on macOS)
 - **jq** for JSON processing (`brew install jq` on macOS)
+- **h2load** (optional) for HTTP/2 scenarios (`brew install nghttp2` on macOS). The runner skips `h2-*` scenarios gracefully when h2load is absent.
 
 ## Quick Start
 
@@ -68,14 +69,28 @@ Options:
 
 ## Scenarios
 
-| Scenario | Endpoint | wrk Threads | Connections | Purpose |
-|----------|----------|-------------|-------------|---------|
+### HTTP/1.1 (wrk)
+
+| Scenario | Endpoint | Threads | Connections | Purpose |
+|----------|----------|---------|-------------|---------|
 | `baseline` | `GET /` | 12 | 100 | No-op throughput ceiling |
 | `hello` | `GET /hello` | 12 | 100 | Small response body |
 | `post-load` | `POST /load` | 12 | 100 | POST with body, Base64 response |
 | `large-file` | `GET /file?size=1048576` | 4 | 10 | 1MB response throughput |
 | `high-concurrency` | `GET /` | 12 | 1000 | Connection pressure |
 | `mixed` | Rotates endpoints | 12 | 100 | Real-world mix |
+| `browser-headers` | `GET /` | 12 | 100 | Realistic browser header set |
+
+### HTTP/2 (h2load — requires `brew install nghttp2`)
+
+h2load uses h2c prior-knowledge (plaintext HTTP/2 without an upgrade handshake). The canonical h2 workload is *few TCP connections × many concurrent streams*, which has no direct h1.1 equivalent.
+
+| Scenario | Endpoint | Threads | TCP Connections | Streams/conn | Total in-flight | Purpose |
+|----------|----------|---------|-----------------|--------------|-----------------|---------|
+| `h2-hello` | `GET /hello` | 4 | 1 | 100 | 100 | Baseline h2 throughput — single connection, many streams |
+| `h2-high-concurrency` | `GET /hello` | 4 | 10 | 100 | 1000 | Showcases h2 multiplexing (1000 in-flight over 10 TCP connections vs 1000 for h1.1) |
+
+The Latte (`self`) benchmark server enables h2c prior-knowledge by default. Per-vendor h2 enablement (Jetty, Tomcat, Netty) is a separate follow-up task.
 
 ## Results
 

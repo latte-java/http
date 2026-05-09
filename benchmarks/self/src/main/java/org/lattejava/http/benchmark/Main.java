@@ -46,7 +46,7 @@ public class Main {
                                              .withMinimumReadThroughput(4 * 1024)
                                              .withMinimumWriteThroughput(4 * 1024)
                                              .withInstrumenter(instrumenter)
-                                             .withListener(new HTTPListenerConfiguration(8080))
+                                             .withListener(new HTTPListenerConfiguration(8080).withH2cPriorKnowledgeEnabled(true))
                                              .withLoggerFactory(SystemOutLoggerFactory.FACTORY)
                                              .start()) {
 
