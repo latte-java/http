@@ -35,7 +35,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null && pwd)"
 
 # Defaults
 ALL_SERVERS="self jdk-httpserver jetty netty tomcat"
-ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers h2-hello h2-high-concurrency"
+ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers h2-hello h2-high-concurrency h2-tls-hello h2-tls-high-concurrency"
 SERVERS="${ALL_SERVERS}"
 SCENARIOS="${ALL_SCENARIOS}"
 LABEL=""
@@ -216,6 +216,8 @@ scenario_config() {
     browser-headers)     echo "wrk    12 100    /" ;;
     h2-hello)            echo "h2load 1  1   100 /hello" ;;   # 1 thread, 1 TCP connection, 100 streams
     h2-high-concurrency) echo "h2load 4  10  100 /hello" ;;   # 4 threads, 10 TCP connections, 100 streams each
+    h2-tls-hello)            echo "h2load 1  1   100 /hello" ;;   # same shape as h2-hello but over TLS+ALPN
+    h2-tls-high-concurrency) echo "h2load 4  10  100 /hello" ;;   # same shape as h2-high-concurrency but over TLS+ALPN
     *)                   echo ""; return 1 ;;
   esac
 }
@@ -362,13 +364,24 @@ run_h2load_benchmark() {
   echo "  [h2load] Running: ${scenario} (${threads}t, ${connections}c, ${streams}s, ${DURATION}) -> ${endpoint}${trial_label}"
 
   start_timer "[h2load] ${server}/${scenario}${trial_label}"
+
+  # h2-tls-* scenarios go over TLS+ALPN on port 8443 with the benchmark cert; cleartext h2c uses port 8080.
+  local h2load_url h2load_extra_args=""
+  if [[ "${scenario}" == h2-tls-* ]]; then
+    h2load_url="https://127.0.0.1:8443${endpoint}"
+    h2load_extra_args="--ca-file=${SCRIPT_DIR}/certs/server.crt"
+  else
+    h2load_url="http://127.0.0.1:8080${endpoint}"
+  fi
+
   local h2load_output
   h2load_output="$(h2load \
     --duration="${DURATION_SECS}" \
     --clients="${connections}" \
     --max-concurrent-streams="${streams}" \
     --threads="${threads}" \
-    "http://127.0.0.1:8080${endpoint}" 2>&1)"
+    ${h2load_extra_args} \
+    "${h2load_url}" 2>&1)"
   stop_timer
 
   # Parse h2load text output.

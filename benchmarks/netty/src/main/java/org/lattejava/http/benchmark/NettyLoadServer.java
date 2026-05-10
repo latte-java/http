@@ -15,6 +15,7 @@
  */
 package org.lattejava.http.benchmark;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
@@ -51,6 +52,15 @@ import io.netty.handler.codec.http2.Http2MultiplexHandler;
 import io.netty.handler.codec.http2.Http2ServerUpgradeCodec;
 import io.netty.handler.codec.http2.Http2StreamChannel;
 import io.netty.handler.codec.http2.Http2StreamFrameToHttpObjectCodec;
+import io.netty.handler.ssl.ApplicationProtocolConfig;
+import io.netty.handler.ssl.ApplicationProtocolConfig.Protocol;
+import io.netty.handler.ssl.ApplicationProtocolConfig.SelectedListenerFailureBehavior;
+import io.netty.handler.ssl.ApplicationProtocolConfig.SelectorFailureBehavior;
+import io.netty.handler.ssl.ApplicationProtocolNames;
+import io.netty.handler.ssl.ApplicationProtocolNegotiationHandler;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.SslProvider;
 
 public class NettyLoadServer {
   private static final Map<Integer, byte[]> Blobs = new HashMap<>();
@@ -59,7 +69,22 @@ public class NettyLoadServer {
     EventLoopGroup bossGroup = new NioEventLoopGroup(1);
     EventLoopGroup workerGroup = new NioEventLoopGroup();
 
+    // TLS+ALPN SslContext: load the fixed benchmark self-signed cert/key from benchmarks/certs/.
+    // Path is relative to the working directory (build/dist when launched by start.sh).
+    File certFile = new File("../../certs/server.crt");
+    File keyFile = new File("../../certs/server.key");
+    SslContext sslCtx = SslContextBuilder.forServer(certFile, keyFile)
+                                         .sslProvider(SslProvider.JDK)
+                                         .applicationProtocolConfig(new ApplicationProtocolConfig(
+                                             Protocol.ALPN,
+                                             SelectorFailureBehavior.NO_ADVERTISE,
+                                             SelectedListenerFailureBehavior.ACCEPT,
+                                             ApplicationProtocolNames.HTTP_2,
+                                             ApplicationProtocolNames.HTTP_1_1))
+                                         .build();
+
     try {
+      // Port 8080: h2c (cleartext) + HTTP/1.1 — used by wrk and h2load h2c scenarios.
       ServerBootstrap b = new ServerBootstrap();
       b.group(bossGroup, workerGroup)
        .channel(NioServerSocketChannel.class)
@@ -70,9 +95,23 @@ public class NettyLoadServer {
            configurePipeline(ch.pipeline());
          }
        });
-
       var ch = b.bind(8080).sync().channel();
-      System.out.println("Netty server started on port 8080");
+
+      // Port 8443: TLS + ALPN h2 — used by h2load TLS scenarios.
+      ServerBootstrap tlsBootstrap = new ServerBootstrap();
+      tlsBootstrap.group(bossGroup, workerGroup)
+                  .channel(NioServerSocketChannel.class)
+                  .option(ChannelOption.SO_BACKLOG, 200)
+                  .childHandler(new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(SocketChannel ch) {
+                      configureTLSPipeline(ch.pipeline(), sslCtx);
+                    }
+                  });
+      var tlsCh = tlsBootstrap.bind(8443).sync().channel();
+
+      System.out.println("Netty server started on port 8080 (h2c) and port 8443 (TLS+ALPN h2)");
+      tlsCh.closeFuture().sync();
       ch.closeFuture().sync();
     } finally {
       bossGroup.shutdownGracefully();
@@ -138,6 +177,46 @@ public class NettyLoadServer {
     // Fallback: plain HTTP/1.1 traffic that did not trigger any upgrade.
     p.addLast(new HttpObjectAggregator(10 * 1024 * 1024));
     p.addLast(new LoadHandler());
+  }
+
+  /**
+   * Configures a TLS+ALPN pipeline on port 8443 for h2load TLS scenarios.
+   *
+   * <p>The pipeline is:
+   * <ol>
+   *   <li>TLS handshake (SslHandler from the provided SslContext)</li>
+   *   <li>ALPN dispatch (ApplicationProtocolNegotiationHandler): selects h2 or http/1.1 sub-pipeline</li>
+   * </ol>
+   */
+  private static void configureTLSPipeline(ChannelPipeline p, SslContext sslCtx) {
+    p.addLast(sslCtx.newHandler(p.channel().alloc()));
+    p.addLast(new ApplicationProtocolNegotiationHandler(ApplicationProtocolNames.HTTP_1_1) {
+      @Override
+      protected void configurePipeline(ChannelHandlerContext ctx, String protocol) {
+        if (ApplicationProtocolNames.HTTP_2.equals(protocol)) {
+          // h2 path: frame codec + stream multiplexer.
+          var http2FrameCodec = Http2FrameCodecBuilder.forServer().build();
+          var http2Multiplexer = new Http2MultiplexHandler(new ChannelInitializer<Http2StreamChannel>() {
+            @Override
+            protected void initChannel(Http2StreamChannel streamCh) {
+              streamCh.pipeline().addLast(
+                  new Http2StreamFrameToHttpObjectCodec(true),
+                  new HttpObjectAggregator(10 * 1024 * 1024),
+                  new LoadHandler()
+              );
+            }
+          });
+          ctx.pipeline().addLast(http2FrameCodec, http2Multiplexer);
+        } else {
+          // http/1.1 fallback.
+          ctx.pipeline().addLast(
+              new HttpServerCodec(),
+              new HttpObjectAggregator(10 * 1024 * 1024),
+              new LoadHandler()
+          );
+        }
+      }
+    });
   }
 
   static class LoadHandler extends SimpleChannelInboundHandler<FullHttpRequest> {

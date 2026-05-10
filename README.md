@@ -223,6 +223,26 @@ cd benchmarks
 | Netty         |      533,267 |      0 |              1.80 |             13.26 |        124.4% |
 | Apache Tomcat |      153,702 |      0 |              5.86 |             27.30 |         35.8% |
 
+#### h2-tls-hello (TLS+ALPN, 1 connection × 100 streams)
+
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |          TBD |    TBD |               TBD |               TBD |          TBD |
+| Jetty         |          TBD |    TBD |               TBD |               TBD |          TBD |
+| Netty         |          TBD |    TBD |               TBD |               TBD |          TBD |
+| Apache Tomcat |          TBD |    TBD |               TBD |               TBD |          TBD |
+
+#### h2-tls-high-concurrency (TLS+ALPN, 10 connections × 100 streams each)
+
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |          TBD |    TBD |               TBD |               TBD |          TBD |
+| Jetty         |          TBD |    TBD |               TBD |               TBD |          TBD |
+| Netty         |          TBD |    TBD |               TBD |               TBD |          TBD |
+| Apache Tomcat |          TBD |    TBD |               TBD |               TBD |          TBD |
+
+_TLS scenarios use a self-signed certificate at `benchmarks/certs/server.crt` (benchmark fixture only). All four servers terminate TLS and use ALPN to negotiate h2._
+
 _JDK HttpServer does not support HTTP/2 and is excluded from h2 results._
 
 _Benchmark performed 2026-05-10 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
@@ -232,7 +252,7 @@ _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 To reproduce (requires `brew install nghttp2`):
 ```bash
 cd benchmarks
-./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency
+./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency,h2-tls-hello,h2-tls-high-concurrency
 ./update-readme.sh
 ```
 <!-- H2-BENCHMARK-END -->

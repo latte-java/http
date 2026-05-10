@@ -33,6 +33,36 @@
            prior-knowledge by default; wrk uses HTTP/1.1. -->
       <UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol"/>
     </Connector>
+    <!--
+       Port 8443: TLS + ALPN HTTP/2 connector.
+       Uses Http11Nio2Protocol (JSSE-based NIO) with SSLEnabled=true. The Http2Protocol upgrade
+       protocol wired here causes Tomcat to advertise "h2" and "http/1.1" via ALPN during the TLS
+       handshake. h2load TLS scenarios target this port.
+
+       Cert paths are relative to catalina.home — at runtime that is build/dist/tomcat/apache-tomcat,
+       so ../../.. walks up to the benchmarks/ directory and certs/ is under that.
+     -->
+    <Connector port="8443"
+               protocol="org.apache.coyote.http11.Http11Nio2Protocol"
+               connectionTimeout="20000"
+               compression="off"
+               maxHttpHeaderSize="10240"
+               maxParameterCount="-1"
+               maxPostSize="-1"
+               SSLEnabled="true"
+               scheme="https"
+               secure="true"
+               acceptCount="200"
+               maxConnections="1000"
+               maxThreads="200"
+               URIEncoding="UTF-8">
+      <SSLHostConfig>
+        <Certificate certificateFile="${catalina.home}/../../../certs/server.crt"
+                     certificateKeyFile="${catalina.home}/../../../certs/server.key"
+                     type="RSA"/>
+      </SSLHostConfig>
+      <UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol"/>
+    </Connector>
     <Engine name="Catalina" defaultHost="localhost">
       <Host name="localhost" autoDeploy="false" unpackWARs="false">
         <Context path="" docBase="${catalina.base}/../web">

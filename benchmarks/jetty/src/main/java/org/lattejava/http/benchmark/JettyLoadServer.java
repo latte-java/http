@@ -23,24 +23,29 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
+import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.io.Content;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 
 public class JettyLoadServer {
   private static final Map<Integer, byte[]> Blobs = new HashMap<>();
 
   public static void main(String[] args) throws Exception {
     Server server = new Server();
-    // Enable both HTTP/1.1 and h2c-prior-knowledge on the same port.
-    // wrk uses HTTP/1.1; h2load uses h2c prior-knowledge.
+
+    // Port 8080: HTTP/1.1 + h2c (cleartext) — used by wrk and h2load h2c scenarios.
     HttpConfiguration httpConfig = new HttpConfiguration();
     HttpConnectionFactory http1 = new HttpConnectionFactory(httpConfig);
     HTTP2CServerConnectionFactory h2c = new HTTP2CServerConnectionFactory(httpConfig);
@@ -49,9 +54,32 @@ public class JettyLoadServer {
     connector.setAcceptQueueSize(200);
     server.addConnector(connector);
 
+    // Port 8443: TLS + ALPN negotiating h2 or http/1.1 — used by h2load TLS scenarios.
+    // Loads the fixed self-signed benchmark cert from benchmarks/certs/ (two levels up from build/dist/).
+    SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+    sslContextFactory.setKeyStorePath("../../certs/keystore.p12");
+    sslContextFactory.setKeyStorePassword("benchmark");
+    sslContextFactory.setKeyStoreType("PKCS12");
+
+    HttpConfiguration httpsConfig = new HttpConfiguration(httpConfig);
+    httpsConfig.addCustomizer(new SecureRequestCustomizer());
+
+    // ALPN negotiation: advertises h2 (preferred) and http/1.1.
+    ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory();
+    alpn.setDefaultProtocol("h2");
+
+    HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory(httpsConfig);
+    HttpConnectionFactory https1 = new HttpConnectionFactory(httpsConfig);
+    SslConnectionFactory ssl = new SslConnectionFactory(sslContextFactory, alpn.getProtocol());
+
+    ServerConnector tlsConnector = new ServerConnector(server, ssl, alpn, h2, https1);
+    tlsConnector.setPort(8443);
+    tlsConnector.setAcceptQueueSize(200);
+    server.addConnector(tlsConnector);
+
     server.setHandler(new LoadHandler());
     server.start();
-    System.out.println("Jetty server started on port 8080");
+    System.out.println("Jetty server started on port 8080 (h2c) and port 8443 (TLS+ALPN h2)");
     server.join();
   }
 

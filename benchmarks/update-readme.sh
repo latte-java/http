@@ -277,15 +277,31 @@ if jq -e '.results[] | select(.scenario == "h2-high-concurrency" and .tool == "h
   HAS_H2_HC=true
 fi
 
+HAS_H2_TLS_HELLO=false
+if jq -e '.results[] | select(.scenario == "h2-tls-hello" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+  HAS_H2_TLS_HELLO=true
+fi
+
+HAS_H2_TLS_HC=false
+if jq -e '.results[] | select(.scenario == "h2-tls-high-concurrency" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+  HAS_H2_TLS_HC=true
+fi
+
 H2_FILE="$(mktemp)"
 trap 'rm -f "${H1_FILE}" "${H2_FILE}"' EXIT
 
-if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" ]]; then
+if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" || "${HAS_H2_TLS_HELLO}" == "true" || "${HAS_H2_TLS_HC}" == "true" ]]; then
   H2_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-hello" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
   [[ -z "${H2_SELF_RPS}" || "${H2_SELF_RPS}" == "null" ]] && H2_SELF_RPS="0"
 
   H2_HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-high-concurrency" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
   [[ -z "${H2_HC_SELF_RPS}" || "${H2_HC_SELF_RPS}" == "null" ]] && H2_HC_SELF_RPS="0"
+
+  H2_TLS_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-tls-hello" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+  [[ -z "${H2_TLS_SELF_RPS}" || "${H2_TLS_SELF_RPS}" == "null" ]] && H2_TLS_SELF_RPS="0"
+
+  H2_TLS_HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-tls-high-concurrency" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+  [[ -z "${H2_TLS_HC_SELF_RPS}" || "${H2_TLS_HC_SELF_RPS}" == "null" ]] && H2_TLS_HC_SELF_RPS="0"
 
   {
     echo "### HTTP/2 (h2load)"
@@ -304,6 +320,25 @@ if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" ]]; then
       generate_h2_table "h2-high-concurrency" "${H2_HC_SELF_RPS}"
     fi
 
+    if [[ "${HAS_H2_TLS_HELLO}" == "true" ]]; then
+      echo ""
+      echo "#### h2-tls-hello (TLS+ALPN, 1 connection × 100 streams)"
+      echo ""
+      generate_h2_table "h2-tls-hello" "${H2_TLS_SELF_RPS}"
+    fi
+
+    if [[ "${HAS_H2_TLS_HC}" == "true" ]]; then
+      echo ""
+      echo "#### h2-tls-high-concurrency (TLS+ALPN, 10 connections × 100 streams each)"
+      echo ""
+      generate_h2_table "h2-tls-high-concurrency" "${H2_TLS_HC_SELF_RPS}"
+    fi
+
+    if [[ "${HAS_H2_TLS_HELLO}" == "true" || "${HAS_H2_TLS_HC}" == "true" ]]; then
+      echo ""
+      echo "_TLS scenarios use a self-signed certificate at \`benchmarks/certs/server.crt\` (benchmark fixture only). All four servers terminate TLS and use ALPN to negotiate h2._"
+    fi
+
     echo ""
     echo "_JDK HttpServer does not support HTTP/2 and is excluded from h2 results._"
     echo ""
@@ -314,7 +349,7 @@ if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" ]]; then
     echo "To reproduce (requires \`brew install nghttp2\`):"
     echo '```bash'
     echo "cd benchmarks"
-    echo "./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency"
+    echo "./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency,h2-tls-hello,h2-tls-high-concurrency"
     echo "./update-readme.sh"
     echo '```'
   } > "${H2_FILE}"
