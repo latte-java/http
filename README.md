@@ -209,19 +209,19 @@ cd benchmarks
 
 | Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |      208,621 |      0 |              0.45 |              1.48 |        100.0% |
-| Jetty         |       27,191 | 1011316 |              0.42 |              1.38 |         13.0% |
-| Netty         |      224,840 |      0 |              0.42 |              1.59 |        107.7% |
-| Apache Tomcat |       48,976 |      0 |              2.03 |              4.96 |         23.4% |
+| Latte http    |      260,790 |      0 |              0.37 |              1.21 |        100.0% |
+| Jetty         |       21,053 | 9753914 |              0.34 |              1.20 |          8.0% |
+| Netty         |      225,270 |      0 |              0.41 |              1.20 |         86.3% |
+| Apache Tomcat |       78,582 |      0 |              1.26 |              3.05 |         30.1% |
 
 #### h2-high-concurrency (10 connections × 100 streams each)
 
 | Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |      369,994 |     13 |              2.75 |             26.85 |        100.0% |
-| Jetty         |       85,130 | 1954545 |              2.31 |             18.63 |         23.0% |
-| Netty         |      768,319 |      0 |              1.32 |              9.53 |        207.6% |
-| Apache Tomcat |      140,423 |      0 |              6.61 |             37.43 |         37.9% |
+| Latte http    |      428,605 |     74 |              2.29 |             14.85 |        100.0% |
+| Jetty         |      128,338 | 13649991 |              1.65 |             14.19 |         29.9% |
+| Netty         |      533,267 |      0 |              1.80 |             13.26 |        124.4% |
+| Apache Tomcat |      153,702 |      0 |              5.86 |             27.30 |         35.8% |
 
 _JDK HttpServer does not support HTTP/2 and is excluded from h2 results._
 
