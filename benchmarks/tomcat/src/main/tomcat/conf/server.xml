@@ -39,8 +39,8 @@
        protocol wired here causes Tomcat to advertise "h2" and "http/1.1" via ALPN during the TLS
        handshake. h2load TLS scenarios target this port.
 
-       Cert paths are relative to catalina.home — at runtime that is build/dist/tomcat/apache-tomcat,
-       so ../../.. walks up to the benchmarks/ directory and certs/ is under that.
+       Cert paths are relative to catalina.home — at runtime that is benchmarks/tomcat/build/dist/tomcat/apache-tomcat,
+       so ../../../../.. walks up to the benchmarks/ directory and certs/ is under that.
      -->
     <Connector port="8443"
                protocol="org.apache.coyote.http11.Http11Nio2Protocol"
@@ -57,8 +57,8 @@
                maxThreads="200"
                URIEncoding="UTF-8">
       <SSLHostConfig>
-        <Certificate certificateFile="${catalina.home}/../../../certs/server.crt"
-                     certificateKeyFile="${catalina.home}/../../../certs/server.key"
+        <Certificate certificateFile="${catalina.home}/../../../../../certs/server.crt"
+                     certificateKeyFile="${catalina.home}/../../../../../certs/server.key"
                      type="RSA"/>
       </SSLHostConfig>
       <UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol"/>
