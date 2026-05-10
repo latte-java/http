@@ -174,10 +174,10 @@ All servers implement the same request handler that reads the request body and r
 
 | Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |       87,075 |            0 |              1.34 |             12.86 |        100.0% |
-| Jetty          |      107,526 |            0 |              1.35 |             17.84 |        123.4% |
-| Netty          |      104,461 |            0 |              3.02 |             77.25 |        119.9% |
-| Apache Tomcat  |      102,208 |            0 |              1.02 |              6.32 |        117.3% |
+| Latte http     |      110,989 |            0 |              0.99 |              7.34 |        100.0% |
+| Jetty          |      111,548 |            0 |              1.03 |              6.03 |        100.5% |
+| Netty          |      114,546 |            0 |              0.94 |              5.52 |        103.2% |
+| Apache Tomcat  |      109,330 |            0 |              1.01 |              7.49 |         98.5% |
 
 #### Under stress (1,000 concurrent connections)
 
@@ -190,7 +190,7 @@ All servers implement the same request handler that reads the request body and r
 
 _JDK HttpServer (`com.sun.net.httpserver`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._
 
-_Benchmark performed 2026-05-09 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
+_Benchmark performed 2026-05-10 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
 _OS: macOS 15.7.3._
 _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 
@@ -225,7 +225,7 @@ cd benchmarks
 
 _JDK HttpServer does not support HTTP/2 and is excluded from h2 results._
 
-_Benchmark performed 2026-05-09 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
+_Benchmark performed 2026-05-10 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
 _OS: macOS 15.7.3._
 _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 
