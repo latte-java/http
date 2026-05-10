@@ -149,7 +149,16 @@ stop_timer() {
   fi
   TIMER_ELAPSED=$(( SECONDS - TIMER_START ))
 }
-trap stop_timer EXIT
+cleanup_on_exit() {
+  stop_timer
+  # If set -e or a Ctrl+C aborts the script mid-scenario, stop_server is never called explicitly.
+  # Try to clean up whatever server PID is currently tracked.
+  if [[ -n "${SERVER_PID:-}" ]]; then
+    kill -- -"${SERVER_PID}" 2>/dev/null || kill "${SERVER_PID}" 2>/dev/null || true
+    kill -9 -- -"${SERVER_PID}" 2>/dev/null || kill -9 "${SERVER_PID}" 2>/dev/null || true
+  fi
+}
+trap cleanup_on_exit EXIT
 
 # --- Banner ---
 
@@ -365,24 +374,33 @@ run_h2load_benchmark() {
 
   start_timer "[h2load] ${server}/${scenario}${trial_label}"
 
-  # h2-tls-* scenarios go over TLS+ALPN on port 8443 with the benchmark cert; cleartext h2c uses port 8080.
-  local h2load_url h2load_extra_args=""
+  # h2-tls-* scenarios go over TLS+ALPN on port 8443; cleartext h2c uses port 8080.
+  # h2load uses SSL_VERIFY_NONE by default for client TLS — no flag needed to accept the
+  # self-signed benchmark cert. (--ca-file does not exist on h2load.)
+  local h2load_url
   if [[ "${scenario}" == h2-tls-* ]]; then
     h2load_url="https://127.0.0.1:8443${endpoint}"
-    h2load_extra_args="--ca-file=${SCRIPT_DIR}/certs/server.crt"
   else
     h2load_url="http://127.0.0.1:8080${endpoint}"
   fi
 
-  local h2load_output
+  local h2load_output h2load_exit
+  set +e
   h2load_output="$(h2load \
     --duration="${DURATION_SECS}" \
     --clients="${connections}" \
     --max-concurrent-streams="${streams}" \
     --threads="${threads}" \
-    ${h2load_extra_args} \
     "${h2load_url}" 2>&1)"
+  h2load_exit=$?
+  set -e
   stop_timer
+
+  if [[ ${h2load_exit} -ne 0 ]]; then
+    echo "    h2load exited ${h2load_exit}; output:"
+    echo "${h2load_output}" | sed 's/^/      /'
+    # Don't bubble up — leave parsing to record zero metrics; the outer cleanup will still kill the server.
+  fi
 
   # Parse h2load text output.
   # h2load summary line: "finished in Xs, NNN.NN req/s, ..." -> rps
