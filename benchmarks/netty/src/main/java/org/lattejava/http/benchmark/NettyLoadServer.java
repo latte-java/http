@@ -70,9 +70,9 @@ public class NettyLoadServer {
     EventLoopGroup workerGroup = new NioEventLoopGroup();
 
     // TLS+ALPN SslContext: load the fixed benchmark self-signed cert/key from benchmarks/certs/.
-    // Path is relative to the working directory (build/dist when launched by start.sh).
-    File certFile = new File("../../certs/server.crt");
-    File keyFile = new File("../../certs/server.key");
+    // start.sh runs from build/dist, so we walk up: dist → build → netty → benchmarks → certs.
+    File certFile = new File("../../../certs/server.crt");
+    File keyFile = new File("../../../certs/server.key");
     SslContext sslCtx = SslContextBuilder.forServer(certFile, keyFile)
                                          .sslProvider(SslProvider.JDK)
                                          .applicationProtocolConfig(new ApplicationProtocolConfig(

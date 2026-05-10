@@ -55,9 +55,10 @@ public class JettyLoadServer {
     server.addConnector(connector);
 
     // Port 8443: TLS + ALPN negotiating h2 or http/1.1 — used by h2load TLS scenarios.
-    // Loads the fixed self-signed benchmark cert from benchmarks/certs/ (two levels up from build/dist/).
+    // Loads the fixed self-signed benchmark cert from benchmarks/certs/.
+    // start.sh runs from build/dist, so we walk up: dist → build → jetty → benchmarks → certs.
     SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-    sslContextFactory.setKeyStorePath("../../certs/keystore.p12");
+    sslContextFactory.setKeyStorePath("../../../certs/keystore.p12");
     sslContextFactory.setKeyStorePassword("benchmark");
     sslContextFactory.setKeyStoreType("PKCS12");
 

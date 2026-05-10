@@ -39,11 +39,10 @@ public class Main {
     var outputFile = setupOutput();
     var instrumenter = new ThreadSafeCountingInstrumenter();
 
-    // TLS listener on 8443: load the benchmark self-signed cert/key from the certs/ directory adjacent to this JAR.
-    // The path resolves relative to the working directory (build/dist when launched by start.sh, which is run from
-    // the server directory by run-benchmarks.sh — so ../../certs/ walks up to benchmarks/certs/).
-    String certPem = Files.readString(Path.of("../../certs/server.crt"));
-    String keyPem = Files.readString(Path.of("../../certs/server.key"));
+    // TLS listener on 8443: load the benchmark self-signed cert/key from benchmarks/certs/.
+    // start.sh runs from build/dist, so we walk up: dist → build → self → benchmarks → certs.
+    String certPem = Files.readString(Path.of("../../../certs/server.crt"));
+    String keyPem = Files.readString(Path.of("../../../certs/server.key"));
 
     try (HTTPServer ignore = new HTTPServer().withHandler(new LoadHandler())
                                              .withCompressByDefault(false)
