@@ -153,6 +153,67 @@ public class HTTPRequestTest {
   }
 
   @Test
+  public void getReconstructedURL() {
+    // Path only, no query string
+    HTTPRequest request = new HTTPRequest();
+    request.setScheme("https");
+    request.setHost("acme.com");
+    request.setPort(443);
+    request.setPath("/foo/bar");
+    assertEquals(request.getReconstructedURL(), "https://acme.com/foo/bar");
+
+    // Path plus query string
+    HTTPRequest withQuery = new HTTPRequest();
+    withQuery.setScheme("https");
+    withQuery.setHost("acme.com");
+    withQuery.setPort(443);
+    withQuery.setPath("/foo/bar?a=1&b=2");
+    assertEquals(withQuery.getReconstructedURL(), "https://acme.com/foo/bar?a=1&b=2");
+
+    // Empty query string produces no trailing question mark
+    HTTPRequest emptyQuery = new HTTPRequest();
+    emptyQuery.setScheme("https");
+    emptyQuery.setHost("acme.com");
+    emptyQuery.setPort(443);
+    emptyQuery.setPath("/foo/bar?");
+    assertEquals(emptyQuery.getReconstructedURL(), "https://acme.com/foo/bar");
+
+    // Default path when none is set
+    HTTPRequest root = new HTTPRequest();
+    root.setScheme("http");
+    root.setHost("acme.com");
+    root.setPort(80);
+    assertEquals(root.getReconstructedURL(), "http://acme.com/");
+
+    // Non-default port is included
+    HTTPRequest custom = new HTTPRequest();
+    custom.setScheme("http");
+    custom.setHost("acme.com");
+    custom.setPort(8080);
+    custom.setPath("/path?x=y");
+    assertEquals(custom.getReconstructedURL(), "http://acme.com:8080/path?x=y");
+
+    // Proxy headers are honored
+    HTTPRequest proxied = new HTTPRequest();
+    proxied.setScheme("http");
+    proxied.setHost("internal");
+    proxied.setPort(8080);
+    proxied.setPath("/dashboard?tab=main");
+    proxied.setHeader(HTTPValues.Headers.XForwardedProto, "https");
+    proxied.setHeader(HTTPValues.Headers.XForwardedHost, "acme.com");
+    proxied.setHeader(HTTPValues.Headers.XForwardedPort, "443");
+    assertEquals(proxied.getReconstructedURL(), "https://acme.com/dashboard?tab=main");
+
+    // Invalid scheme propagates the IllegalArgumentException from getBaseURL()
+    HTTPRequest bad = new HTTPRequest();
+    bad.setScheme("ftp");
+    bad.setHost("acme.com");
+    bad.setPort(21);
+    bad.setPath("/file");
+    expectThrows(IllegalArgumentException.class, bad::getReconstructedURL);
+  }
+
+  @Test
   public void hostHeaderPortHandling() {
     // positive cases
     assertURLs("http", "myhost", "myhost", 80, "http://myhost");
