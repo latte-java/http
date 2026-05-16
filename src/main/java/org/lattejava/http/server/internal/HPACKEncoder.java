@@ -5,6 +5,7 @@
 package org.lattejava.http.server.internal;
 
 import module java.base;
+import module org.lattejava.http;
 
 /**
  * RFC 7541 HPACK encoder. Encodes an ordered list of (name, value) pairs to a HEADERS+CONTINUATION block fragment.
@@ -24,7 +25,7 @@ public class HPACKEncoder {
   public byte[] encode(List<HPACKDynamicTable.HeaderField> fields) {
     var out = new ByteArrayOutputStream();
     for (var f : fields) {
-      String lcName = f.name().toLowerCase(Locale.ROOT);
+      String lcName = HTTPTools.asciiLowerCase(f.name());
       // 1. Exact match in static table → indexed
       int staticExact = HPACKStaticTable.indexFullMatch(f.name(), f.value());
       if (staticExact != -1) {

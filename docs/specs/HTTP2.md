@@ -328,6 +328,102 @@ Throughput is noise-level flat (both within normal run-to-run variance for a 5s 
 - `StringLatin1.hashCode()` at 9.5% CPU — header-map lookups; consider interning or pre-hashing common header names
 - `Socket.getRemoteSocketAddress()` per-request allocation (1% alloc events) — could be cached on `HTTPRequest` construction
 
+### Performance findings (2026-05-10): empty-body request fast-path
+
+**Run config:** h2load against `h2-high-concurrency` (4 threads / 10 connections / 100 streams per connection, h2c), 20 s JFR window inside a 30 s run. Single-trial JFR comparison for the allocation deltas; rigorous 30 s × 3 matrix for the throughput numbers in the README. Machine: Apple M4, 10 cores, 24 GB RAM, macOS 15.7.3, JDK 25.0.2.
+
+**Hypothesis check.** Initial profiling was aimed at the deferred "DATA frame payload pooling" item — the assumption being that `HTTP2OutputStream.flushAndFragment`'s per-DATA-frame `new byte[chunk]` allocations dominated the wire path. JFR weight-summed `byte[]` allocations told a different story:
+
+| Rank | byte[] alloc site (baseline) | Bytes / 20 s |
+|---|---|---:|
+| 1 | `InputStream.readNBytes(int)` ← `readAllBytes()` ← **`LoadHandler.handleHello`** | **116 GB** |
+| 2 | `StringLatin1.toLowerCase` | 1.4 GB |
+| 3 | `Arrays.copyOf` ← `ByteArrayOutputStream.toByteArray` | 1.3 GB |
+| 4 | `ByteArrayOutputStream.<init>` | 0.97 GB |
+| 5 | `HTTP2OutputStream.flushAndFragment` | 0.12 GB |
+
+The dominant site is the benchmark handler calling `is.readAllBytes()` on every request, which (for bodyless GETs) drops into `InputStream.readNBytes(Integer.MAX_VALUE)` — the JDK default allocates a 16 KB read buffer, calls `read()`, gets `-1`, throws the buffer away. Roughly 1000× the magnitude of `flushAndFragment`.
+
+**Audit of the four h2 benchmark handlers** showed Netty's `handleHello()` never touches the request body (it builds a `FullHttpResponse` directly), while Jetty / Tomcat / jdk-httpserver / Latte all call `is.readAllBytes()`. The library-side improvement is to make the drain cheap on Latte's stream rather than asymmetrically patch the benchmark handler, since real applications are likely to read the body even when it is empty.
+
+**Fix.** New singleton `org.lattejava.http.server.io.EmptyHTTPInputStream` and a guarded fast-path in `HTTP2Connection.spawnRequestHandler`: when the HEADERS frame carries `END_STREAM` (i.e. no body will follow on this stream), skip the per-stream `ArrayBlockingQueue<byte[]>`, the `HTTP2InputStream`, the `PushbackInputStream`, and the wrapping `HTTPInputStream` entirely. The handler sees a zero-allocation empty input stream whose `readAllBytes()` / `readNBytes(int)` return a shared empty `byte[]` constant. A stale DATA frame on such a stream was already handled by `handleData` returning silently when the pipe is missing.
+
+**Allocation delta (h2-high-concurrency, 20 s JFR @ ~426K req/s).**
+
+| Object class — total | Before | After | Delta |
+|---|---:|---:|---:|
+| `byte[]` | 121.9 GB | **7.2 GB** | **−94%** |
+| `org.lattejava.http.server.internal.HTTP2Connection$LazyHeaderOutputStream` | 474 MB | 414 MB | −13% (per-stream, unrelated path) |
+| `java.util.concurrent.ArrayBlockingQueue` | 471 MB | not in top 20 | per-stream pipe eliminated for bodyless requests |
+| `org.lattejava.http.server.io.HTTPInputStream` | 617 MB | not in top 20 | wrapper allocation eliminated for bodyless requests |
+
+The dominant `readNBytes(int)` site collapses from 116 GB / 20 s to not in the top 12. JFR file size for the same workload drops 75% (16 MB → 4 MB), confirming the broader event-volume reduction.
+
+**Throughput delta.** Allocation pressure was *not* the throughput bottleneck on these scenarios — eliminating 94% of `byte[]` allocations did not move per-trial throughput meaningfully on either scenario:
+
+| Scenario (best of 3, h2c) | Baseline (2026-05-09) | After fix (2026-05-11) | Delta |
+|---|---:|---:|---:|
+| `h2-hello` (1c × 100s) | 260,790 req/s | 251,444 req/s | −3.6% (within run-to-run noise) |
+| `h2-high-concurrency` (10c × 100s) | 428,605 req/s | 432,823 req/s | +1.0% |
+
+Run-to-run noise on this machine over the same two-day window is large — Netty's `h2-hello` jumped from 225,270 req/s to 327,940 req/s without any code change to Netty — so the across-run "vs Netty" comparison is unreliable. The within-run conclusion is that the throughput bottleneck on these scenarios is elsewhere (frame serialization / HPACK / socket I/O), and the value of this change is GC-pressure / tail-latency under sustained load, not steady-state RPS.
+
+**Verification.** `latte test --excludePerformance --excludeTimeouts` → 2887/2887 pass. `h2spec generic` (44 tests) → 41 pass, 3 fail (pre-existing failures: CONTINUATION + POST-with-trailers; same set before and after the change).
+
+**Scope and follow-ups.** The fast-path triggers only on HTTP/2 HEADERS frames carrying `END_STREAM`. HTTP/1.1 still pays the `readAllBytes()` toll on bodyless GETs — a similar empty-stream singleton swap is possible in `HTTP1Worker` and worth doing when the next h1.1 pass happens. The deferred "DATA frame payload pooling" item is left intact in the list above; the JFR data shows it is now a single-digit-percent contributor and lower-priority than other candidates.
+
+### Performance findings (2026-05-15): HTTP/1.1 fast-path, HPACK Huffman decoder, toLowerCase fast-path
+
+**Run config:** h2load `h2-high-concurrency` (4 threads / 10 connections / 100 streams), 20 s JFR window inside a 30 s run, `settings=profile`. Single-trial JFR for the CPU-share comparison; rigorous 30 s × 3 matrix for the throughput numbers. Machine: Apple M4, 10 cores, 24 GB RAM, macOS 15.7.3, JDK 25.0.2.
+
+**Hypothesis check.** With the byte[] allocation pressure from the 2026-05-10 fix gone (−94% on this workload), throughput on `h2-high-concurrency` did not move, so allocation was not the throughput bottleneck. A CPU profile of the post-fix server identified the actual top consumers:
+
+| Rank | Method (leaf) | CPU share | Verdict |
+|---|---|---:|---|
+| 1 | `HPACKHuffman.decode(byte[])` | **15.0%** | O(256 × N) linear scan over symbols per output byte |
+| 2 | `Thread.interrupted()` | 7.4% | virtual-thread machinery; hard to attack |
+| 3 | `StringLatin1.toLowerCase(...)` | **6.3%** | `HTTPRequest.addHeader` (54%) + `HPACKEncoder.encode` (28%) — toLowerCase always allocates a fresh char[] |
+| 4 | `SocketDispatcher.read0` | 5.4% | native socket reads |
+| 5 | `HPACKEncoder.encode(...)` | 3.7% | response-header encoding |
+
+The deferred "DATA frame payload pooling" Plan F item appears at #20 (1.3% CPU) — confirmed lower-priority. The Plan F "HPACK Huffman encoding on the encode path" item is orthogonal (it would add encode-side CPU for wire-byte savings, not remove decode-side CPU).
+
+**Fixes applied (three independent changes on the same branch).**
+
+1. **HTTP/1.1 empty-body fast-path** (`HTTP1Worker`). Extends the 2026-05-10 HTTP/2 singleton fast-path to HTTP/1.1: when `request.hasBody()` is false after preamble parsing, install `EmptyHTTPInputStream.INSTANCE` instead of constructing the `HTTPInputStream` wrapper. The downstream `drain()` call (line 300) is guarded by a null-check since `HTTPInputStream.drain()` was already a no-op for bodyless requests.
+
+2. **Table-driven HPACK Huffman decoder** (`HPACKHuffman.decode`). Replaces the O(256 × N) linear-scan decoder with a 4-bit-nibble FSM. The transition table (`stateCount × 16` entries, ~256 states for the HPACK code) is built at class load from the existing `CODES[]` / `LENGTHS[]` arrays and the trie they imply. Each table entry packs `(nextState << 16) | flags | emittedByte` into one int; flags carry `DECODE_SYM` (transition emits a byte) and `DECODE_FAIL` (invalid transition — EOS leaf seen). End-of-input padding validation is preserved via a precomputed `DECODE_ACCEPT[]` table marking root plus the first 7 nodes on the all-1s EOS prefix path; padding >7 bits is rejected as before. The encoder is unchanged.
+
+3. **toLowerCase ASCII fast-path** (`HTTPTools.asciiLowerCase`). New helper: scans the string once; returns it unchanged when no uppercase ASCII and no non-ASCII is present, otherwise falls back to `String.toLowerCase(Locale.ROOT)`. Applied at `HTTPRequest.addHeader{,s}` (54% of `toLowerCase` samples) and `HPACKEncoder.encode` (28%). Semantically identical to the old code on every input — well-formed or malformed.
+
+**CPU delta (h2-high-concurrency, 20 s single-trial JFR, post-fix machine state).**
+
+| Method (leaf) | Before (2026-05-10) | After (2026-05-15) | Delta |
+|---|---:|---:|---:|
+| `HPACKHuffman.decode` | 15.0% | **not in top 20** | ≈ −15 pts |
+| `StringLatin1.toLowerCase` | 6.3% | 1.6% | −4.7 pts |
+| `HTTPTools.asciiLowerCase` (new) | — | 3.3% | new — the fast-path helper itself |
+| Combined header-normalisation CPU | 6.3% | 4.9% | −1.4 pts (the residual is genuinely-needed lowercasing) |
+
+Combined ~16 percentage points of CPU returned to other work on this profile.
+
+**Throughput delta — confounded by thermal throttling.** The rigorous 30 s × 3 matrix on 2026-05-15 ran with the machine in a different thermal state than the 2026-05-11 baseline. Independent evidence:
+
+| Server | h2-hello best (baseline → today) | h2-high-concurrency best (baseline → today) |
+|---|---|---|
+| self | 251,444 → 264,205 (+5%) | 432,823 → **340,596 (−21%)** |
+| jetty | 21,381 → 10,703 (−50%) | 128,338 → 109,736 (−15%) |
+| tomcat | 70,654 → 44,684 (−37%) | 153,702 → 98,495 (−36%) |
+| netty | 327,940 → 241,973 (−26%) | 630,553 → 569,317 (−10%) |
+
+Jetty and Tomcat dropped 37–50% with no code change to either. Self's three-trial per-trial RPS decreased monotonically across the matrix (264K → 238K → 210K, then 341K → 329K → 317K) — the textbook thermal-throttling signature, also visible in monotonically-rising average latencies. The earlier same-day single-trial JFR run on a cool machine measured self/h2-high-concurrency at 415K req/s — back inside the 2026-05-11 baseline noise band.
+
+Conclusion: the CPU profile is the reliable indicator for this fix set. Re-run the rigorous matrix on a clean thermal state before quoting headline throughput numbers in the README.
+
+**Verification.** `latte test --excludePerformance --excludeTimeouts` → 2887/2887 pass (one flaky `HTTP2RawFrameTest` retry; passes consistently on re-run). Existing `HPACKHuffmanTest` (encode/decode round-trip for RFC 7541 Appendix C vectors plus all printable ASCII) passes unchanged.
+
+**Scope and follow-ups.** The decoder change is hot-path on every inbound HEADERS block (each h2 request). The toLowerCase fast-path is hot on every header name on add/lookup. Both apply to HTTP/1.1 and HTTP/2. Remaining Plan F items remain in the list above; with `HPACKHuffman.decode` and toLowerCase off the table, the next highest-leverage CPU sites are `SocketDispatcher.read0` (11.7% — likely a hard floor without changing the I/O model) and `ByteArrayOutputStream.ensureCapacity` (7.3% — appearing prominently in HPACK encode and `HPACKHuffman.encode`).
+
 ---
 
 ## Bug ledger

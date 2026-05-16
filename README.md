@@ -209,19 +209,35 @@ cd benchmarks
 
 | Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |      260,790 |      0 |              0.37 |              1.21 |        100.0% |
-| Jetty         |       21,053 | 9753914 |              0.34 |              1.20 |          8.0% |
-| Netty         |      225,270 |      0 |              0.41 |              1.20 |         86.3% |
-| Apache Tomcat |       78,582 |      0 |              1.26 |              3.05 |         30.1% |
+| Latte http    |      244,586 |      0 |              0.39 |              1.20 |        100.0% |
+| Latte http    |      251,444 |      0 |              0.38 |              1.21 |        102.8% |
+| Latte http    |      242,900 |      0 |              0.39 |              1.13 |         99.3% |
+| Jetty         |       20,969 | 9453051 |              0.36 |              1.44 |          8.5% |
+| Jetty         |       21,381 | 8822642 |              0.36 |              0.82 |          8.7% |
+| Jetty         |       20,604 | 9150486 |              0.37 |              1.07 |          8.4% |
+| Netty         |      317,380 |      0 |              0.31 |              0.95 |        129.7% |
+| Netty         |      327,940 |      0 |              0.29 |              0.48 |        134.0% |
+| Netty         |      322,483 |      0 |              0.29 |              0.37 |        131.8% |
+| Apache Tomcat |       70,478 |      0 |              1.42 |              3.24 |         28.8% |
+| Apache Tomcat |       70,654 |      0 |              1.41 |              2.84 |         28.8% |
+| Apache Tomcat |       67,424 |      0 |              1.47 |              2.91 |         27.5% |
 
 #### h2-high-concurrency (10 connections × 100 streams each)
 
 | Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |      428,605 |     74 |              2.29 |             14.85 |        100.0% |
-| Jetty         |      128,338 | 13649991 |              1.65 |             14.19 |         29.9% |
-| Netty         |      533,267 |      0 |              1.80 |             13.26 |        124.4% |
-| Apache Tomcat |      153,702 |      0 |              5.86 |             27.30 |         35.8% |
+| Latte http    |      432,823 |     62 |              2.25 |             15.07 |        100.0% |
+| Latte http    |      428,121 |     23 |              2.05 |             14.82 |         98.9% |
+| Latte http    |      431,073 |     22 |              2.26 |             14.50 |         99.5% |
+| Jetty         |      131,307 | 14151916 |              1.81 |             18.61 |         30.3% |
+| Jetty         |      135,776 | 13405081 |              1.86 |             18.85 |         31.3% |
+| Jetty         |      143,864 | 12501718 |              1.81 |             19.44 |         33.2% |
+| Netty         |      546,633 |      0 |              5.67 |              5.40 |        126.2% |
+| Netty         |      630,553 |      0 |              1.33 |              8.80 |        145.6% |
+| Netty         |      481,456 |      0 |              2.00 |             14.50 |        111.2% |
+| Apache Tomcat |      145,292 |      0 |              6.28 |             28.73 |         33.5% |
+| Apache Tomcat |      149,148 |      0 |              5.96 |             21.90 |         34.4% |
+| Apache Tomcat |      152,126 |      0 |              5.88 |             20.29 |         35.1% |
 
 #### h2-tls-hello (TLS+ALPN, 1 connection × 100 streams)
 
@@ -245,7 +261,7 @@ _TLS scenarios use a self-signed certificate at `benchmarks/certs/server.crt` (b
 
 _JDK HttpServer does not support HTTP/2 and is excluded from h2 results._
 
-_Benchmark performed 2026-05-10 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
+_Benchmark performed 2026-05-11 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
 _OS: macOS 15.7.3._
 _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 

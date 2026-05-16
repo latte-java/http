@@ -27,6 +27,29 @@ public final class HTTPTools {
   private static Logger logger;
 
   /**
+   * Lowercases an HTTP header-name-style string with no allocation when the input is already
+   * lowercase ASCII. {@link String#toLowerCase(Locale)} always copies, even when no transformation
+   * is needed; this scan-once helper returns the input unchanged in the common case.
+   *
+   * <p>Falls back to {@code String.toLowerCase(Locale.ROOT)} when any uppercase ASCII or non-ASCII
+   * character is present, so observable behavior is identical to the existing code for both
+   * well-formed and malformed inputs.
+   *
+   * @param s The header name (or any ASCII-token string) to lowercase.
+   * @return {@code s} unchanged when it is already lowercase ASCII; otherwise the lowercased form.
+   */
+  public static String asciiLowerCase(String s) {
+    int len = s.length();
+    for (int i = 0; i < len; i++) {
+      char c = s.charAt(i);
+      if ((c >= 'A' && c <= 'Z') || c > 0x7F) {
+        return s.toLowerCase(Locale.ROOT);
+      }
+    }
+    return s;
+  }
+
+  /**
    * Return the maximum request body size for the requested content type.
    *
    * @param contentType        the content-type of the request

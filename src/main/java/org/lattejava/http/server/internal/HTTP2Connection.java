@@ -8,6 +8,7 @@ import module java.base;
 import module org.lattejava.http;
 
 import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.server.io.EmptyHTTPInputStream;
 
 /**
  * Per-connection HTTP/2 state and lifecycle. Owns the socket I/O, frame codec, HPACK state, and stream registry.
@@ -396,21 +397,19 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     }
     streams.put(streamId, stream);
 
-    ArrayBlockingQueue<byte[]> pipe = new ArrayBlockingQueue<>(16);
-    streamPipes.put(streamId, pipe);
-    HTTP2InputStream inputStream = new HTTP2InputStream(pipe);
-    // Pass -1 for unlimited content length. Integer.MAX_VALUE would cause an integer overflow in
-    // HTTPInputStream's boundary check: maximumContentLength - bytesRead + 1 overflows to Integer.MIN_VALUE.
-    request.setInputStream(new HTTPInputStream(configuration, request,
-        new PushbackInputStream(inputStream, instrumenter), -1));
-
-    // For END_STREAM-on-HEADERS (no body), pre-populate the EOF sentinel so the handler's input read returns -1 immediately.
     if ((flags & HTTP2Frame.FLAG_END_STREAM) != 0) {
-      try {
-        pipe.put(HTTP2InputStream.eofSentinel());
-      } catch (InterruptedException ignore) {
-        Thread.currentThread().interrupt();
-      }
+      // No body will follow. Skip the per-stream pipe, HTTP2InputStream, PushbackInputStream, and HTTPInputStream
+      // allocations entirely — the handler sees a zero-allocation empty stream. Any DATA frame that arrives after
+      // END_STREAM-on-HEADERS is a client protocol violation; handleData handles a missing pipe by ignoring per §6.1.
+      request.setInputStream(EmptyHTTPInputStream.INSTANCE);
+    } else {
+      ArrayBlockingQueue<byte[]> pipe = new ArrayBlockingQueue<>(16);
+      streamPipes.put(streamId, pipe);
+      HTTP2InputStream inputStream = new HTTP2InputStream(pipe);
+      // Pass -1 for unlimited content length. Integer.MAX_VALUE would cause an integer overflow in
+      // HTTPInputStream's boundary check: maximumContentLength - bytesRead + 1 overflows to Integer.MIN_VALUE.
+      request.setInputStream(new HTTPInputStream(configuration, request,
+          new PushbackInputStream(inputStream, instrumenter), -1));
     }
 
     HTTPResponse response = new HTTPResponse();

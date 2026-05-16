@@ -16,6 +16,24 @@ public final class HPACKHuffman {
   private static final int[] CODES = new int[257];
   private static final int[] LENGTHS = new int[257];
 
+  // 4-bit nibble FSM for the decoder. Built at class load from CODES[]/LENGTHS[] below.
+  //
+  // Packing per entry (one int):
+  //   bits  0..7  : emitted byte value (valid iff DECODE_SYM bit is set)
+  //   bit   8     : DECODE_SYM     — this transition emits a byte
+  //   bit   9     : DECODE_FAIL    — invalid transition (encountered EOS leaf, or unreachable)
+  //   bits 16..31 : next state index
+  //
+  // State 0 is the root of the Huffman trie. Decoding consumes input one nibble at a time; per
+  // RFC 7541 §5.2, the minimum symbol length is 5 bits, so a single 4-bit nibble can emit at
+  // most one symbol.
+  private static final int DECODE_FAIL = 1 << 9;
+  private static final int DECODE_SYM = 1 << 8;
+  private static final int[] DECODE_TABLE;
+  // States accepted at end of input: root (no padding) plus the first 7 nodes on the all-1s
+  // EOS prefix path (valid Huffman padding is the leading bits of EOS and must be <8 bits).
+  private static final boolean[] DECODE_ACCEPT;
+
   static {
     // RFC 7541 Appendix B full table (symbol, hex code, bit length)
     CODES[  0] = 0x1ff8;       LENGTHS[  0] = 13;
@@ -278,44 +296,141 @@ public final class HPACKHuffman {
     CODES[256] = 0x3fffffff;   LENGTHS[256] = 30;
   }
 
+  // Build the 4-bit nibble FSM transition table from the CODES[]/LENGTHS[] above. Runs once at
+  // class load. Final HPACK Huffman trie has 256 internal nodes, well under the 65,536-state
+  // ceiling implied by 16-bit state indices.
+  static {
+    // Build the Huffman trie. Each internal node has two children indexed by the next bit.
+    TrieNode root = new TrieNode();
+    for (int sym = 0; sym < 257; sym++) {
+      int code = CODES[sym];
+      int len = LENGTHS[sym];
+      TrieNode cur = root;
+      for (int i = len - 1; i >= 0; i--) {
+        int bit = (code >>> i) & 1;
+        TrieNode next = cur.children[bit];
+        if (next == null) {
+          next = new TrieNode();
+          cur.children[bit] = next;
+        }
+        cur = next;
+      }
+      cur.symbol = sym;
+    }
+
+    // Enumerate internal-node states by BFS, root first.
+    ArrayList<TrieNode> states = new ArrayList<>();
+    states.add(root);
+    root.stateIndex = 0;
+    for (int i = 0; i < states.size(); i++) {
+      TrieNode n = states.get(i);
+      for (TrieNode c : n.children) {
+        if (c != null && c.symbol < 0 && c.stateIndex < 0) {
+          c.stateIndex = states.size();
+          states.add(c);
+        }
+      }
+    }
+
+    int stateCount = states.size();
+    int[] table = new int[stateCount * 16];
+    boolean[] accept = new boolean[stateCount];
+
+    // Mark the accepting states: root plus the first 7 nodes on the all-1s (EOS) path.
+    // Padding longer than 7 bits is rejected per RFC 7541 §5.2.
+    accept[0] = true;
+    TrieNode eosNode = root;
+    for (int b = 0; b < 7; b++) {
+      eosNode = eosNode.children[1];
+      if (eosNode == null || eosNode.symbol >= 0) break;
+      accept[eosNode.stateIndex] = true;
+    }
+
+    // Compute transitions for every (state, nibble) pair.
+    for (int s = 0; s < stateCount; s++) {
+      TrieNode start = states.get(s);
+      for (int nibble = 0; nibble < 16; nibble++) {
+        TrieNode cur = start;
+        int emitted = -1;
+        boolean fail = false;
+        for (int i = 3; i >= 0; i--) {
+          int bit = (nibble >>> i) & 1;
+          cur = cur.children[bit];
+          if (cur == null) {
+            fail = true;
+            break;
+          }
+          if (cur.symbol >= 0) {
+            if (cur.symbol == 256) {
+              // Encoder must never produce an explicit EOS symbol mid-stream.
+              fail = true;
+              break;
+            }
+            emitted = cur.symbol;
+            cur = root;
+          }
+        }
+        int entry;
+        if (fail) {
+          entry = DECODE_FAIL;
+        } else {
+          entry = (cur.stateIndex & 0xFFFF) << 16;
+          if (emitted >= 0) {
+            entry |= DECODE_SYM | (emitted & 0xFF);
+          }
+        }
+        table[s * 16 + nibble] = entry;
+      }
+    }
+
+    DECODE_TABLE = table;
+    DECODE_ACCEPT = accept;
+  }
+
   private HPACKHuffman() {}
 
   public static byte[] decode(byte[] input) {
-    var out = new ByteArrayOutputStream();
-    long acc = 0;
-    int bits = 0;
-    int i = 0;
-    outer:
-    while (i < input.length || bits >= 5) {
-      while (bits < 30 && i < input.length) {
-        acc = (acc << 8) | (input[i] & 0xFF);
-        bits += 8;
-        i++;
+    // Heuristic initial size: HPACK Huffman gains average ~20% compression on ASCII, so the
+    // decoded length is roughly 1.25× the encoded length. Round up to keep small headers in a
+    // single allocation; grow on demand for the rare oversize case.
+    byte[] out = new byte[Math.max(input.length + (input.length >> 2) + 8, 16)];
+    int outLen = 0;
+    int state = 0;
+    int[] table = DECODE_TABLE;
+
+    for (int i = 0; i < input.length; i++) {
+      int b = input[i] & 0xFF;
+
+      int entry = table[(state << 4) | (b >>> 4)];
+      if ((entry & DECODE_FAIL) != 0) {
+        throw new IllegalArgumentException("Invalid Huffman encoding");
       }
-      // Try to match a symbol from MSB of acc.
-      for (int sym = 0; sym < 256; sym++) {
-        int len = LENGTHS[sym];
-        if (len <= bits) {
-          int candidate = (int) ((acc >> (bits - len)) & ((1L << len) - 1));
-          if (candidate == CODES[sym]) {
-            out.write(sym);
-            bits -= len;
-            continue outer;
-          }
+      if ((entry & DECODE_SYM) != 0) {
+        if (outLen == out.length) {
+          out = Arrays.copyOf(out, out.length * 2);
         }
+        out[outLen++] = (byte) entry;
       }
-      // Could be padding (EOS prefix is all 1s). Verify remaining bits are all 1s.
-      if (bits > 0 && bits < 8) {
-        long padMask = (1L << bits) - 1;
-        long pad = acc & padMask;
-        if (pad != padMask) {
-          throw new IllegalArgumentException("Invalid Huffman padding (must be EOS prefix all-1s)");
+      state = entry >>> 16;
+
+      entry = table[(state << 4) | (b & 0xF)];
+      if ((entry & DECODE_FAIL) != 0) {
+        throw new IllegalArgumentException("Invalid Huffman encoding");
+      }
+      if ((entry & DECODE_SYM) != 0) {
+        if (outLen == out.length) {
+          out = Arrays.copyOf(out, out.length * 2);
         }
-        break;
+        out[outLen++] = (byte) entry;
       }
-      throw new IllegalArgumentException("Invalid Huffman encoding: cannot match symbol at bits remaining [" + bits + "]");
+      state = entry >>> 16;
     }
-    return out.toByteArray();
+
+    if (!DECODE_ACCEPT[state]) {
+      throw new IllegalArgumentException("Invalid Huffman padding (must be EOS prefix all-1s)");
+    }
+
+    return outLen == out.length ? out : Arrays.copyOf(out, outLen);
   }
 
   public static byte[] encode(byte[] input) {
@@ -337,5 +452,12 @@ public final class HPACKHuffman {
       out.write((int) (acc & 0xFF));
     }
     return out.toByteArray();
+  }
+
+  // Build-time only: Huffman trie node used to construct DECODE_TABLE.
+  private static final class TrieNode {
+    final TrieNode[] children = new TrieNode[2];
+    int stateIndex = -1;
+    int symbol = -1;
   }
 }

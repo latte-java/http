@@ -20,6 +20,7 @@ import module org.lattejava.http;
 
 import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.server.io.EmptyHTTPInputStream;
 
 /**
  * An HTTP worker that is a delegate Runnable to an {@link HTTPHandler}.
@@ -143,8 +144,17 @@ public class HTTP1Worker implements ClientConnection, Runnable {
         }
 
         int maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
-        httpInputStream = new HTTPInputStream(configuration, request, inputStream, maximumContentLength);
-        request.setInputStream(httpInputStream);
+        if (request.hasBody()) {
+          httpInputStream = new HTTPInputStream(configuration, request, inputStream, maximumContentLength);
+          request.setInputStream(httpInputStream);
+        } else {
+          // Bodyless requests (the GET/HEAD common case): give the handler a zero-allocation empty stream so
+          // readAllBytes() returns a shared empty byte[] instead of the JDK default's 16 KB-allocate-then-discard pattern.
+          // The drain step below is a no-op for these requests (HTTPInputStream.drain already short-circuits when hasBody()
+          // is false), so skipping the wrapper here is behaviour-preserving.
+          httpInputStream = null;
+          request.setInputStream(EmptyHTTPInputStream.INSTANCE);
+        }
 
         // Set the Connection response header as soon as possible
         // - This needs to occur after we have parsed the pre-amble so we can read the request headers
@@ -295,12 +305,15 @@ public class HTTP1Worker implements ClientConnection, Runnable {
         logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), workerState, soTimeout);
         socket.setSoTimeout(soTimeout);
 
-        // Drain the InputStream so we can complete this request
-        long startDrain = System.currentTimeMillis();
-        int drained = httpInputStream.drain();
-        if (drained > 0 && logger.isTraceEnabled()) {
-          long drainDuration = System.currentTimeMillis() - startDrain;
-          logger.trace("[{}] Drained [{}] bytes from the InputStream. Duration [{}] ms.", Thread.currentThread().threadId(), drained, drainDuration);
+        // Drain the InputStream so we can complete this request. Null when the request was bodyless and the
+        // EmptyHTTPInputStream singleton was installed above — nothing to drain in that case.
+        if (httpInputStream != null) {
+          long startDrain = System.currentTimeMillis();
+          int drained = httpInputStream.drain();
+          if (drained > 0 && logger.isTraceEnabled()) {
+            long drainDuration = System.currentTimeMillis() - startDrain;
+            logger.trace("[{}] Drained [{}] bytes from the InputStream. Duration [{}] ms.", Thread.currentThread().threadId(), drained, drainDuration);
+          }
         }
       }
     } catch (ConnectionClosedException e) {

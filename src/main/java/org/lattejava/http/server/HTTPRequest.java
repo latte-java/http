@@ -283,13 +283,13 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public void addHeader(String name, String value) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).add(value);
     decodeHeader(name, value);
   }
 
   public void addHeaders(String name, String... values) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).addAll(List.of(values));
 
     for (String value : values) {
@@ -298,7 +298,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   public void addHeaders(String name, Collection<String> values) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).addAll(values);
 
     for (String value : values) {
