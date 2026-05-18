@@ -543,8 +543,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   /**
    * Reads and returns the entire HTTP request body as a byte array. The body is read from the input stream the first
-   * time this is called and cached, subsequent calls return the same array. If there is no input stream, an empty
-   * array is returned. This is not thread-safe and may block until the client has sent the full body.
+   * time this is called and cached, subsequent calls return the same array. If there is no input stream, an empty array
+   * is returned. This is not thread-safe and may block until the client has sent the full body.
    *
    * <pre>{@code
    * HTTPRequest request = ...;

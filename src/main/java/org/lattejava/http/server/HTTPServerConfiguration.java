@@ -352,8 +352,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return Whether the server auto-emits an RFC 1123 {@code Date} header on every response. Defaults to true per
-   *     RFC 9110 §6.6.1.
+   * @return Whether the server auto-emits an RFC 1123 {@code Date} header on every response. Defaults to true per RFC
+   *     9110 §6.6.1.
    */
   public boolean isSendDateHeader() {
     return sendDateHeader;

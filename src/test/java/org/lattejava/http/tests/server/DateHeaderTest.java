@@ -79,7 +79,7 @@ public class DateHeaderTest extends BaseTest {
 
       // Allow a 5s grace window to absorb the cache granularity (1s) and clock jitter between client and server.
       assertTrue(!parsed.isBefore(before.minusSeconds(5)) && !parsed.isAfter(after.plusSeconds(5)),
-                 "Date header [" + parsed + "] should be within 5s of [" + before + " .. " + after + "].");
+          "Date header [" + parsed + "] should be within 5s of [" + before + " .. " + after + "].");
     }
   }
 
@@ -104,27 +104,27 @@ public class DateHeaderTest extends BaseTest {
           HttpResponse.BodyHandlers.discarding());
 
       assertEquals(response.headers().firstValue("Date").orElse(null), fixedDate,
-                   "Handler-set Date must not be overwritten by the auto-Date logic.");
+          "Handler-set Date must not be overwritten by the auto-Date logic.");
     }
   }
 
   /**
    * Use case: regression coverage for IMF-fixdate (RFC 9110 §5.6.7) day-of-month zero-padding. The JDK's
    * {@link DateTimeFormatter#RFC_1123_DATE_TIME} emits 1-2 digits for day-of-month, so days 1-9 render as
-   * {@code Sun, 3 May 2026 ...} — invalid IMF-fixdate. This formats an early-month instant directly to catch any
-   * future regression that swaps the formatter back.
+   * {@code Sun, 3 May 2026 ...} — invalid IMF-fixdate. This formats an early-month instant directly to catch any future
+   * regression that swaps the formatter back.
    */
   @Test
   public void formatter_zero_pads_single_digit_day() {
     Instant instant = Instant.parse("2026-05-03T08:49:37Z");
     String formatted = DateTools.RFC_5322_DATE_TIME.format(instant.atZone(ZoneOffset.UTC));
     assertEquals(formatted, "Sun, 03 May 2026 08:49:37 GMT",
-                 "RFC_5322_DATE_TIME must zero-pad day-of-month per IMF-fixdate (RFC 9110 §5.6.7).");
+        "RFC_5322_DATE_TIME must zero-pad day-of-month per IMF-fixdate (RFC 9110 §5.6.7).");
   }
 
   /**
-   * Use case: a handler that wants no Date header on this specific response — e.g. a server behind a reverse proxy
-   * that adds Date itself, or a test fixture that does not want any clock-derived bytes in the response. Calling
+   * Use case: a handler that wants no Date header on this specific response — e.g. a server behind a reverse proxy that
+   * adds Date itself, or a test fixture that does not want any clock-derived bytes in the response. Calling
    * {@link HTTPResponse#removeHeader} during request handling must be respected.
    * <p>
    * This works because the auto-Date logic populates the header before invoking the handler; the handler then has full
@@ -145,7 +145,7 @@ public class DateHeaderTest extends BaseTest {
           HttpResponse.BodyHandlers.discarding());
 
       assertFalse(response.headers().firstValue("Date").isPresent(),
-                  "Handler removed Date — server must not re-add it.");
+          "Handler removed Date — server must not re-add it.");
     }
   }
 
@@ -168,7 +168,7 @@ public class DateHeaderTest extends BaseTest {
           HttpResponse.BodyHandlers.discarding());
 
       assertFalse(response.headers().firstValue("Date").isPresent(),
-                  "Server with sendDateHeader=false must not emit Date.");
+          "Server with sendDateHeader=false must not emit Date.");
     }
   }
 }
