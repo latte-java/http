@@ -87,8 +87,12 @@ h2load uses h2c prior-knowledge (plaintext HTTP/2 without an upgrade handshake).
 
 | Scenario | Endpoint | Threads | TCP Connections | Streams/conn | Total in-flight | Purpose |
 |----------|----------|---------|-----------------|--------------|-----------------|---------|
-| `h2-hello` | `GET /hello` | 4 | 1 | 100 | 100 | Baseline h2 throughput — single connection, many streams |
-| `h2-high-concurrency` | `GET /hello` | 4 | 10 | 100 | 1000 | Showcases h2 multiplexing (1000 in-flight over 10 TCP connections vs 1000 for h1.1) |
+| `h2-hello` | `GET /hello` | 1 | 1 | 100 | 100 | Baseline h2 throughput — single connection, many streams |
+| `h2-high-stream-concurrency` | `GET /hello` | 4 | 10 | 100 | 1000 | Many-streams-per-conn (backend / proxy shape) — favors event-loop demux |
+| `h2-high-connection-concurrency` | `GET /hello` | 4 | 500 | 2 | 1000 | Many-conns-few-streams (browser / CDN shape) — same in-flight, different topology |
+| `h2-compute` | `GET /compute?rounds=5000` | 4 | 10 | 100 | 1000 | CPU-bound — chained SHA-256 ~500us–1ms/req; protocol becomes <20% of cost |
+| `h2-io` | `GET /io?ms=10` | 4 | 10 | 100 | 1000 | Blocking-IO simulation — 10ms sleep per request; tests thread/IO model under wait |
+| `h2-stream` | `GET /stream?size=131072` | 4 | 10 | 100 | 1000 | 128KB chunked response per stream — exercises DATA-frame writer/flush path |
 
 Per-vendor h2c support:
 

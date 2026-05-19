@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2022-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.Map;
 
 public class LoadServlet extends HttpServlet {
@@ -44,14 +46,39 @@ public class LoadServlet extends HttpServlet {
       case "/hello" -> handleHello(req, res);
       case "/file" -> handleFile(req, res);
       case "/load" -> handleLoad(req, res);
+      case "/compute" -> handleCompute(req, res);
+      case "/io" -> handleIO(req, res);
+      case "/stream" -> handleStream(req, res);
       default -> handleFailure(req, res);
+    }
+  }
+
+  private void handleCompute(HttpServletRequest req, HttpServletResponse res) {
+    int rounds = 5000;
+    String roundsParam = req.getParameter("rounds");
+    if (roundsParam != null) {
+      rounds = Integer.parseInt(roundsParam);
+    }
+    try {
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      byte[] hash = new byte[32];
+      for (int i = 0; i < rounds; i++) {
+        hash = md.digest(hash);
+      }
+      byte[] body = HexFormat.of().formatHex(hash).getBytes(StandardCharsets.UTF_8);
+      res.setStatus(200);
+      res.setContentType("text/plain");
+      res.setContentLength(body.length);
+      res.getOutputStream().write(body);
+    } catch (Exception e) {
+      res.setStatus(500);
     }
   }
 
   private void handleFailure(HttpServletRequest req, HttpServletResponse res) {
     // Path does not match handler.
     res.setStatus(400);
-    byte[] response = ("Invalid path [" + req.getPathInfo() + "]. Supported paths include [/, /no-read, /hello, /file, /load].").getBytes(StandardCharsets.UTF_8);
+    byte[] response = ("Invalid path [" + req.getPathInfo() + "]. Supported paths include [/, /no-read, /hello, /file, /load, /compute, /io, /stream].").getBytes(StandardCharsets.UTF_8);
     res.setContentLength(response.length);
     res.setContentType("text/plain");
     try {
@@ -119,6 +146,27 @@ public class LoadServlet extends HttpServlet {
     }
   }
 
+  private void handleIO(HttpServletRequest req, HttpServletResponse res) {
+    int ms = 10;
+    String msParam = req.getParameter("ms");
+    if (msParam != null) {
+      ms = Integer.parseInt(msParam);
+    }
+    try {
+      Thread.sleep(ms);
+      byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+      res.setStatus(200);
+      res.setContentType("text/plain");
+      res.setContentLength(body.length);
+      res.getOutputStream().write(body);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      res.setStatus(500);
+    } catch (IOException e) {
+      res.setStatus(500);
+    }
+  }
+
   private void handleLoad(HttpServletRequest req, HttpServletResponse res) {
     // Note that this should be mostly the same between all load tests.
     // - See benchmarks/self
@@ -148,5 +196,41 @@ public class LoadServlet extends HttpServlet {
   private void handleNoRead(HttpServletRequest req, HttpServletResponse res) {
     // Note that it is intentionally that we are not reading the InputStream. This will cause the server to have to drain it.
     res.setStatus(200);
+  }
+
+  private void handleStream(HttpServletRequest req, HttpServletResponse res) {
+    int size = 131072;
+    String sizeParam = req.getParameter("size");
+    if (sizeParam != null) {
+      size = Integer.parseInt(sizeParam);
+    }
+
+    byte[] blob = Blobs.get(size);
+    if (blob == null) {
+      synchronized (Blobs) {
+        blob = Blobs.get(size);
+        if (blob == null) {
+          String s = "Lorem ipsum dolor sit amet";
+          String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+          Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+          blob = Blobs.get(size);
+        }
+      }
+    }
+
+    res.setStatus(200);
+    res.setContentType("application/octet-stream");
+    res.setContentLength(blob.length);
+
+    try (OutputStream os = res.getOutputStream()) {
+      int chunkSize = 8192;
+      for (int offset = 0; offset < blob.length; offset += chunkSize) {
+        int len = Math.min(chunkSize, blob.length - offset);
+        os.write(blob, offset, len);
+        os.flush();
+      }
+    } catch (IOException e) {
+      res.setStatus(500);
+    }
   }
 }

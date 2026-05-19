@@ -273,7 +273,7 @@ if jq -e '.results[] | select(.scenario == "h2-hello" and .tool == "h2load")' "$
 fi
 
 HAS_H2_HC=false
-if jq -e '.results[] | select(.scenario == "h2-high-concurrency" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+if jq -e '.results[] | select(.scenario == "h2-high-stream-concurrency" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
   HAS_H2_HC=true
 fi
 
@@ -283,7 +283,7 @@ if jq -e '.results[] | select(.scenario == "h2-tls-hello" and .tool == "h2load")
 fi
 
 HAS_H2_TLS_HC=false
-if jq -e '.results[] | select(.scenario == "h2-tls-high-concurrency" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+if jq -e '.results[] | select(.scenario == "h2-tls-high-stream-concurrency" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
   HAS_H2_TLS_HC=true
 fi
 
@@ -294,13 +294,13 @@ if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" || "${HAS_H2_TLS_H
   H2_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-hello" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
   [[ -z "${H2_SELF_RPS}" || "${H2_SELF_RPS}" == "null" ]] && H2_SELF_RPS="0"
 
-  H2_HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-high-concurrency" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+  H2_HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-high-stream-concurrency" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
   [[ -z "${H2_HC_SELF_RPS}" || "${H2_HC_SELF_RPS}" == "null" ]] && H2_HC_SELF_RPS="0"
 
   H2_TLS_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-tls-hello" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
   [[ -z "${H2_TLS_SELF_RPS}" || "${H2_TLS_SELF_RPS}" == "null" ]] && H2_TLS_SELF_RPS="0"
 
-  H2_TLS_HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-tls-high-concurrency" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+  H2_TLS_HC_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-tls-high-stream-concurrency" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
   [[ -z "${H2_TLS_HC_SELF_RPS}" || "${H2_TLS_HC_SELF_RPS}" == "null" ]] && H2_TLS_HC_SELF_RPS="0"
 
   {
@@ -315,9 +315,9 @@ if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" || "${HAS_H2_TLS_H
 
     if [[ "${HAS_H2_HC}" == "true" ]]; then
       echo ""
-      echo "#### h2-high-concurrency (10 connections × 100 streams each)"
+      echo "#### h2-high-stream-concurrency (10 conns × 100 streams (many-streams-per-conn))"
       echo ""
-      generate_h2_table "h2-high-concurrency" "${H2_HC_SELF_RPS}"
+      generate_h2_table "h2-high-stream-concurrency" "${H2_HC_SELF_RPS}"
     fi
 
     if [[ "${HAS_H2_TLS_HELLO}" == "true" ]]; then
@@ -329,9 +329,9 @@ if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" || "${HAS_H2_TLS_H
 
     if [[ "${HAS_H2_TLS_HC}" == "true" ]]; then
       echo ""
-      echo "#### h2-tls-high-concurrency (TLS+ALPN, 10 connections × 100 streams each)"
+      echo "#### h2-tls-high-stream-concurrency (TLS+ALPN, 10 conns × 100 streams (many-streams-per-conn))"
       echo ""
-      generate_h2_table "h2-tls-high-concurrency" "${H2_TLS_HC_SELF_RPS}"
+      generate_h2_table "h2-tls-high-stream-concurrency" "${H2_TLS_HC_SELF_RPS}"
     fi
 
     if [[ "${HAS_H2_TLS_HELLO}" == "true" || "${HAS_H2_TLS_HC}" == "true" ]]; then
@@ -349,7 +349,7 @@ if [[ "${HAS_H2_HELLO}" == "true" || "${HAS_H2_HC}" == "true" || "${HAS_H2_TLS_H
     echo "To reproduce (requires \`brew install nghttp2\`):"
     echo '```bash'
     echo "cd benchmarks"
-    echo "./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency,h2-tls-hello,h2-tls-high-concurrency"
+    echo "./run-benchmarks.sh --scenarios h2-hello,h2-high-stream-concurrency,h2-tls-hello,h2-tls-high-stream-concurrency"
     echo "./update-readme.sh"
     echo '```'
   } > "${H2_FILE}"

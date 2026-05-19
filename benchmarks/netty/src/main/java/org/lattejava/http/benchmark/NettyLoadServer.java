@@ -17,9 +17,12 @@ package org.lattejava.http.benchmark;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
@@ -234,10 +237,18 @@ public class NettyLoadServer {
           case "/hello" -> handleHello();
           case "/file" -> handleFile(request);
           case "/load" -> handleLoad(request);
+          case "/compute" -> handleCompute(request);
+          case "/io" -> { handleIO(ctx, request); yield null; }
+          case "/stream" -> handleStream(request);
           default -> handleFailure(pathOnly);
         };
       } catch (Exception e) {
         response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      // handleIO dispatched asynchronously and will write its own response — skip the sync write path.
+      if (response == null) {
+        return;
       }
 
       boolean keepAlive = HttpUtil.isKeepAlive(request);
@@ -257,8 +268,26 @@ public class NettyLoadServer {
       ctx.close();
     }
 
+    private FullHttpResponse handleCompute(FullHttpRequest request) throws Exception {
+      int rounds = 5000;
+      String roundsParam = queryParam(request.uri(), "rounds");
+      if (roundsParam != null) {
+        rounds = Integer.parseInt(roundsParam);
+      }
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      byte[] hash = new byte[32];
+      for (int i = 0; i < rounds; i++) {
+        hash = md.digest(hash);
+      }
+      byte[] body = HexFormat.of().formatHex(hash).getBytes(StandardCharsets.UTF_8);
+      ByteBuf content = Unpooled.wrappedBuffer(body);
+      FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, content);
+      response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain");
+      return response;
+    }
+
     private FullHttpResponse handleFailure(String path) {
-      byte[] body = ("Invalid path [" + path + "]. Supported paths include [/, /no-read, /hello, /file, /load].").getBytes(StandardCharsets.UTF_8);
+      byte[] body = ("Invalid path [" + path + "]. Supported paths include [/, /no-read, /hello, /file, /load, /compute, /io, /stream].").getBytes(StandardCharsets.UTF_8);
       ByteBuf content = Unpooled.wrappedBuffer(body);
       FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST, content);
       response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain");
@@ -303,6 +332,29 @@ public class NettyLoadServer {
       return response;
     }
 
+    private void handleIO(ChannelHandlerContext ctx, FullHttpRequest request) {
+      int ms = 10;
+      String msParam = queryParam(request.uri(), "ms");
+      if (msParam != null) {
+        ms = Integer.parseInt(msParam);
+      }
+      boolean keepAlive = HttpUtil.isKeepAlive(request);
+      ctx.executor().schedule(() -> {
+        byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+        ByteBuf content = Unpooled.wrappedBuffer(body);
+        FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, content);
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain");
+        response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, body.length);
+        if (keepAlive) {
+          response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+        }
+        var future = ctx.writeAndFlush(response);
+        if (!keepAlive) {
+          future.addListener(ChannelFutureListener.CLOSE);
+        }
+      }, ms, TimeUnit.MILLISECONDS);
+    }
+
     private FullHttpResponse handleLoad(FullHttpRequest request) {
       // Note that this should be mostly the same between all load tests.
       // - See benchmarks/self
@@ -322,6 +374,46 @@ public class NettyLoadServer {
 
     private FullHttpResponse handleNoRead() {
       return new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+    }
+
+    private FullHttpResponse handleStream(FullHttpRequest request) {
+      int size = 131072;
+      String sizeParam = queryParam(request.uri(), "size");
+      if (sizeParam != null) {
+        size = Integer.parseInt(sizeParam);
+      }
+
+      byte[] blob = Blobs.get(size);
+      if (blob == null) {
+        synchronized (Blobs) {
+          blob = Blobs.get(size);
+          if (blob == null) {
+            String s = "Lorem ipsum dolor sit amet";
+            String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+            Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+            blob = Blobs.get(size);
+          }
+        }
+      }
+
+      ByteBuf content = Unpooled.wrappedBuffer(blob);
+      FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, content);
+      response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/octet-stream");
+      return response;
+    }
+
+    private static String queryParam(String uri, String name) {
+      int q = uri.indexOf('?');
+      if (q < 0) {
+        return null;
+      }
+      for (String param : uri.substring(q + 1).split("&")) {
+        String[] kv = param.split("=", 2);
+        if (kv.length == 2 && kv[0].equals(name)) {
+          return kv[1];
+        }
+      }
+      return null;
     }
   }
 }

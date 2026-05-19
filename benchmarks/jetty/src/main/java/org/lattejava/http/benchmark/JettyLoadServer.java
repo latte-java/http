@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2025-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.Map;
 
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
@@ -101,6 +103,9 @@ public class JettyLoadServer {
           case "/hello" -> handleHello(request, response);
           case "/file" -> handleFile(request, response);
           case "/load" -> handleLoad(request, response);
+          case "/compute" -> handleCompute(request, response);
+          case "/io" -> handleIO(request, response);
+          case "/stream" -> handleStream(request, response);
           default -> handleFailure(request, response, path);
         }
         callback.succeeded();
@@ -111,9 +116,26 @@ public class JettyLoadServer {
       return true;
     }
 
+    private void handleCompute(Request request, Response response) throws Exception {
+      int rounds = 5000;
+      String roundsParam = queryParam(request, "rounds");
+      if (roundsParam != null) {
+        rounds = Integer.parseInt(roundsParam);
+      }
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      byte[] hash = new byte[32];
+      for (int i = 0; i < rounds; i++) {
+        hash = md.digest(hash);
+      }
+      byte[] body = HexFormat.of().formatHex(hash).getBytes(StandardCharsets.UTF_8);
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "text/plain");
+      response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
+    }
+
     private void handleFailure(Request request, Response response, String path) throws Exception {
       readRequestBody(request);
-      byte[] body = ("Invalid path [" + path + "]. Supported paths include [/, /no-read, /hello, /file, /load].").getBytes(StandardCharsets.UTF_8);
+      byte[] body = ("Invalid path [" + path + "]. Supported paths include [/, /no-read, /hello, /file, /load, /compute, /io, /stream].").getBytes(StandardCharsets.UTF_8);
       response.setStatus(400);
       response.getHeaders().put("Content-Type", "text/plain");
       response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
@@ -162,6 +184,19 @@ public class JettyLoadServer {
       response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
     }
 
+    private void handleIO(Request request, Response response) throws Exception {
+      int ms = 10;
+      String msParam = queryParam(request, "ms");
+      if (msParam != null) {
+        ms = Integer.parseInt(msParam);
+      }
+      Thread.sleep(ms);
+      byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "text/plain");
+      response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
+    }
+
     private void handleLoad(Request request, Response response) throws Exception {
       // Note that this should be mostly the same between all load tests.
       // - See benchmarks/self
@@ -179,6 +214,53 @@ public class JettyLoadServer {
 
     private void handleNoRead(Request request, Response response) {
       response.setStatus(200);
+    }
+
+    private void handleStream(Request request, Response response) throws Exception {
+      int size = 131072;
+      String sizeParam = queryParam(request, "size");
+      if (sizeParam != null) {
+        size = Integer.parseInt(sizeParam);
+      }
+
+      byte[] blob = Blobs.get(size);
+      if (blob == null) {
+        synchronized (Blobs) {
+          blob = Blobs.get(size);
+          if (blob == null) {
+            String s = "Lorem ipsum dolor sit amet";
+            String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+            Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+            blob = Blobs.get(size);
+          }
+        }
+      }
+
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "application/octet-stream");
+
+      int chunkSize = 8192;
+      int offset = 0;
+      while (offset < blob.length) {
+        int len = Math.min(chunkSize, blob.length - offset);
+        boolean last = offset + len == blob.length;
+        response.write(last, ByteBuffer.wrap(blob, offset, len), Callback.NOOP);
+        offset += len;
+      }
+    }
+
+    private static String queryParam(Request request, String name) {
+      String query = request.getHttpURI().getQuery();
+      if (query == null) {
+        return null;
+      }
+      for (String param : query.split("&")) {
+        String[] kv = param.split("=", 2);
+        if (kv.length == 2 && kv[0].equals(name)) {
+          return kv[1];
+        }
+      }
+      return null;
     }
   }
 }
