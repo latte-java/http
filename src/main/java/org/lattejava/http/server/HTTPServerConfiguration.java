@@ -56,7 +56,7 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   private int maxBytesToDrain = 256 * 1024; // 256 Kilobytes
 
-  private int maxPendingSocketConnections = 250;
+  private int maxPendingSocketConnections = 4096;
 
   private int maxRequestChunkSize = 1024 * 1024; // 1 Megabyte
 
