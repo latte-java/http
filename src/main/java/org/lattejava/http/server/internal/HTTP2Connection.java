@@ -51,7 +51,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final Logger logger;
   private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
   private final boolean prefaceAlreadyConsumed;
-  private final HTTP2RateLimits rateLimits;
+  private final HTTP2RateLimitsTracker rateLimits;
   // Bounded deque of recently-closed stream IDs for RFC 9113 §5.1 STREAM_CLOSED error detection.
   // Access is confined to the reader thread, so no synchronization is needed.
   private final Deque<Integer> recentlyClosedStreams = new ArrayDeque<>();
@@ -89,7 +89,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     this.buffers = new HTTPBuffers(configuration);
     this.logger = configuration.getLoggerFactory().getLogger(HTTP2Connection.class);
     this.localSettings = configuration.getHTTP2Settings();
-    this.rateLimits = configuration.getHTTP2RateLimits().forNewConnection();
+    this.rateLimits = configuration.getHTTP2RateLimits().newTracker();
     this.prefaceAlreadyConsumed = Boolean.TRUE.equals(prefaceAlreadyConsumed);
     this.serverSendsFirst = serverSendsFirst;
     this.startInstant = System.currentTimeMillis();
