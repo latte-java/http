@@ -105,6 +105,7 @@ public class JettyLoadServer {
           case "/load" -> handleLoad(request, response);
           case "/compute" -> handleCompute(request, response);
           case "/io" -> handleIO(request, response);
+          case "/large-response" -> handleLargeResponse(request, response);
           case "/stream" -> handleStream(request, response);
           default -> handleFailure(request, response, path);
         }
@@ -195,6 +196,32 @@ public class JettyLoadServer {
       response.setStatus(200);
       response.getHeaders().put("Content-Type", "text/plain");
       response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
+    }
+
+    private void handleLargeResponse(Request request, Response response) throws Exception {
+      // Single-shot write; contrast with /stream which writes per-chunk with explicit completion-per-chunk.
+      int size = 131072;
+      String sizeParam = queryParam(request, "size");
+      if (sizeParam != null) {
+        size = Integer.parseInt(sizeParam);
+      }
+
+      byte[] blob = Blobs.get(size);
+      if (blob == null) {
+        synchronized (Blobs) {
+          blob = Blobs.get(size);
+          if (blob == null) {
+            String s = "Lorem ipsum dolor sit amet";
+            String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+            Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+            blob = Blobs.get(size);
+          }
+        }
+      }
+
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "application/octet-stream");
+      response.write(true, ByteBuffer.wrap(blob), Callback.NOOP);
     }
 
     private void handleLoad(Request request, Response response) throws Exception {

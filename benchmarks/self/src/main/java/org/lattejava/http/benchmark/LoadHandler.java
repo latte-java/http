@@ -42,6 +42,7 @@ public class LoadHandler implements HTTPHandler {
       case "/load" -> handleLoad(req, res);
       case "/compute" -> handleCompute(req, res);
       case "/io" -> handleIO(req, res);
+      case "/large-response" -> handleLargeResponse(req, res);
       case "/stream" -> handleStream(req, res);
       default -> handleFailure(req, res);
     }
@@ -156,6 +157,39 @@ public class LoadHandler implements HTTPHandler {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       res.setStatus(500);
+    } catch (IOException e) {
+      res.setStatus(500);
+    }
+  }
+
+  private void handleLargeResponse(HTTPRequest req, HTTPResponse res) {
+    // Single-shot write: hand the whole blob to OutputStream.write() and let close() emit the body.
+    // Contrast with /stream which forces per-8KB DATA frames via explicit os.flush() between chunks.
+    int size = 131072;
+    String sizeParam = req.getURLParameter("size");
+    if (sizeParam != null) {
+      size = Integer.parseInt(sizeParam);
+    }
+
+    byte[] blob = Blobs.get(size);
+    if (blob == null) {
+      synchronized (Blobs) {
+        blob = Blobs.get(size);
+        if (blob == null) {
+          String s = "Lorem ipsum dolor sit amet";
+          String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+          Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+          blob = Blobs.get(size);
+        }
+      }
+    }
+
+    res.setStatus(200);
+    res.setContentType("application/octet-stream");
+    res.setContentLength(blob.length);
+
+    try (OutputStream os = res.getOutputStream()) {
+      os.write(blob);
     } catch (IOException e) {
       res.setStatus(500);
     }

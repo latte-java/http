@@ -35,7 +35,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null && pwd)"
 
 # Defaults
 ALL_SERVERS="self jdk-httpserver jetty netty tomcat"
-ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers h2-hello h2-high-stream-concurrency h2-high-connection-concurrency h2-compute h2-io h2-stream h2-tls-hello h2-tls-high-stream-concurrency"
+ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers h2-hello h2-high-stream-concurrency h2-high-connection-concurrency h2-compute h2-io h2-stream h2-large-response h2-tls-hello h2-tls-high-stream-concurrency"
 SERVERS="${ALL_SERVERS}"
 SCENARIOS="${ALL_SCENARIOS}"
 LABEL=""
@@ -228,7 +228,8 @@ scenario_config() {
     h2-high-connection-concurrency) echo "h2load 4  500  2   /hello" ;;                # 500 conns x 2 streams: many-conns-few-streams (browser / CDN shape)
     h2-compute)                     echo "h2load 4  10   100 /compute?rounds=5000" ;;  # CPU-bound: chained SHA-256 ~500us-1ms/req
     h2-io)                          echo "h2load 4  10   100 /io?ms=10" ;;             # blocking-IO: 10ms downstream call simulation
-    h2-stream)                      echo "h2load 4  10   100 /stream?size=131072" ;;   # 128KB chunked response per stream
+    h2-stream)                      echo "h2load 4  10   100 /stream?size=131072" ;;   # 128KB chunked response per stream (handler forces per-chunk flush)
+    h2-large-response)              echo "h2load 4  10   100 /large-response?size=131072" ;;   # 128KB one-shot response (handler writes whole body, server chooses framing)
     h2-tls-hello)                       echo "h2load 1  1    100 /hello" ;;            # same shape as h2-hello but over TLS+ALPN
     h2-tls-high-stream-concurrency)     echo "h2load 4  10   100 /hello" ;;            # same shape as h2-high-stream-concurrency but over TLS+ALPN
     *)                   echo ""; return 1 ;;

@@ -239,6 +239,7 @@ public class NettyLoadServer {
           case "/load" -> handleLoad(request);
           case "/compute" -> handleCompute(request);
           case "/io" -> { handleIO(ctx, request); yield null; }
+          case "/large-response" -> handleLargeResponse(request);
           case "/stream" -> handleStream(request);
           default -> handleFailure(pathOnly);
         };
@@ -353,6 +354,36 @@ public class NettyLoadServer {
           future.addListener(ChannelFutureListener.CLOSE);
         }
       }, ms, TimeUnit.MILLISECONDS);
+    }
+
+    private FullHttpResponse handleLargeResponse(FullHttpRequest request) {
+      // Identical shape to handleStream for Netty (Netty always uses FullHttpResponse + codec
+      // fragmentation; there is no "honor flush" path to compare against). Kept as a separate
+      // endpoint so all four servers expose the same scenario surface; the value here is the
+      // contrast against Latte/Jetty where /stream and /large-response diverge.
+      int size = 131072;
+      String sizeParam = queryParam(request.uri(), "size");
+      if (sizeParam != null) {
+        size = Integer.parseInt(sizeParam);
+      }
+
+      byte[] blob = Blobs.get(size);
+      if (blob == null) {
+        synchronized (Blobs) {
+          blob = Blobs.get(size);
+          if (blob == null) {
+            String s = "Lorem ipsum dolor sit amet";
+            String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+            Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+            blob = Blobs.get(size);
+          }
+        }
+      }
+
+      ByteBuf content = Unpooled.wrappedBuffer(blob);
+      FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, content);
+      response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/octet-stream");
+      return response;
     }
 
     private FullHttpResponse handleLoad(FullHttpRequest request) {
