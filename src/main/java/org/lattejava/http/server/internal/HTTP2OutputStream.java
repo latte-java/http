@@ -66,6 +66,23 @@ public class HTTP2OutputStream extends OutputStream {
   }
 
   private void flushAndFragment(boolean endStream) throws IOException {
+    int size = buffer.size();
+    // Fast path: the buffered payload fits in a single DATA frame AND we have enough send-window credit
+    // right now. Avoids the byte[]-per-chunk copy in the loop below. Hot for streaming handlers that
+    // write+flush in chunks already sized to a single frame.
+    if (size > 0 && size <= peerMaxFrameSize && stream.sendWindow() >= size) {
+      byte[] piece = buffer.toByteArray();
+      buffer.reset();
+      stream.consumeSendWindow(size);
+      try {
+        writerQueue.put(new HTTP2Frame.DataFrame(stream.streamId(), endStream ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new InterruptedIOException();
+      }
+      return;
+    }
+
     byte[] all = buffer.toByteArray();
     buffer.reset();
     int off = 0;

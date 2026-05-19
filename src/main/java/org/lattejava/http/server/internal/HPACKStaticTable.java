@@ -79,25 +79,34 @@ public final class HPACKStaticTable {
       new HPACKDynamicTable.HeaderField("www-authenticate", "")
   };
 
+  // O(1) lookup tables built once at class init. RFC 7541 §2.3.1 mandates the lowest matching index
+  // when the same name appears multiple times (e.g. :status), so NAME_INDEX is populated in ascending
+  // order and putIfAbsent preserves the lowest index.
+  private static final Map<HPACKDynamicTable.HeaderField, Integer> FULL_INDEX;
+  private static final Map<String, Integer> NAME_INDEX;
+
+  static {
+    Map<HPACKDynamicTable.HeaderField, Integer> full = new HashMap<>(SIZE * 2);
+    Map<String, Integer> name = new HashMap<>(SIZE * 2);
+    for (int i = 1; i <= SIZE; i++) {
+      var e = ENTRIES[i];
+      full.putIfAbsent(e, i);
+      name.putIfAbsent(e.name(), i);
+    }
+    FULL_INDEX = full;
+    NAME_INDEX = name;
+  }
+
   private HPACKStaticTable() {}
 
   public static int indexFullMatch(String name, String value) {
-    for (int i = 1; i <= SIZE; i++) {
-      var e = ENTRIES[i];
-      if (e.name().equals(name) && e.value().equals(value)) {
-        return i;
-      }
-    }
-    return -1;
+    Integer idx = FULL_INDEX.get(new HPACKDynamicTable.HeaderField(name, value));
+    return idx == null ? -1 : idx;
   }
 
   public static int indexNameOnly(String name) {
-    for (int i = 1; i <= SIZE; i++) {
-      if (ENTRIES[i].name().equals(name)) {
-        return i;
-      }
-    }
-    return -1;
+    Integer idx = NAME_INDEX.get(name);
+    return idx == null ? -1 : idx;
   }
 
   public static HPACKDynamicTable.HeaderField lookup(int index) {
