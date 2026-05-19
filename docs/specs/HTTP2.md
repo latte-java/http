@@ -424,6 +424,67 @@ Conclusion: the CPU profile is the reliable indicator for this fix set. Re-run t
 
 **Scope and follow-ups.** The decoder change is hot-path on every inbound HEADERS block (each h2 request). The toLowerCase fast-path is hot on every header name on add/lookup. Both apply to HTTP/1.1 and HTTP/2. Remaining Plan F items remain in the list above; with `HPACKHuffman.decode` and toLowerCase off the table, the next highest-leverage CPU sites are `SocketDispatcher.read0` (11.7% — likely a hard floor without changing the I/O model) and `ByteArrayOutputStream.ensureCapacity` (7.3% — appearing prominently in HPACK encode and `HPACKHuffman.encode`).
 
+### Performance findings (2026-05-19): HPACK static-table lookup, DATA flush fast-path, rate-limit isolation
+
+**Context.** Added four new h2 benchmark scenarios — `h2-high-stream-concurrency` (renamed from `h2-high-concurrency`), `h2-high-connection-concurrency` (500 conn × 2 streams, browser/CDN shape), `h2-compute` (chained SHA-256 × 5000 rounds, CPU-bound), `h2-io` (10ms `Thread.sleep`, blocking-IO simulation), `h2-stream` (128KB chunked response). Profiled with JFR `settings=profile` on `h2-stream` (10 conn × 100 streams × 20 s) to find what dominates the streaming-response path now that the bodyless-fast-path work is done.
+
+**Correctness fix surfaced by `h2-high-connection-concurrency`.** Under 500 simultaneous connections, the server stopped accepting new sockets after ~30s. Root cause: `HTTP2RateLimits` (sliding-window counters backed by `ArrayDeque<Long>`) was held as a single shared instance on `HTTPServerConfiguration` and reused across every accepted connection. The deques are not thread-safe; concurrent record/prune racing produced (a) `NullPointerException` from `peekFirst()` returning null between `isEmpty()` and the unbox, and (b) spurious GOAWAY(ENHANCE_YOUR_CALM) for healthy clients because the shared `windowUpdate` deque accumulated entries from all connections and tripped the 100-event-per-second threshold globally rather than per-connection. Refactored into an immutable config record (`HTTP2RateLimits`) plus per-connection mutable state (`HTTP2RateLimitsTracker`); the type system now enforces the per-connection contract.
+
+**Backlog default.** `HTTPServerConfiguration.maxPendingSocketConnections` raised from 250 → 4096 to match modern server-library norms (nginx 511, Netty SOMAXCONN). The kernel silently clamps to its sysctl (`somaxconn`: Linux 4096+, macOS 128), so this is "let the kernel decide" on the low end and an actual queueing improvement on platforms where it matters. Removes kernel-level SYN drops under the 500-conn benchmark.
+
+**CPU hotspots from the `h2-stream` JFR (post-fix):**
+
+| Cost block | % of samples | Item |
+|---|---:|---|
+| `sun.nio.ch.SocketDispatcher.write0` and friends | ~13% | Writer thread doing one syscall per DATA frame |
+| `VirtualThread.park` / `LockSupport.unpark` / `AQS$ConditionObject.doSignal` / `AQS.enqueue` | ~18% | Producer + consumer contention on the per-connection `LinkedBlockingQueue<HTTP2Frame>` |
+| `HTTP2OutputStream.flushAndFragment` | ~8% | Per-flush DATA frame construction |
+| `HPACKStaticTable.indexFullMatch` | ~7% | Linear scan over 61 entries per response header (now fixed) |
+| `ByteArrayOutputStream.toByteArray` | ~2% | Per-flush copy out of the local buffer |
+
+**Fixes applied (hot-path CPU):**
+
+- `HPACKStaticTable` now builds two `HashMap`s (full-match by `HeaderField` record, name-only by `String`) at class init; `indexFullMatch` and `indexNameOnly` are O(1). RFC 7541 §2.3.1 requires the lowest matching index on duplicate names, so the maps are populated in ascending order with `putIfAbsent`. Hot on every response header.
+- `HTTP2OutputStream.flushAndFragment` added a single-frame fast path for the common case where the buffered payload fits in one DATA frame *and* the stream has enough send-window credit. Skips the `new byte[chunk] + arraycopy` the loop body always did.
+
+**Throughput delta (best-of-3, 30 s × 3 trials, post-fixes, on cool machine before sustained matrix):**
+
+| Scenario | Pre-today's fixes | Post-fixes | Delta |
+|---|---:|---:|---:|
+| `h2-compute` | 13.6k RPS | 29.1k RPS | **+113%** |
+| `h2-high-stream-concurrency` | 427k RPS | 442k RPS | +3.5% |
+| `h2-io` | 67k RPS | 75k RPS | +11% |
+| `h2-stream` | 4.1k RPS | 4.1k RPS | 0 (writer-queue contention; addressed by new Plan F item below) |
+| `h2-high-connection-concurrency` | broken (server hang) | 213k RPS, 0 errors | correctness fix |
+
+**Peer comparison (best-of-3 from the same matrix run, h2c, cool machine; Netty's HTTP/1 numbers were measured after the other three vendors had run and may reflect machine state rather than steady-state Netty):**
+
+| Scenario | self (Latte) | jetty | tomcat | netty |
+|---|---:|---:|---:|---:|
+| `h2-high-stream-concurrency` | 427,828 | 123,707* | 124,105 | **447,247** |
+| `h2-high-connection-concurrency` | **213,273** | 171,355* | 59,226 | 153,419 |
+| `h2-compute` | **25,794** | 15,367* | 12,773 | 15,329 |
+| `h2-io` | **72,682** | 12,420 | 15,241 | 73,668 |
+| `h2-stream` | 4,096 | 14,529* | 4,563 *(unstable)* | 15,220 |
+
+\* Jetty h2 scenarios show 10M+ wire errors from a separate benchmark-config issue with Jetty's h2c implementation, not a Latte signal.
+
+The headline story: Latte is **5–6× ahead of worker-pool servers on blocking-IO workloads** (`h2-io`), **68% ahead on CPU-bound** (`h2-compute`), and **39% ahead on connection-heavy browser/CDN-shape traffic** (`h2-high-connection-concurrency`). At parity with Netty on multiplexed streams-per-connection (`h2-high-stream-concurrency`, 96% of Netty). The one architectural gap is `h2-stream` (large chunked response, 26% of Netty) — see new Plan F item below.
+
+**New Plan F item: writer-thread batching for h2 DATA emission.**
+
+The `h2-stream` scenario reveals an architectural cost we hadn't profiled before. Every `HTTPResponse.getOutputStream().write()+flush()` enqueues a DATA frame onto a connection-shared `LinkedBlockingQueue<HTTP2Frame>` (capacity 128); the writer virtual-thread `take()`s frames one at a time and does one socket write per frame. At 100 streams per connection generating 16 DATA frames per request, that's ~1600 enqueue/dequeue cycles + 1600 socket writes per request-round, which the JFR profile shows costing ~18% of CPU in lock/park/unpark and another ~13% in `SocketDispatcher.write0`. The single-frame fast-path added today removes one byte-array copy from the producer side but does not address the producer/consumer contention.
+
+Three candidate designs, in increasing scope:
+
+1. **Coalesced socket writes (smallest scope, biggest single lever):** writer drains up to N frames from the queue per cycle (via `queue.drainTo(list, N)`), packs them into a single gathering `write` (vectored I/O via `SocketChannel` or just a single buffered `write` of the concatenated frame bytes), then flushes. Cuts socket-write syscalls by the batch factor and amortizes per-frame lock-acquire cost on the consumer side. Producer-side contention is unchanged.
+2. **MPSC ring buffer instead of `LinkedBlockingQueue`** (e.g. `MpscArrayQueue` from JCTools, or a small custom ring buffer if we want zero deps): cuts producer-side lock-acquire cost per `put`. Each `put` becomes a CAS instead of `lock.lockInterruptibly()` + `signalNotEmpty()`. Combine with option 1 for batched drain on the consumer side. Zero-dep variant is ~80 lines.
+3. **Per-stream local buffering + writer drain:** each `HTTP2OutputStream` accumulates writes in a stream-local buffer; the writer thread periodically (or on flush hint) walks the active stream list and drains each stream's buffer. Completely removes the producer/consumer queue, replaces it with stream-state polling. Largest scope; changes the flow-control wait pattern (stream waits for window become per-stream condition variables that the reader signals directly into the per-stream output, rather than through the queue).
+
+**Recommended sequence:** prototype option 1 first (~half day of work, 1 file changed: `HTTP2Connection.run`'s writer-thread lambda). If that closes 60%+ of the gap, stop. If not, layer in option 2 (~1 day, adds JCTools dep or a custom MPSC class). Option 3 is a larger architectural rework; only pursue if 1+2 leave us materially behind.
+
+**Open question on the `/stream` benchmark scenario itself.** Tomcat and Netty handlers do not honor per-chunk flush the way Latte and Jetty do — Tomcat treats servlet `flush()` as a hint, Netty's handler in the benchmark sends a `FullHttpResponse` and lets the codec fragment. So the benchmark partially measures "does this server honor per-chunk-flush semantics," not pure throughput. Real apps that rely on flush semantics (SSE, long-polling) want Latte's current behavior; apps that don't care want the throughput. We are not considering loosening Latte's `OutputStream.flush()` contract (that would silently break SSE-style handlers), but a future bench refinement could test "send-large-body-server's-choice" alongside the current explicit-flush version.
+
 ---
 
 ## Bug ledger

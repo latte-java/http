@@ -174,23 +174,87 @@ All servers implement the same request handler that reads the request body and r
 
 | Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |      110,989 |            0 |              0.99 |              7.34 |        100.0% |
-| Jetty          |      111,548 |            0 |              1.03 |              6.03 |        100.5% |
-| Netty          |      114,546 |            0 |              0.94 |              5.52 |        103.2% |
-| Apache Tomcat  |      109,330 |            0 |              1.01 |              7.49 |         98.5% |
+| Latte http     |      105,574 | 0
+30.096727
+30.088667 |              2.72 |             52.83 |        100.0% |
+| Latte http     |      107,446 | 0
+30.096727
+30.088667 |              2.43 |             52.36 |        101.7% |
+| Latte http     |      106,799 | 0
+30.096727
+30.088667 |              2.34 |             52.28 |        101.1% |
+| Jetty          |      107,697 | 0
+30.097703
+30.095233 |              3.12 |             62.33 |        102.0% |
+| Jetty          |      109,394 | 0
+30.097703
+30.095233 |              1.93 |             36.25 |        103.6% |
+| Jetty          |      108,551 | 0
+30.097703
+30.095233 |              2.18 |             46.13 |        102.8% |
+| Netty          |       76,391 | 0
+30.082156
+30.080803 |              2.09 |             27.94 |         72.3% |
+| Netty          |       67,544 | 0
+30.082156
+30.080803 |              2.17 |             27.02 |         63.9% |
+| Netty          |       68,297 | 0
+30.082156
+30.080803 |              2.35 |             33.39 |         64.6% |
+| Apache Tomcat  |      108,102 | 0
+30.017092
+30.108437 |              2.71 |             66.58 |        102.3% |
+| Apache Tomcat  |      106,415 | 0
+30.017092
+30.108437 |              2.06 |             42.15 |        100.7% |
+| Apache Tomcat  |       98,576 | 0
+30.017092
+30.108437 |              2.52 |             54.73 |         93.3% |
 
 #### Under stress (1,000 concurrent connections)
 
 | Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |       82,254 |        554.4 |             11.56 |             30.93 |        100.0% |
-| Jetty          |      109,041 |            0 |              9.11 |             31.58 |        132.5% |
-| Netty          |      105,667 |            0 |              9.19 |             25.33 |        128.4% |
-| Apache Tomcat  |      106,486 |            0 |              9.22 |             28.18 |        129.4% |
+| Latte http     |      109,902 | 0
+30.094795
+30.07674 |             11.07 |             95.25 |        100.0% |
+| Latte http     |      111,234 | 0
+30.094795
+30.07674 |             10.95 |             95.87 |        101.2% |
+| Latte http     |      110,389 | 0
+30.094795
+30.07674 |             11.01 |             95.94 |        100.4% |
+| Jetty          |      111,408 | 0
+30.103014
+30.102409 |             13.00 |            127.57 |        101.3% |
+| Jetty          |      105,841 | 0
+30.103014
+30.102409 |             10.98 |             87.65 |         96.3% |
+| Jetty          |      102,883 | 0
+30.103014
+30.102409 |             11.50 |             99.94 |         93.6% |
+| Netty          |       69,248 | 0
+30.10154
+30.101195 |             15.49 |             81.56 |         63.0% |
+| Netty          |       72,079 | 0
+30.10154
+30.101195 |             14.35 |             63.20 |         65.5% |
+| Netty          |       68,830 | 0
+30.10154
+30.101195 |             15.55 |             78.61 |         62.6% |
+| Apache Tomcat  |       92,349 | 0
+30.09523
+30.057853 |             12.70 |             96.17 |         84.0% |
+| Apache Tomcat  |       90,597 | 0
+30.09523
+30.057853 |             13.11 |            106.60 |         82.4% |
+| Apache Tomcat  |       91,855 | 0
+30.09523
+30.057853 |             12.85 |            103.00 |         83.5% |
 
 _JDK HttpServer (`com.sun.net.httpserver`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._
 
-_Benchmark performed 2026-05-10 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
+_Benchmark performed 2026-05-19 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
 _OS: macOS 15.7.3._
 _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 
@@ -205,70 +269,34 @@ cd benchmarks
 <!-- H2-BENCHMARK-START -->
 ### HTTP/2 (h2load)
 
-#### h2-hello (1 connection × 100 streams)
+
+#### h2-high-stream-concurrency (10 conns × 100 streams (many-streams-per-conn))
 
 | Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |      244,586 |      0 |              0.39 |              1.20 |        100.0% |
-| Latte http    |      251,444 |      0 |              0.38 |              1.21 |        102.8% |
-| Latte http    |      242,900 |      0 |              0.39 |              1.13 |         99.3% |
-| Jetty         |       20,969 | 9453051 |              0.36 |              1.44 |          8.5% |
-| Jetty         |       21,381 | 8822642 |              0.36 |              0.82 |          8.7% |
-| Jetty         |       20,604 | 9150486 |              0.37 |              1.07 |          8.4% |
-| Netty         |      317,380 |      0 |              0.31 |              0.95 |        129.7% |
-| Netty         |      327,940 |      0 |              0.29 |              0.48 |        134.0% |
-| Netty         |      322,483 |      0 |              0.29 |              0.37 |        131.8% |
-| Apache Tomcat |       70,478 |      0 |              1.42 |              3.24 |         28.8% |
-| Apache Tomcat |       70,654 |      0 |              1.41 |              2.84 |         28.8% |
-| Apache Tomcat |       67,424 |      0 |              1.47 |              2.91 |         27.5% |
-
-#### h2-high-concurrency (10 connections × 100 streams each)
-
-| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
-|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |      432,823 |     62 |              2.25 |             15.07 |        100.0% |
-| Latte http    |      428,121 |     23 |              2.05 |             14.82 |         98.9% |
-| Latte http    |      431,073 |     22 |              2.26 |             14.50 |         99.5% |
-| Jetty         |      131,307 | 14151916 |              1.81 |             18.61 |         30.3% |
-| Jetty         |      135,776 | 13405081 |              1.86 |             18.85 |         31.3% |
-| Jetty         |      143,864 | 12501718 |              1.81 |             19.44 |         33.2% |
-| Netty         |      546,633 |      0 |              5.67 |              5.40 |        126.2% |
-| Netty         |      630,553 |      0 |              1.33 |              8.80 |        145.6% |
-| Netty         |      481,456 |      0 |              2.00 |             14.50 |        111.2% |
-| Apache Tomcat |      145,292 |      0 |              6.28 |             28.73 |         33.5% |
-| Apache Tomcat |      149,148 |      0 |              5.96 |             21.90 |         34.4% |
-| Apache Tomcat |      152,126 |      0 |              5.88 |             20.29 |         35.1% |
-
-#### h2-tls-hello (TLS+ALPN, 1 connection × 100 streams)
-
-| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
-|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |          TBD |    TBD |               TBD |               TBD |          TBD |
-| Jetty         |          TBD |    TBD |               TBD |               TBD |          TBD |
-| Netty         |          TBD |    TBD |               TBD |               TBD |          TBD |
-| Apache Tomcat |          TBD |    TBD |               TBD |               TBD |          TBD |
-
-#### h2-tls-high-concurrency (TLS+ALPN, 10 connections × 100 streams each)
-
-| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
-|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |          TBD |    TBD |               TBD |               TBD |          TBD |
-| Jetty         |          TBD |    TBD |               TBD |               TBD |          TBD |
-| Netty         |          TBD |    TBD |               TBD |               TBD |          TBD |
-| Apache Tomcat |          TBD |    TBD |               TBD |               TBD |          TBD |
-
-_TLS scenarios use a self-signed certificate at `benchmarks/certs/server.crt` (benchmark fixture only). All four servers terminate TLS and use ALPN to negotiate h2._
+| Latte http    |      416,662 |     41 |              2.49 |             20.65 |        100.0% |
+| Latte http    |      427,828 |     79 |              2.27 |             17.28 |        102.6% |
+| Latte http    |      423,837 |     51 |              2.28 |             17.91 |        101.7% |
+| Jetty         |       97,005 | 10391862 |              2.30 |             18.61 |         23.2% |
+| Jetty         |      120,511 | 11853706 |              1.94 |             15.75 |         28.9% |
+| Jetty         |      123,707 | 11855823 |              1.87 |             15.59 |         29.6% |
+| Netty         |      360,943 |      0 |              3.18 |             32.57 |         86.6% |
+| Netty         |      424,843 |      0 |              2.26 |             18.10 |        101.9% |
+| Netty         |      447,247 |      0 |              2.14 |             16.17 |        107.3% |
+| Apache Tomcat |       96,950 |      0 |              9.96 |             75.42 |         23.2% |
+| Apache Tomcat |      124,105 |      0 |              7.24 |             34.00 |         29.7% |
+| Apache Tomcat |       39,812 |      0 |              8.09 |             54.32 |          9.5% |
 
 _JDK HttpServer does not support HTTP/2 and is excluded from h2 results._
 
-_Benchmark performed 2026-05-11 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
+_Benchmark performed 2026-05-19 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
 _OS: macOS 15.7.3._
 _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 
 To reproduce (requires `brew install nghttp2`):
 ```bash
 cd benchmarks
-./run-benchmarks.sh --scenarios h2-hello,h2-high-concurrency,h2-tls-hello,h2-tls-high-concurrency
+./run-benchmarks.sh --scenarios h2-hello,h2-high-stream-concurrency,h2-tls-hello,h2-tls-high-stream-concurrency
 ./update-readme.sh
 ```
 <!-- H2-BENCHMARK-END -->
