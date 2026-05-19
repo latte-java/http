@@ -29,6 +29,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null && pwd)"
 
 RESULTS_DIR="${SCRIPT_DIR}/results"
 README="${SCRIPT_DIR}/../README.md"
+BENCHMARKS_DOC="${SCRIPT_DIR}/../docs/BENCHMARKS.md"
 
 # Find the latest results file
 LATEST="$(ls -t "${RESULTS_DIR}"/*.json 2>/dev/null | head -1)"
@@ -84,9 +85,11 @@ generate_h1_table() {
   echo "| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |"
   echo "|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|"
 
+  # Include duration_us as a per-row field so the failures/sec calc uses this trial's duration,
+  # not a multi-trial concatenation (the prior nested jq returned N values for matrix runs).
   jq -r --arg scenario "${scenario}" --arg tool "${tool}" \
-    '[.results[] | select(.scenario == $scenario and .tool == $tool)] | sort_by(if .server == "self" then "" else .server end) | .[] | [.server, (.metrics.rps | tostring), ((.metrics.errors_connect + .metrics.errors_read + .metrics.errors_write + .metrics.errors_timeout) | tostring), (.metrics.avg_latency_us | tostring), (.metrics.p99_us | tostring)] | @tsv' \
-    "${LATEST}" | while IFS=$'\t' read -r server rps errors avg_lat p99_lat; do
+    '[.results[] | select(.scenario == $scenario and .tool == $tool)] | sort_by(if .server == "self" then "" else .server end) | .[] | [.server, (.metrics.rps | tostring), ((.metrics.errors_connect + .metrics.errors_read + .metrics.errors_write + .metrics.errors_timeout) | tostring), (.metrics.avg_latency_us | tostring), (.metrics.p99_us | tostring), (.metrics.duration_us | tostring)] | @tsv' \
+    "${LATEST}" | while IFS=$'\t' read -r server rps errors avg_lat p99_lat duration_us; do
 
     display_name="$(server_display_name "${server}")"
 
@@ -94,11 +97,9 @@ generate_h1_table() {
     avg_lat_ms="$(printf "%.2f" "$(echo "scale=4; ${avg_lat} / 1000" | bc)")"
     p99_lat_ms="$(printf "%.2f" "$(echo "scale=4; ${p99_lat} / 1000" | bc)")"
 
-    # Calculate failures per second from total errors / duration
-    duration_s="$(jq -r --arg server "${server}" --arg scenario "${scenario}" --arg tool "${tool}" \
-      '.results[] | select(.server == $server and .scenario == $scenario and .tool == $tool) | .metrics.duration_us / 1e6' "${LATEST}")"
-    if [[ -n "${duration_s}" && "${duration_s}" != "0" && "${duration_s}" != "null" ]]; then
-      fps="$(echo "scale=1; ${errors} / ${duration_s}" | bc)"
+    # Calculate failures per second from this trial's errors / duration
+    if [[ -n "${duration_us}" && "${duration_us}" != "0" && "${duration_us}" != "null" ]]; then
+      fps="$(echo "scale=1; ${errors} * 1000000 / ${duration_us}" | bc)"
     else
       fps="0"
     fi
@@ -165,13 +166,14 @@ inject_section() {
   local start_marker="$1"
   local end_marker="$2"
   local content_file="$3"
+  local target_file="${4:-${README}}"
 
-  python3 - "${README}" "${start_marker}" "${end_marker}" "${content_file}" << 'PYEOF'
+  python3 - "${target_file}" "${start_marker}" "${end_marker}" "${content_file}" << 'PYEOF'
 import sys, re
 
-readme_path, start_marker, end_marker, content_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+target_path, start_marker, end_marker, content_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
-with open(readme_path, 'r') as f:
+with open(target_path, 'r') as f:
     text = f.read()
 
 with open(content_path, 'r') as f:
@@ -186,10 +188,10 @@ replacement = rf'\1\n{new_content}\n\2'
 
 new_text, n = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)
 if n == 0:
-    print(f"ERROR: Could not find markers '{start_marker}' ... '{end_marker}' in README.md", file=sys.stderr)
+    print(f"ERROR: Could not find markers '{start_marker}' ... '{end_marker}' in {target_path}", file=sys.stderr)
     sys.exit(1)
 
-with open(readme_path, 'w') as f:
+with open(target_path, 'w') as f:
     f.write(new_text)
 PYEOF
 }
@@ -257,8 +259,8 @@ if [[ "${HAS_H1_DATA}" == "true" ]]; then
     echo '```'
   } > "${H1_FILE}"
 
-  inject_section "<!-- H1-BENCHMARK-START -->" "<!-- H1-BENCHMARK-END -->" "${H1_FILE}"
-  echo "README.md HTTP/1.1 section updated."
+  inject_section "<!-- H1-BENCHMARK-START -->" "<!-- H1-BENCHMARK-END -->" "${H1_FILE}" "${BENCHMARKS_DOC}"
+  echo "docs/BENCHMARKS.md HTTP/1.1 section updated."
 else
   echo "No HTTP/1.1 wrk results found — skipping H1 section update."
 fi
@@ -340,10 +342,41 @@ if [[ "${ANY_H2}" == "true" ]]; then
     echo '```'
   } > "${H2_FILE}"
 
-  inject_section "<!-- H2-BENCHMARK-START -->" "<!-- H2-BENCHMARK-END -->" "${H2_FILE}"
-  echo "README.md HTTP/2 section updated."
+  inject_section "<!-- H2-BENCHMARK-START -->" "<!-- H2-BENCHMARK-END -->" "${H2_FILE}" "${BENCHMARKS_DOC}"
+  echo "docs/BENCHMARKS.md HTTP/2 section updated."
 else
   echo "No HTTP/2 h2load results found — skipping H2 section update (placeholder table preserved)."
+fi
+
+# ---------------------------------------------------------------------------
+# Build PERF-SUMMARY for top-level README.md (brief: h2-io headline + link)
+# ---------------------------------------------------------------------------
+
+SUMMARY_FILE="$(mktemp)"
+trap 'rm -f "${H1_FILE}" "${H2_FILE}" "${SUMMARY_FILE}"' EXIT
+
+if jq -e '.results[] | select(.scenario == "h2-io" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+  IO_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-io" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1)"
+  [[ -z "${IO_SELF_RPS}" || "${IO_SELF_RPS}" == "null" ]] && IO_SELF_RPS="0"
+
+  {
+    echo "Latte HTTP is competitive with the fastest production HTTP servers across most workloads. Where it pulls clearly ahead is the **blocking-IO scenario**, which simulates a handler waiting on a database, cache, or downstream HTTP call — the most common shape for real web apps. Virtual threads park for free; worker-pool servers (Tomcat, Jetty) are bottlenecked by their default thread-pool size."
+    echo ""
+    echo "**Headline scenario: \`h2-io\`** (handler does \`Thread.sleep(10ms)\` per request, 10 conns × 100 streams = 1000 in-flight)"
+    echo ""
+    generate_h2_table "h2-io" "${IO_SELF_RPS}"
+    echo ""
+    echo "**See [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** for the full 6-scenario breakdown across self / jetty / tomcat / netty — including HTTP/1, CPU-bound, multiplexed stream concurrency, browser-shape connection concurrency, large-response throughput, and per-scenario rationale on what each scenario was designed to expose."
+    echo ""
+    printf "_Benchmark performed %s on %s, %sGB RAM%s._%s\n" \
+      "${DATE_FORMATTED}" "${SYSTEM_DESC}" "${RAM_GB}" "${MACHINE_LINE}" "${OS_LINE}"
+    echo "_Java: ${JAVA_VERSION}._"
+  } > "${SUMMARY_FILE}"
+
+  inject_section "<!-- PERF-SUMMARY-START -->" "<!-- PERF-SUMMARY-END -->" "${SUMMARY_FILE}" "${README}"
+  echo "README.md performance summary updated."
+else
+  echo "No h2-io result found — skipping README PERF-SUMMARY update."
 fi
 
 echo "Done."
