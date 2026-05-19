@@ -89,7 +89,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     this.buffers = new HTTPBuffers(configuration);
     this.logger = configuration.getLoggerFactory().getLogger(HTTP2Connection.class);
     this.localSettings = configuration.getHTTP2Settings();
-    this.rateLimits = configuration.getHTTP2RateLimits();
+    this.rateLimits = configuration.getHTTP2RateLimits().forNewConnection();
     this.prefaceAlreadyConsumed = Boolean.TRUE.equals(prefaceAlreadyConsumed);
     this.serverSendsFirst = serverSendsFirst;
     this.startInstant = System.currentTimeMillis();

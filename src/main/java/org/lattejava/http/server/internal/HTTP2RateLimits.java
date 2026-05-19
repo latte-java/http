@@ -48,6 +48,15 @@ public class HTTP2RateLimits {
     return new HTTP2RateLimits(100, 30_000L, 10, 1_000L, 10, 1_000L, 100, 30_000L, 100, 1_000L);
   }
 
+  /**
+   * Returns a fresh instance with the same thresholds and windows but its own counter state. The counters
+   * (ArrayDeque<Long>) are not thread-safe, so each HTTP/2 connection needs its own — the configuration
+   * instance is a template, not a shared accumulator.
+   */
+  public HTTP2RateLimits forNewConnection() {
+    return new HTTP2RateLimits(rstStreamMax, rstStreamWindowMs, pingMax, pingWindowMs, settingsMax, settingsWindowMs, emptyDataMax, emptyDataWindowMs, windowUpdateMax, windowUpdateWindowMs);
+  }
+
   public boolean recordEmptyData() { return record(emptyData, emptyDataMax, emptyDataWindowMs); }
 
   public boolean recordPing() { return record(ping, pingMax, pingWindowMs); }

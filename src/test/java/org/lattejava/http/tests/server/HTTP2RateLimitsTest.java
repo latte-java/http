@@ -39,4 +39,23 @@ public class HTTP2RateLimitsTest {
     Thread.sleep(150); // exceed window
     assertFalse(rl.recordRstStream(), "old events should have expired");
   }
+
+  @Test
+  public void forNewConnection_returns_isolated_counters() {
+    // Each HTTP/2 connection must get its own counter state. The configuration instance is a
+    // shared template; calling forNewConnection() per accept gives the connection an independent
+    // ArrayDeque so concurrent connections don't race on the same non-thread-safe collection
+    // (and one noisy connection cannot trip the rate limit for everyone else).
+    var template = HTTP2RateLimits.defaults();
+    var conn1 = template.forNewConnection();
+    var conn2 = template.forNewConnection();
+
+    // Saturate conn1.
+    for (int i = 0; i < 100; i++) {
+      conn1.recordRstStream();
+    }
+    assertTrue(conn1.recordRstStream(), "conn1 should have crossed threshold");
+    assertFalse(conn2.recordRstStream(), "conn2 must not be affected by conn1");
+    assertFalse(template.recordRstStream(), "template must not be affected by either connection");
+  }
 }
