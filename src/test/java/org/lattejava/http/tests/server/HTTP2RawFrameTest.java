@@ -8,6 +8,9 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
+import org.lattejava.http.server.internal.HPACKDecoder;
+import org.lattejava.http.server.internal.HPACKDynamicTable;
+
 import static org.testng.Assert.*;
 
 /**
@@ -262,6 +265,85 @@ public class HTTP2RawFrameTest extends BaseTest {
         assertEquals(responseStreamId, 1,
             "Expected response HEADERS on stream 1 (current bug: trailers HEADERS triggers RST_STREAM(STREAM_CLOSED))");
         assertEquals(trailerValue.get(), "end", "Server should expose request trailer via req.getTrailers()");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.1 — response trailers MUST be sent as a HEADERS frame with END_STREAM AFTER the final DATA frame,
+   * and the final DATA frame MUST NOT have END_STREAM set. Currently exercised only indirectly via GRPCInteropTest;
+   * this direct test pins the wire-level behavior so a regression in setTrailersFollow / emitTrailers fails fast.
+   */
+  @Test
+  public void response_trailers_emitted_as_headers_frame_after_final_data() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      // Signal that the response will have trailers (so the output stream defers END_STREAM on the final DATA).
+      res.setTrailer("x-checksum", "abc123");
+      try (var out = res.getOutputStream()) {
+        out.write("hello".getBytes());
+      }
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Send a basic GET request on stream 1.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+
+        // Read frames in order. Track: did we see response HEADERS, then DATA frames (last one MUST NOT have
+        // END_STREAM), then trailers HEADERS (MUST have END_STREAM and decode to include x-checksum: abc123).
+        boolean sawResponseHeaders = false;
+        boolean sawDataFrame = false;
+        int lastDataFlags = -1;
+        byte[] trailerBlock = null;
+        int trailerFlags = -1;
+        int sawHeadersCount = 0;
+        for (int i = 0; i < 20 && trailerBlock == null; i++) {
+          byte[] hdr = in.readNBytes(9);
+          if (hdr.length < 9) break;
+          int len = ((hdr[0] & 0xFF) << 16) | ((hdr[1] & 0xFF) << 8) | (hdr[2] & 0xFF);
+          int type = hdr[3] & 0xFF;
+          int flags = hdr[4] & 0xFF;
+          byte[] payload = in.readNBytes(len);
+          if (payload.length < len) break;
+          switch (type) {
+            case 0x1 -> { // HEADERS
+              sawHeadersCount++;
+              if (sawHeadersCount == 1) {
+                sawResponseHeaders = true;
+              } else {
+                trailerBlock = payload;
+                trailerFlags = flags;
+              }
+            }
+            case 0x0 -> { // DATA
+              sawDataFrame = true;
+              lastDataFlags = flags;
+            }
+            default -> {} // SETTINGS, WINDOW_UPDATE, etc. — ignore.
+          }
+        }
+
+        assertTrue(sawResponseHeaders, "Expected response HEADERS frame on stream 1");
+        assertTrue(sawDataFrame, "Expected at least one DATA frame");
+        assertEquals(lastDataFlags & 0x1, 0,
+            "Final DATA frame MUST NOT have END_STREAM when trailers follow; flags=[" + lastDataFlags + "]");
+        assertNotNull(trailerBlock, "Expected trailers HEADERS frame after final DATA");
+        assertEquals(trailerFlags & 0x1, 0x1,
+            "Trailers HEADERS frame MUST have END_STREAM; flags=[" + trailerFlags + "]");
+
+        // Decode the trailer block to verify x-checksum: abc123.
+        var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+        var fields = decoder.decode(trailerBlock);
+        boolean foundChecksum = fields.stream()
+            .anyMatch(f -> f.name().equals("x-checksum") && f.value().equals("abc123"));
+        assertTrue(foundChecksum, "Expected x-checksum: abc123 in trailer block; decoded: [" + fields + "]");
       }
     }
   }
