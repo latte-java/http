@@ -872,4 +872,35 @@ public class HTTP2RawFrameTest extends BaseTest {
       }
     }
   }
+
+  /**
+   * When the writer thread dies (broken pipe / peer reset mid-write), the reader must not park indefinitely on
+   * {@code writerQueue.put()}. The {@code writerDead} flag plus reader interrupt close the deadlock by triggering the
+   * reader's finally block, which interrupts handler virtual threads. Within a few seconds the connection should be
+   * fully torn down.
+   *
+   * <p>This test is intentionally light — fully deterministic reproduction would need a test hook to inject a
+   * {@code writeFrame} failure. The test passes if the {@code timeOut} does not fire.
+   */
+  @Test(timeOut = 10_000)
+  public void reader_exits_within_timeout_after_socket_abort() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      Socket sock = openH2cConnection(server.getActualPort());
+      var out = sock.getOutputStream();
+      byte[] headers = new byte[]{
+          (byte) 0x82, (byte) 0x84, (byte) 0x86,
+          (byte) 0x41, 0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
+      };
+      writeFrameHeader(out, headers.length, 0x1, 0x4 | 0x1, 1);
+      out.write(headers);
+      out.flush();
+      // Abort the socket from the client side. The server's writer will fail next writeFrame and exit.
+      sock.setSoLinger(true, 0);
+      sock.close();
+      // Give the server time to clean up. The 10-second @Test timeout is the safety net.
+      Thread.sleep(1500);
+    }
+  }
 }

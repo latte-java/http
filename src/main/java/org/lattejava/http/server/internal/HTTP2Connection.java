@@ -74,7 +74,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private volatile boolean goawaySent;
   private long handledRequests;
   private volatile int highestSeenStreamId = 0;
+  // Reader thread handle, captured at the top of run() so the writer thread can interrupt it when it dies.
+  private volatile Thread readerThread;
   private volatile ClientConnection.State state = ClientConnection.State.Read;
+  // Set true when the writer virtual-thread exits (either via the shutdown sentinel or an unexpected exception).
+  // The reader checks this before each blocking enqueue to avoid parking forever on a full writerQueue.
+  private volatile boolean writerDead;
 
   public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput, Boolean prefaceAlreadyConsumed) throws IOException {
@@ -125,15 +130,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
    * complete before the socket is force-closed by {@link HTTPServer}.
    */
   public void shutdown() {
-    try {
-      writerQueue.put(new HTTP2Frame.GoawayFrame(highestSeenStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
+    enqueueForWriter(new HTTP2Frame.GoawayFrame(highestSeenStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
   }
 
   @Override
   public void run() {
+    readerThread = Thread.currentThread();
     Thread writerThread = null;
     InputStream socketIn = null;
     try {
@@ -223,7 +225,16 @@ public class HTTP2Connection implements ClientConnection, Runnable {
             outForThread.flush();
           }
         } catch (Exception e) {
-          logger.debug("Writer thread ended", e);
+          logger.debug("Writer thread ended unexpectedly; signaling reader", e);
+        } finally {
+          // Signal the reader and any handler-thread enqueuers that the writer is gone. Without this the reader
+          // would park forever on a full writerQueue (broken-pipe / peer-reset mid-write deadlock). The reader's
+          // finally block then interrupts any handler virtual-threads still waiting on the queue.
+          writerDead = true;
+          Thread readerThreadRef = readerThread;
+          if (readerThreadRef != null) {
+            readerThreadRef.interrupt();
+          }
         }
       });
 
@@ -239,6 +250,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       try {
         while (true) {
           state = ClientConnection.State.Read;
+          if (writerDead) {
+            logger.debug("Writer thread dead; reader exiting");
+            break;
+          }
           HTTP2Frame frame;
           try {
             frame = reader.readFrame();
@@ -364,12 +379,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         logger.error("Unhandled exception in HTTP/2 reader; emitting GOAWAY(INTERNAL_ERROR)", t);
         goAway(HTTP2ErrorCode.INTERNAL_ERROR);
       } finally {
-        // Signal writer thread to exit cleanly.
-        try {
-          writerQueue.put(new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]));
-        } catch (InterruptedException ignore) {
-          Thread.currentThread().interrupt();
-        }
+        // Signal writer thread to exit cleanly. If the writer has already died, the sentinel is a no-op.
+        enqueueForWriter(new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]));
       }
     } catch (Exception e) {
       logger.debug("HTTP/2 connection ended", e);
@@ -503,6 +514,33 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     handledRequests++;
   }
 
+  /**
+   * Enqueue a frame for the writer thread. Returns {@code false} (and logs at debug) if the writer is dead or the
+   * queue stays full past the timeout — caller decides what to do (typically: return, the connection is tearing
+   * down). Used by reader-side enqueues only; handler-side calls are covered by the existing handler-thread-interrupt
+   * mechanism in the reader's finally block.
+   */
+  private boolean enqueueForWriter(HTTP2Frame f) {
+    if (writerDead) {
+      // Fire-and-forget: callers intentionally ignore the boolean. The frame is dropped because the connection
+      // is tearing down; whatever the caller wanted to send (RST_STREAM, WINDOW_UPDATE, ACK) is moot once the
+      // peer has lost the socket.
+      logger.debug("Dropping frame [{}] — writer thread already dead", f);
+      return false;
+    }
+    try {
+      if (!writerQueue.offer(f, 5, TimeUnit.SECONDS)) {
+        logger.debug("Writer queue full for [5s]; declaring writer death and dropping frame [{}]", f);
+        writerDead = true;
+        return false;
+      }
+      return true;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
+  }
+
   private void goAway(HTTP2ErrorCode code) {
     if (goawaySent) {
       return; // Idempotent — only one GOAWAY per connection.
@@ -510,11 +548,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     goawaySent = true;
     // Use the highest seen client stream-id.
     // lastStreamId == -1 is reserved as the writer-shutdown sentinel and must never be used for a real GOAWAY.
-    try {
-      writerQueue.put(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
-    } catch (InterruptedException ignore) {
-      Thread.currentThread().interrupt();
-    }
+    enqueueForWriter(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
   }
 
   /**
@@ -536,11 +570,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
    * Use this for stream errors (RFC 9113 §5.4.2), not connection errors.
    */
   private void rstStream(int streamId, HTTP2ErrorCode code) {
-    try {
-      writerQueue.put(new HTTP2Frame.RSTStreamFrame(streamId, code.value));
-    } catch (InterruptedException ignore) {
-      Thread.currentThread().interrupt();
-    }
+    enqueueForWriter(new HTTP2Frame.RSTStreamFrame(streamId, code.value));
   }
 
   private void handleContinuationFrame(HTTP2Frame.ContinuationFrame f, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
@@ -617,18 +647,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       if (stream.receiveWindow() < (long) localSettings.initialWindowSize() / 2) {
         int delta = localSettings.initialWindowSize() - (int) stream.receiveWindow();
         stream.incrementReceiveWindow(delta);
-        try {
-          writerQueue.put(new HTTP2Frame.WindowUpdateFrame(f.streamId(), delta));
-        } catch (InterruptedException ignore) {
-          Thread.currentThread().interrupt();
-        }
+        enqueueForWriter(new HTTP2Frame.WindowUpdateFrame(f.streamId(), delta));
       }
       // Also replenish the connection-level window for the consumed bytes so the peer can keep sending.
-      try {
-        writerQueue.put(new HTTP2Frame.WindowUpdateFrame(0, f.payload().length));
-      } catch (InterruptedException ignore) {
-        Thread.currentThread().interrupt();
-      }
+      enqueueForWriter(new HTTP2Frame.WindowUpdateFrame(0, f.payload().length));
     }
   }
 
@@ -636,11 +658,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     // Enforce MAX_CONCURRENT_STREAMS before any per-stream allocation (headerAccum, ArrayBlockingQueue, etc.).
     // This ensures a HEADERS flood cannot exhaust heap even if the cap is reached.
     if (streams.size() >= localSettings.maxConcurrentStreams()) {
-      try {
-        writerQueue.put(new HTTP2Frame.RSTStreamFrame(f.streamId(), HTTP2ErrorCode.REFUSED_STREAM.value));
-      } catch (InterruptedException ignore) {
-        Thread.currentThread().interrupt();
-      }
+      enqueueForWriter(new HTTP2Frame.RSTStreamFrame(f.streamId(), HTTP2ErrorCode.REFUSED_STREAM.value));
       return;
     }
     headerAccum.reset();
@@ -663,11 +681,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       goAway(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
       return;
     }
-    try {
-      writerQueue.put(new HTTP2Frame.PingFrame(HTTP2Frame.FLAG_ACK, f.opaqueData()));
-    } catch (InterruptedException ignore) {
-      Thread.currentThread().interrupt();
-    }
+    enqueueForWriter(new HTTP2Frame.PingFrame(HTTP2Frame.FLAG_ACK, f.opaqueData()));
   }
 
   private void handleRSTStream(HTTP2Frame.RSTStreamFrame f) {
@@ -721,11 +735,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       }
     }
     // ACK the peer's SETTINGS.
-    try {
-      writerQueue.put(new HTTP2Frame.SettingsFrame(HTTP2Frame.FLAG_ACK, new byte[0]));
-    } catch (InterruptedException ignore) {
-      Thread.currentThread().interrupt();
-    }
+    enqueueForWriter(new HTTP2Frame.SettingsFrame(HTTP2Frame.FLAG_ACK, new byte[0]));
   }
 
   private void handleWindowUpdate(HTTP2Frame.WindowUpdateFrame f) {
