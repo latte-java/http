@@ -730,7 +730,14 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       return;
     }
     if (stream != null) {
-      stream.applyEvent(HTTP2Stream.Event.RECV_RST_STREAM);
+      try {
+        stream.applyEvent(HTTP2Stream.Event.RECV_RST_STREAM);
+      } catch (IllegalStateException ignored) {
+        // Stream already CLOSED — handler completed and sent END_STREAM before this RST arrived (common
+        // in rapid-reset patterns where the client RSTs every just-opened stream). The RST is now harmless;
+        // cleanup below is still safe to run.
+        logger.debug("RST_STREAM on already-closed stream [{}] — ignoring", f.streamId());
+      }
       streams.remove(f.streamId());
       BlockingQueue<byte[]> pipe = streamPipes.remove(f.streamId());
       markClosed(f.streamId());
