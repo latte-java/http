@@ -959,10 +959,18 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         streams.remove(stream.streamId());
         streamPipes.remove(stream.streamId());
       } catch (Exception e) {
-        logger.error("h2 handler exception", e);
-        // offer (not put) — the writer may already be dead and the queue full during connection teardown; we don't
-        // want this cleanup path to block. A dropped RST_STREAM during teardown is harmless: the socket is closing.
-        writerQueue.offer(new HTTP2Frame.RSTStreamFrame(stream.streamId(), HTTP2ErrorCode.INTERNAL_ERROR.value));
+        logger.error("h2 handler exception on stream [" + stream.streamId() + "]", e);
+        // offer with short timeout — the writer may already be dead and the queue full during connection teardown.
+        // We don't want this cleanup path to block, but a silently dropped RST_STREAM is worth a debug log so that
+        // backed-up writer-queue scenarios are visible.
+        try {
+          if (!writerQueue.offer(new HTTP2Frame.RSTStreamFrame(stream.streamId(), HTTP2ErrorCode.INTERNAL_ERROR.value),
+                                  100, TimeUnit.MILLISECONDS)) {
+            logger.debug("Dropped RST_STREAM(INTERNAL_ERROR) for stream [{}] — writer queue full or dead", stream.streamId());
+          }
+        } catch (InterruptedException ie) {
+          Thread.currentThread().interrupt();
+        }
         streams.remove(stream.streamId());
         streamPipes.remove(stream.streamId());
       } finally {
@@ -1052,26 +1060,27 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       synchronized (encoder) {
         headerBlock = encoder.encode(respFields);
       }
-      // If the client RST'd the stream, applyEvent(SEND_HEADERS_NO_END_STREAM) would throw because the
-      // state is CLOSED. Mark the stream as reset so the handler finishes without further errors.
-      // Do not enqueue the HEADERS frame — the stream was cancelled by the client.
-      if (stream.state() == HTTP2Stream.State.CLOSED) {
-        streamReset = true;
-        return;
-      }
-      try {
-        writerQueue.put(new HTTP2Frame.HeadersFrame(stream.streamId(), HTTP2Frame.FLAG_END_HEADERS, headerBlock));
-      } catch (InterruptedException ignore) {
-        Thread.currentThread().interrupt();
-      }
-      try {
-        stream.applyEvent(HTTP2Stream.Event.SEND_HEADERS_NO_END_STREAM);
-      } catch (IllegalStateException ignored) {
-        // Race: client sent RST_STREAM between the state check above and the applyEvent call.
-        // The HEADERS frame was already enqueued (writer will discard it per RFC 9113 §5.1).
-        // Mark stream as reset so subsequent handler writes go to /dev/null.
-        streamReset = true;
-        return;
+      // RFC 9113 §5.1 — frames (other than PRIORITY) MUST NOT be sent on a closed stream. Take the stream
+      // monitor across the state check, state transition, AND enqueue so a concurrent RECV_RST_STREAM on the
+      // reader thread cannot interleave between the check and the put. (HTTP2Stream's own methods are
+      // synchronized on the same monitor, so applyEvent is re-entrant here.)
+      synchronized (stream) {
+        if (stream.state() == HTTP2Stream.State.CLOSED) {
+          streamReset = true;
+          return;
+        }
+        try {
+          stream.applyEvent(HTTP2Stream.Event.SEND_HEADERS_NO_END_STREAM);
+        } catch (IllegalStateException ignored) {
+          // Should not occur now that the check + transition are atomic, but mark as reset for safety.
+          streamReset = true;
+          return;
+        }
+        if (!enqueueForWriter(new HTTP2Frame.HeadersFrame(stream.streamId(), HTTP2Frame.FLAG_END_HEADERS, headerBlock))) {
+          // Writer is dead; the connection is tearing down. Subsequent handler writes are no-ops.
+          streamReset = true;
+          return;
+        }
       }
       delegate = new HTTP2OutputStream(stream, writerQueue, peerSettings.maxFrameSize());
     }
