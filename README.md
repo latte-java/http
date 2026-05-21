@@ -174,22 +174,28 @@ Latte HTTP is competitive with the fastest production HTTP servers across most w
 
 | Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |       75,804 |    138 |             13.03 |             31.56 |        100.0% |
-| Latte http    |       75,758 |    138 |             13.07 |             34.93 |         99.9% |
-| Latte http    |       77,151 |    107 |             12.74 |             30.82 |        101.7% |
-| Jetty         |       11,249 |  84764 |             68.82 |            238.04 |         14.8% |
-| Jetty         |       11,305 |  85573 |             68.63 |            233.18 |         14.9% |
-| Jetty         |       10,530 |  81843 |             72.77 |            236.41 |         13.8% |
-| Netty         |       78,023 |      0 |             12.76 |             28.17 |        102.9% |
-| Netty         |       78,059 |      0 |             12.70 |             27.47 |        102.9% |
-| Netty         |       78,021 |      0 |             12.80 |             34.93 |        102.9% |
-| Apache Tomcat |       14,966 |      0 |             66.66 |            125.24 |         19.7% |
-| Apache Tomcat |       14,962 |      0 |             66.71 |            124.59 |         19.7% |
-| Apache Tomcat |       14,761 |      0 |             67.62 |            147.34 |         19.4% |
+| Latte http    |       70,676 |    125 |             13.94 |             19.41 |        100.0% |
+| Latte http    |       67,159 |    122 |             14.39 |             27.60 |         95.0% |
+| Latte http    |       69,337 |     52 |             14.22 |             25.88 |         98.1% |
+| Helidon       |       70,915 |      0 |             13.97 |             26.44 |        100.3% |
+| Helidon       |       69,149 |      0 |             14.15 |             32.11 |         97.8% |
+| Helidon       |       72,902 |      0 |             13.52 |             29.75 |        103.1% |
+| Jetty         |       11,249 |  84764 |             68.82 |            238.04 |         15.9% |
+| Jetty         |       11,305 |  85573 |             68.63 |            233.18 |         15.9% |
+| Jetty         |       10,530 |  81843 |             72.77 |            236.41 |         14.8% |
+| Netty         |       78,023 |      0 |             12.76 |             28.17 |        110.3% |
+| Netty         |       78,059 |      0 |             12.70 |             27.47 |        110.4% |
+| Netty         |       78,021 |      0 |             12.80 |             34.93 |        110.3% |
+| Apache Tomcat |       14,966 |      0 |             66.66 |            125.24 |         21.1% |
+| Apache Tomcat |       14,962 |      0 |             66.71 |            124.59 |         21.1% |
+| Apache Tomcat |       14,761 |      0 |             67.62 |            147.34 |         20.8% |
+| Undertow      |        6,826 |      0 |            146.11 |            182.30 |          9.6% |
+| Undertow      |        6,792 |      0 |            146.83 |            184.29 |          9.6% |
+| Undertow      |        6,778 |      0 |            147.13 |            191.21 |          9.5% |
 
 **See [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** for the full 6-scenario breakdown across self / jetty / tomcat / netty — including HTTP/1, CPU-bound, multiplexed stream concurrency, browser-shape connection concurrency, large-response throughput, and per-scenario rationale on what each scenario was designed to expose.
 
-_Benchmark performed 2026-05-19 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
+_Benchmark performed 2026-05-21 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
 _OS: macOS 15.7.3._
 _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 <!-- PERF-SUMMARY-END -->

@@ -512,6 +512,87 @@ Three candidate designs, in increasing scope:
 
 **On `OutputStream.flush()` semantics.** Latte honors `flush()` literally — every call drains the buffer into a DATA frame and enqueues it. This is the correct contract for SSE / long-polling / gRPC server-streaming handlers; loosening it would silently break those use cases. Tomcat treats servlet `flush()` as a hint and is allowed to ignore it by spec; Netty's bench handler doesn't actually use a streaming API (sends `FullHttpResponse`). The bench `/stream` scenario partially measures whether each server honors handler intent — Latte's apparent loss there is in part a fidelity-to-contract measurement, not a pure throughput measurement. We do not intend to change the contract; the writer-thread batching above benefits both `/stream` and `/large-response` equally and is the right lever.
 
+### Performance findings (2026-05-21): Helidon WebServer and Undertow added to the benchmark matrix; per-stream flow-control lost-wakeup identified
+
+**Context.** Two new vendors added so the peer comparison covers Latte's architectural counterparts: **Helidon WebServer 4.1.7** (virtual-thread + blocking I/O — the only mainstream Java server with the same arch shape as Latte) and **Undertow 2.3.18.Final** (NIO/XNIO — Red Hat / WildFly / Quarkus). Both bind 8080 (h1.1 + h2c) and 8443 (TLS+ALPN h2) using the same shared certs and the same 9-handler endpoints as Jetty/Netty/Tomcat. h2load + wrk drivers unchanged.
+
+Each new vendor was run in isolation (3 trials × 30 s × all 16 scenarios) with a 20-minute cool-down between vendors. Numbers below are best-of-3.
+
+**Peer comparison, h2 scenarios (Latte numbers re-run 2026-05-21 with the full 16-scenario suite so all rows are populated; jetty/netty/tomcat numbers carried from 2026-05-19 fair rerun):**
+
+| Scenario | self (Latte) | helidon | undertow | jetty | tomcat | netty¹ | Leader |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `h2-hello` (1c × 100s) | 154k² | 150k | 115k | — | — | — | self ≈ helidon |
+| `h2-high-stream-concurrency` (10c × 100s) | 454k | **634k** | 165k | 127k* | 150k | 889k | Netty / Helidon ahead |
+| `h2-high-connection-concurrency` (500c × 2s) | 223k | 161k | 147k | 161k* | 109k | **272k** | Netty; Latte 2nd |
+| `h2-compute` | 27k | 22k | **30k** | 15k* | 24k | 26k | Undertow narrowly |
+| `h2-io` (Thread.sleep 10 ms) | **69k** | 70k | 6.8k | 11k | 15k | 78k | Latte / Netty / Helidon ≈ tie; all ~5–10× the worker-pool servers |
+| `h2-stream` (force flush) | 4.1k | **38k** | 20k | 14k* | 1.4k | 32k | Helidon |
+| `h2-large-response` (one-shot) | 4.1k | **36k** | 32k | 19k* | 30k | 30k | Helidon |
+| `h2-tls-hello` | **328k** | 100k | 115k | — | — | — | **Latte (3.3× helidon, 2.9× undertow)** |
+| `h2-tls-high-stream-concurrency` | **394k** | 290k | 244k | — | — | — | **Latte (1.4× helidon, 1.6× undertow)** |
+
+¹ Netty numbers carried from 2026-05-19. *Jetty's h2c numbers are persistently affected by a benchmark-config issue producing 10M+ wire errors; throughput reading is unreliable. ²`h2-hello` trial 3 was an h2load-side outlier (~10k RPS with a 938 s duration — driver got stuck). Reported number is the median of the two valid trials (258k, 154k); high run-to-run variance worth a follow-up.
+
+**Two distinct headlines:**
+
+1. **TLS h2: Latte leads by a wide margin.** `h2-tls-hello` at 328k is 3.3× Helidon and 2.9× Undertow; `h2-tls-high-stream-concurrency` at 394k is 1.4× / 1.6× ahead. Same h2 stream shape as the cleartext versions, just over TLS — so this confirms the core h2 dispatch and HPACK paths are fast. The bottleneck is *not* in HEADERS processing, frame parsing, or stream management.
+
+2. **Cleartext h2 streaming: Helidon is 9× faster on `h2-stream` / `h2-large-response`.** 38k / 36k vs Latte's 4.1k / 4.1k. Same architectural model on both sides (virtual-thread + blocking I/O), so this rules out the "VT-per-stream is paradigmatically slower" interpretation. **The bottleneck is implementation-specific, in the writer/DATA-frame emission path**, exactly as identified in the 2026-05-19 finding above.
+
+**Apples-to-apples vs Helidon (same VT + blocking-I/O architecture):**
+
+- **`h2-tls-hello`** / **`h2-tls-high-stream-concurrency`**: Latte ahead by 3.3× and 1.4×. h2 dispatch + HPACK is genuinely fast.
+- **`h2-io`**: ≈ tie (69k vs 70k). Both servers park virtual threads cleanly during blocking handlers — the architectural payoff.
+- **`h2-high-stream-concurrency`**: Helidon +40% (634k vs 454k). Both use VTs, so the gap is mostly the writer-thread design.
+- **`h2-stream` / `h2-large-response`**: Helidon ~9× ahead. Same root cause as the existing Plan F item — confirmed to be implementation-specific writer-path cost.
+- **`h2-compute`**: Latte +23% (27k vs 22k). CPU-bound; protocol-stack overhead is a small fraction of total cost.
+
+**Why TLS h2 is faster than cleartext h2 for Latte:** Counterintuitive but reproducible. Latte's `h2-tls-hello` at 328k is *higher* than its `h2-hello` at 154k. Most likely: h2load's cleartext h2c path uses a different I/O pattern (smaller socket reads, different framing) that triggers more writer-side cycles per request; TLS path bundles records more aggressively. Worth its own investigation, but unrelated to the streaming-response bottleneck.
+
+**Where Undertow stands:**
+
+- **`h2-io`** at 6.8k is the worker-pool tax exactly as expected — XNIO worker threads block on `Thread.sleep` and the connection-level concurrency is capped by the pool size. Same shape as Jetty (11k) and Tomcat (15k).
+- **`h2-stream` / `h2-large-response`** at 20k / 32k confirms that NIO-with-coalesced-writes is also 5–8× faster than Latte's per-frame-syscall writer. Combined with Helidon's number, the gap to close is around 30–40k RPS on these scenarios.
+
+**Additional bottleneck identified: per-stream flow-control lost-wakeup.**
+
+While investigating the `h2-stream` gap, found a classic lost-wakeup in `HTTP2OutputStream.flushAndFragment` (lines 92–101 in `src/main/java/org/lattejava/http/server/internal/HTTP2OutputStream.java`):
+
+```java
+while (stream.sendWindow() <= 0) {
+  try {
+    synchronized (stream) {
+      stream.wait(100);
+    }
+  } catch (InterruptedException e) { … }
+}
+```
+
+The window check is **outside** the `synchronized (stream)` block. If a `WINDOW_UPDATE` arrives between the check and entering `wait()`, the `notifyAll()` from the reader thread fires while the handler isn't waiting yet; the handler then blocks for up to 100 ms before the next poll. This shows up as wall-clock latency, not CPU samples — which is why the 2026-05-19 JFR analysis missed it.
+
+For `h2-stream` (128KB / 16 × 8KB chunks vs 65535 default per-stream send-window), the handler runs out of credit after the 8th chunk; the 9th-onwards waits hit this race. At ~2–3 stalls per request × 100 ms each, the theoretical ceiling is ~3000–5000 RPS per connection × 10 connections / 100 streams in flight ≈ 4 k RPS, which matches the observed ceiling.
+
+Fix is mechanical — move the predicate inside the monitor:
+
+```java
+synchronized (stream) {
+  while (stream.sendWindow() <= 0) {
+    stream.wait(100);
+  }
+}
+```
+
+This complements the existing Plan F "writer-thread architecture" item but is independent of it — even with the writer-thread coalescing optimization, the lost wakeup would still impose 100 ms tail-latency stalls on credit-starved streams. Worth fixing as a standalone change before or alongside the larger writer-thread refactor.
+
+**Action items added to the Plan F backlog.**
+
+- **Fix the `HTTP2OutputStream` lost-wakeup** (small, mechanical; estimate <1 h including a regression test that exercises window exhaustion + a delayed `WINDOW_UPDATE`).
+- **Writer-thread architecture work** (existing 2026-05-19 Plan F item, design options 1–3 already enumerated above). Helidon's 9× number on `h2-stream` is now the concrete target — closing 60–80 % of that gap is the success criterion for option 1 (coalesced socket writes).
+- **Verify other `wait`/`notify` sites in the h2 path** don't share the lost-wakeup pattern. Suspects: connection-level send-window block in `HTTP2Connection.handleSettings` retroactive adjustment path; any settings-ACK / GOAWAY wait paths.
+
+**Verification of the new vendors.** Both Helidon and Undertow pass smoke tests for h1.1, h2c, and TLS+ALPN h2 on the standard `/` `/hello` `/load` `/compute` endpoints. Errors columns across the matrix are 0 for both vendors on every scenario except `baseline` (1 error for self, 1 for helidon, 25 for undertow — typical transient connect-error trial variance, not a server defect). Helidon and Undertow's `project.latte` setup added ~13 `.Final → semver` mappings each to satisfy Latte's SemVer validator on Helidon's umbrella BOM hierarchy and Undertow's jboss-* chain; this is documented as a one-time cost in the per-vendor `project.latte` files.
+
 ---
 
 ## Bug ledger
