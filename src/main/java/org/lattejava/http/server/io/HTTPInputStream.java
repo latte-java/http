@@ -120,7 +120,9 @@ public class HTTPInputStream extends InputStream {
     // This covers both the case where nobody called read() yet (!initialized) and the case where
     // the handler called readAllBytes() / read() on a bodyless request (GET/HEAD) — both result in
     // an empty underlying stream, so allocating the skip buffer and looping is pointless.
-    if (!request.hasBody()) {
+    // Null guard: subclasses constructed via the no-arg constructor (EmptyHTTPInputStream) leave request null;
+    // they MUST override drain() to avoid reaching here, but the guard makes the failure mode graceful if not.
+    if (request == null || !request.hasBody()) {
       return 0;
     }
 

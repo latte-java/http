@@ -461,8 +461,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       }
       try {
         existingStream.applyEvent(HTTP2Stream.Event.RECV_HEADERS_END_STREAM);
-      } catch (IllegalStateException ignored) {
-        // Race with concurrent RST_STREAM — stream is already closed; nothing to do.
+      } catch (IllegalStateException e) {
+        // Race with concurrent RST_STREAM — stream is already closed; trailers harmless. Log so unexpected
+        // state-machine transitions in future refactors are visible.
+        logger.debug("Trailers HEADERS ignored on stream [{}] in state [{}]", existingStream.streamId(), existingStream.state(), e);
       }
       return;
     }

@@ -101,7 +101,19 @@ public class HTTPServerThread extends Thread {
         }
 
         Throughput throughput = new Throughput(configuration.getReadThroughputCalculationDelay().toMillis(), configuration.getWriteThroughputCalculationDelay().toMillis());
-        ClientConnection conn = ProtocolSelector.select(clientSocket, configuration, context, instrumenter, listener, throughput);
+        ClientConnection conn;
+        try {
+          conn = ProtocolSelector.select(clientSocket, configuration, context, instrumenter, listener, throughput);
+        } catch (IOException e) {
+          // Protocol selection failed (TLS handshake error, h2c-preface peek error, etc.). Close the accepted
+          // socket so the file descriptor does not leak; the outer accept loop continues.
+          logger.debug("Protocol selection failed; closing socket", e);
+          try {
+            clientSocket.close();
+          } catch (IOException ignore) {
+          }
+          continue;
+        }
         Thread client = Thread.ofVirtual()
                               .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
                               .start((Runnable) conn);
