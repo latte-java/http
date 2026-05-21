@@ -621,9 +621,21 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       }
       stream.consumeReceiveWindow(f.payload().length);
       try {
-        pipe.put(f.payload());
+        long timeoutMs = configuration.getHTTP2HandlerReadTimeout().toMillis();
+        if (!pipe.offer(f.payload(), timeoutMs, TimeUnit.MILLISECONDS)) {
+          // RFC 9113 §5.2 flow control is the intended back-pressure mechanism — but if a handler is not consuming
+          // its body at all (stuck or buggy), the per-stream pipe fills and blocking the reader thread would freeze
+          // every other stream on this connection. Cancel the offending stream instead.
+          logger.debug("h2 handler on stream [{}] did not consume body within [{}ms]; sending RST_STREAM(CANCEL)",
+              f.streamId(), timeoutMs);
+          rstStream(f.streamId(), HTTP2ErrorCode.CANCEL);
+          streams.remove(f.streamId());
+          streamPipes.remove(f.streamId());
+          return;
+        }
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
+        return;
       }
     }
     if ((f.flags() & HTTP2Frame.FLAG_END_STREAM) != 0) {

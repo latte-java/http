@@ -42,6 +42,7 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   private String contextPath = "";
   private ExpectValidator expectValidator = new AlwaysContinueExpectValidator();
   private HTTPHandler handler;
+  private Duration http2HandlerReadTimeout = Duration.ofSeconds(10);
   private Duration http2KeepAlivePingInterval;
   private HTTP2RateLimits http2RateLimits = HTTP2RateLimits.defaults();
   private HTTP2Settings http2Settings = HTTP2Settings.defaults();
@@ -131,6 +132,16 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public HTTPHandler getHandler() {
     return handler;
+  }
+
+  /**
+   * @return The duration the connection reader will wait for an HTTP/2 handler to consume a DATA frame from its per-stream
+   *     input pipe before cancelling the offending stream with RST_STREAM(CANCEL). Defaults to 10 seconds. Flow control
+   *     is the intended back-pressure mechanism — this is a safety net so a stuck or buggy handler cannot freeze every
+   *     other stream sharing the connection by blocking the reader thread on a full pipe.
+   */
+  public Duration getHTTP2HandlerReadTimeout() {
+    return http2HandlerReadTimeout;
   }
 
   /**
@@ -446,6 +457,20 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   public HTTPServerConfiguration withHandler(HTTPHandler handler) {
     Objects.requireNonNull(handler, "You cannot set the handler to null");
     this.handler = handler;
+    return this;
+  }
+
+  /**
+   * Sets the duration the connection reader will wait for an HTTP/2 handler to consume a DATA frame from its per-stream
+   * input pipe. When the timeout elapses the offending stream is cancelled with RST_STREAM(CANCEL) and the reader proceeds
+   * to serve other streams on the same connection. Defaults to 10 seconds. Cannot be null.
+   *
+   * @param d The handler read timeout duration.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2HandlerReadTimeout(Duration d) {
+    Objects.requireNonNull(d, "You cannot set the HTTP/2 handler read timeout to null");
+    this.http2HandlerReadTimeout = d;
     return this;
   }
 
