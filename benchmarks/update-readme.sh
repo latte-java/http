@@ -67,6 +67,8 @@ server_display_name() {
     jetty)           echo "Jetty" ;;
     netty)           echo "Netty" ;;
     tomcat)          echo "Apache Tomcat" ;;
+    helidon)         echo "Helidon" ;;
+    undertow)        echo "Undertow" ;;
     *)               echo "$1" ;;
   esac
 }

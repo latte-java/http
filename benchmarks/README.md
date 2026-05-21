@@ -165,7 +165,7 @@ This reads the most recent JSON from `results/` and replaces the `## Performance
 
 ## Performance testing & profiling (`self`)
 
-`run-benchmarks.sh` answers "how do we compare to Jetty/Netty/Tomcat?". For
+`run-benchmarks.sh` answers "how do we compare to Jetty/Netty/Tomcat/Helidon/Undertow?". For
 the different question — "did my change to `self` actually help?" — use
 `perf-test.sh`. It runs wrk against `self` only, attaches a JFR recording to
 the JVM, and emits a single JSON file with both wrk metrics (RPS, latency,

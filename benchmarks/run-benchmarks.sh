@@ -34,7 +34,7 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null && pwd)"
 
 # Defaults
-ALL_SERVERS="self jdk-httpserver jetty netty tomcat"
+ALL_SERVERS="self jdk-httpserver jetty netty tomcat helidon undertow"
 ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers h2-hello h2-high-stream-concurrency h2-high-connection-concurrency h2-compute h2-io h2-stream h2-large-response h2-tls-hello h2-tls-high-stream-concurrency"
 SERVERS="${ALL_SERVERS}"
 SCENARIOS="${ALL_SCENARIOS}"

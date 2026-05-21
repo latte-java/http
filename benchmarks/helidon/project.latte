@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026 Latte Java
+ * SPDX-License-Identifier: MIT
+ */
+helidonVersion = "4.1.7"
+
+project(group: "org.lattejava", name: "helidon", version: "0.1.0", licenses: ["Apache-2.0"]) {
+  workflow {
+    standard()
+
+    semanticVersions {
+      // Helidon's parent BOM pulls many non-semver versions transitively. Mappings added as discovered.
+      mapping(id: "com.oracle.database.jdbc:ojdbc-bom:23.6.0.24.10", version: "23.6.0")
+      mapping(id: "io.netty:netty-bom:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-buffer:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-codec:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-codec-http:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-codec-http2:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-common:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-handler:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-parent:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-resolver:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-transport:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-transport-classes-epoll:4.1.118.Final", version: "4.1.118")
+      mapping(id: "io.netty:netty-transport-native-unix-common:4.1.118.Final", version: "4.1.118")
+    }
+  }
+
+  dependencies {
+    group(name: "compile") {
+      dependency(id: "io.helidon.webserver:helidon-webserver:${helidonVersion}", skipCompatibilityCheck: true)
+      dependency(id: "io.helidon.webserver:helidon-webserver-http2:${helidonVersion}", skipCompatibilityCheck: true)
+    }
+  }
+}
+
+// Plugins
+dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.1.5")
+file = loadPlugin(id: "org.lattejava.plugin:file:0.1.5")
+java = loadPlugin(id: "org.lattejava.plugin:java:0.1.6")
+
+java.settings.javaVersion = "21"
+java.settings.compilerArguments = ""
+java.settings.mainDependencies = [
+    [group: "compile", transitive: true, fetchSource: false, transitiveGroups: ["compile", "runtime"]]
+]
+
+target(name: "clean", description: "Cleans the build directory") {
+  java.clean()
+}
+
+target(name: "compile", description: "Compiles the Java source files") {
+  java.compile()
+}
+
+target(name: "jar", description: "Builds the project JARs", dependsOn: ["compile"]) {
+  java.jar()
+}
+
+target(name: "app", description: "Builds the app", dependsOn: ["jar"]) {
+  dependency.copy(to: "build/dist/lib") {
+    dependencies(group: "compile", transitive: true, fetchSource: false)
+  }
+
+  file.copy(to: "build/dist/lib") {
+    fileSet(dir: "build/jars")
+  }
+
+  file.copy(to: "build/dist") {
+    fileSet(dir: "src/main/script")
+  }
+}
+
+target(name: "start", description: "Starts the Helidon server for load testing!", dependsOn: ["app"]) {
+  if (new ProcessBuilder('./start.sh').directory(new File("build/dist")).inheritIO().start().waitFor() != 0) {
+    fail("Unable to start the server!")
+  }
+}
