@@ -17,6 +17,68 @@ import static org.testng.Assert.*;
  */
 public class ProtocolSwitchTest extends BaseTest {
   @Test
+  public void h2c_upgrade_with_chunked_body_rejected_with_400() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cUpgradeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = new Socket("127.0.0.1", server.getActualPort())) {
+        var out = sock.getOutputStream();
+        String preamble =
+            "POST / HTTP/1.1\r\n"
+            + "Host: localhost\r\n"
+            + "Connection: Upgrade, HTTP2-Settings\r\n"
+            + "Upgrade: h2c\r\n"
+            + "HTTP2-Settings: \r\n"
+            + "Transfer-Encoding: chunked\r\n"
+            + "\r\n"
+            + "4\r\nbody\r\n0\r\n\r\n";
+        out.write(preamble.getBytes());
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        byte[] buf = new byte[256];
+        int n = in.read(buf);
+        assertTrue(n > 0, "Expected a response from the server");
+        String response = new String(buf, 0, n);
+        assertTrue(response.startsWith("HTTP/1.1 400"),
+            "Expected 400 Bad Request for h2c-Upgrade with chunked body; got [" + response.split("\r\n")[0] + "]");
+      }
+    }
+  }
+
+  @Test
+  public void h2c_upgrade_with_request_body_rejected_with_400() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cUpgradeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = new Socket("127.0.0.1", server.getActualPort())) {
+        var out = sock.getOutputStream();
+        String preamble =
+            "POST / HTTP/1.1\r\n"
+            + "Host: localhost\r\n"
+            + "Connection: Upgrade, HTTP2-Settings\r\n"
+            + "Upgrade: h2c\r\n"
+            + "HTTP2-Settings: \r\n"
+            + "Content-Length: 4\r\n"
+            + "\r\n"
+            + "body";
+        out.write(preamble.getBytes());
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        byte[] buf = new byte[256];
+        int n = in.read(buf);
+        assertTrue(n > 0, "Expected a response from the server");
+        String response = new String(buf, 0, n);
+        assertTrue(response.startsWith("HTTP/1.1 400"),
+            "Expected 400 Bad Request for h2c-Upgrade with body; got [" + response.split("\r\n")[0] + "]");
+      }
+    }
+  }
+
+  @Test
   public void switch_protocols_writes_101_then_invokes_handler() throws Exception {
     AtomicBoolean handlerInvoked = new AtomicBoolean(false);
     HTTPHandler handler = (req, res) -> {

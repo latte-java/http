@@ -172,6 +172,14 @@ public class HTTP1Worker implements ClientConnection, Runnable {
         if (listener.isH2cUpgradeEnabled()) {
           String upgrade = request.getHeader("Upgrade");
           if (upgrade != null && upgrade.equalsIgnoreCase("h2c")) {
+            // RFC 9113 §3.2 — h2c Upgrade does NOT permit a request body to carry over. The original HTTP/1.1 body bytes
+            // would remain on the socket after the 101, and the new HTTP/2 reader would mis-interpret them as frames
+            // (request smuggling / protocol confusion). Until Plan E maps the original request into stream 1, refuse any
+            // h2c-Upgrade that declares a body.
+            if (request.hasBody()) {
+              closeSocketOnError(response, Status.BadRequest);
+              return;
+            }
             // RFC 9113 §3.2 requires HTTP2-Settings to be present. The preamble parser drops headers with empty values, so
             // a null here may mean "present but empty" rather than truly absent. Treat both null and empty as an empty
             // settings payload — the practical effect is identical (no peer settings overrides), and rejecting empty
