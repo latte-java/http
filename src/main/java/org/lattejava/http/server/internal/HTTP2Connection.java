@@ -137,6 +137,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       socketIn = in;
       var out = new ThroughputOutputStream(socket.getOutputStream(), throughput);
 
+      // Pre-size buffers to our advertised SETTINGS_MAX_FRAME_SIZE so we can read inbound frames the peer
+      // sends within the limit we declared, and write outbound frames up to the same size. The write buffer
+      // may be grown again below if peer SETTINGS advertise a larger MAX_FRAME_SIZE than our own.
+      buffers.ensureFrameReadCapacity(localSettings.maxFrameSize());
+      buffers.ensureFrameWriteCapacity(localSettings.maxFrameSize());
       var writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
       var reader = new HTTP2FrameReader(in, buffers.frameReadBuffer());
 
@@ -182,6 +187,14 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         return;
       }
       peerSettings.applyPayload(settings.payload());
+
+      // RFC 9113 §4.2: outbound DATA frames may be up to peer's SETTINGS_MAX_FRAME_SIZE. Grow the write buffer
+      // if the peer accepts larger frames than we configured locally; the writer holds a byte[] reference, so
+      // we must rebuild it to pick up the new buffer. Safe to swap here — the writer thread has not started yet.
+      if (peerSettings.maxFrameSize() > localSettings.maxFrameSize()) {
+        buffers.ensureFrameWriteCapacity(peerSettings.maxFrameSize());
+        writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
+      }
 
       // Send SETTINGS ACK.
       writer.writeFrame(new HTTP2Frame.SettingsFrame(HTTP2Frame.FLAG_ACK, new byte[0]));

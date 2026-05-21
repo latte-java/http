@@ -56,7 +56,14 @@ public class HPACKDecoder {
 
   // Decodes an N-prefix integer per RFC 7541 §5.1.
   // Returns a packed long: high 32 bits = decoded value, low 32 bits = nextIndex.
-  static long decodeInt(byte[] block, int i, int prefixBits) {
+  //
+  // RFC 7541 §3.3 requires malformed inputs to surface as COMPRESSION_ERROR rather than a runtime crash.
+  // Two attacker-controlled failure modes are bounded here:
+  //   1) Truncated continuation: the input ends with the continuation bit set on the last byte.
+  //   2) Overlong continuation: enough continuation bytes to overflow the int accumulator. We cap the
+  //      shift at 28 bits (≤ 4 continuation bytes), which lets HPACK express values up to ~268M — well
+  //      beyond any realistic header table index or string length.
+  static long decodeInt(byte[] block, int i, int prefixBits) throws IOException {
     int max = (1 << prefixBits) - 1;
     int v = block[i] & max;
     i++;
@@ -66,6 +73,12 @@ public class HPACKDecoder {
     int m = 0;
     int b;
     do {
+      if (i >= block.length) {
+        throw new IOException("HPACK integer truncated: continuation bit set at end of header block");
+      }
+      if (m > 28) {
+        throw new IOException("HPACK integer overflow: more than 4 continuation bytes");
+      }
       b = block[i++] & 0xFF;
       v += (b & 0x7F) << m;
       m += 7;
@@ -97,11 +110,14 @@ public class HPACKDecoder {
     return new NameValuePair(new HPACKDynamicTable.HeaderField(name, v.value()), v.nextIndex());
   }
 
-  private StringResult readString(byte[] block, int i) {
+  private StringResult readString(byte[] block, int i) throws IOException {
     boolean huffman = (block[i] & 0x80) != 0;
     long r = decodeInt(block, i, 7);
     int len = (int) (r >>> 32);
     int start = (int) r;
+    if (len < 0 || start > block.length - len) {
+      throw new IOException("HPACK string length [" + len + "] exceeds remaining header block");
+    }
     byte[] raw = new byte[len];
     System.arraycopy(block, start, raw, 0, len);
     String s = huffman

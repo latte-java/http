@@ -74,6 +74,36 @@ public class HPACKDecoderTest {
     assertEquals(table.maxSize(), 0);
   }
 
+  // RFC 7541 §3.3 — malformed input must surface as COMPRESSION_ERROR (IOException), not a runtime crash.
+  // Truncated continuation: indexed-header field with prefix saturated (0xFF) plus a single continuation byte
+  // whose high bit is set, with no following byte to read.
+  @Test
+  public void decode_truncated_integer_continuation_throws_ioexception() {
+    byte[] block = {(byte) 0xFF, (byte) 0x80};
+    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    assertThrows(IOException.class, () -> decoder.decode(block));
+  }
+
+  // Overlong integer continuation: five continuation bytes all with high bit set would overflow the int
+  // accumulator. RFC 7541 §5.1 doesn't specify a max, but implementations must bound it.
+  @Test
+  public void decode_overlong_integer_continuation_throws_ioexception() {
+    byte[] block = {(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0x7F};
+    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    assertThrows(IOException.class, () -> decoder.decode(block));
+  }
+
+  // Literal string with length running past the end of the header block must throw, not crash with
+  // ArrayIndexOutOfBoundsException.
+  @Test
+  public void decode_string_length_past_end_throws_ioexception() {
+    // 0x40 = literal-with-incremental-indexing, name-index = 0 (literal name follows).
+    // Next byte 0x0A claims a 10-byte name string, but only 2 bytes follow.
+    byte[] block = {(byte) 0x40, (byte) 0x0A, (byte) 'a', (byte) 'b'};
+    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    assertThrows(IOException.class, () -> decoder.decode(block));
+  }
+
   private static byte[] hex(String h) {
     h = h.replace(" ", "");
     byte[] out = new byte[h.length() / 2];

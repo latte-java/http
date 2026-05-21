@@ -84,7 +84,7 @@ Class layout in `org.lattejava.http.server.internal`:
 | Literal without indexing (§6.2.2) | ✅ | Used for sensitive headers (Authorization, Set-Cookie). — `HPACKDecoderTest`, `HPACKEncoderTest` |
 | Literal never-indexed (§6.2.3) | ✅ | Available for handler-marked-sensitive headers (future API). — `HPACKDecoderTest`, `HPACKEncoderTest` |
 | Huffman coding (Appendix B) | ✅ | Static code table. — `HPACKHuffmanTest` |
-| Header-name validation | ⚠️ | RFC 9113 §8.2 — HPACK decoder writes lowercase + ASCII; explicit validation (reject non-lowercase tchar → PROTOCOL_ERROR) deferred to Plan F. |
+| Header-name validation | ⚠️ | RFC 9113 §8.2 — uppercase ASCII rejection is enforced (`HTTP2Connection.validateHeaders`). Full tchar set check (e.g. reject space, comma, control chars) deferred to Plan F. |
 | Header-value validation | ⚠️ | HPACK decoder writes ASCII; explicit bare CR/LF/NUL rejection deferred to Plan F. |
 | `MAX_HEADER_LIST_SIZE` enforcement | ✅ | Cumulative byte budget enforced on the HEADERS+CONTINUATION accumulator in `HTTP2Connection.handleHeadersFrame` and `handleContinuationFrame`. GOAWAY(ENHANCE_YOUR_CALM) when exceeded. — `HTTP2SecurityTest.continuation_flood_triggers_goaway` |
 
@@ -121,9 +121,9 @@ Class layout in `org.lattejava.http.server.internal`:
 
 | Feature | Status | Notes |
 |---|---|---|
-| `:method`, `:scheme`, `:path`, `:authority` required | ✅ | All four must be present and exactly once. Validation order: pseudo-headers must precede regular headers. |
-| Connection-specific headers forbidden (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) | ⚠️ | Stream error PROTOCOL_ERROR. Runtime check incomplete; Plan F polish. |
-| Uppercase in header name forbidden | ⚠️ | Stream error PROTOCOL_ERROR. Runtime check incomplete; Plan F polish. |
+| `:method`, `:scheme`, `:path` required | ✅ | All three must be present and exactly once for non-CONNECT requests (RFC 9113 §8.3.1). `:authority` is recognized and mapped to the `Host` header when present, but is not required — the RFC makes it a SHOULD, not a MUST. Validation order: pseudo-headers must precede regular headers. CONNECT-specific pseudo-header rules (§8.5) deferred until the method is supported. |
+| Connection-specific headers forbidden (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, `Proxy-Connection`) | ✅ | Stream error PROTOCOL_ERROR. — `HTTP2Connection.validateHeaders`, `HTTP2HeaderValidationTest` |
+| Uppercase in header name forbidden | ✅ | Stream error PROTOCOL_ERROR. — `HTTP2Connection.validateHeaders`, `HTTP2HeaderValidationTest` |
 | `Cookie` coalescing across multiple headers | ⚠️ | Per RFC 9113 §8.2.3, h2 splits Cookie across multiple headers; coalescing with `; ` not yet implemented. Plan F. |
 | `getProtocol()` returns `"HTTP/2.0"` | ✅ | For handlers that need to discriminate. — `HTTP2BasicTest.get_round_trip_h2` |
 | `isKeepAlive()` returns `true` on h2 | ✅ | Multiplexed h2 connections are persistent by definition; the per-request close concept doesn't apply. — `HTTPRequest.isKeepAlive` |
@@ -256,7 +256,7 @@ How latte-java's HTTP/2 surface compares against the Java ecosystem leaders. Cap
 | Request trailers | ⚠️ (h2 deferred) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | gRPC interop tested | ⚠️ (sanity only) | ⚠️ via grpc-jetty | ⚠️ via servlet adapter | ✅ (native) | ⚠️ | ✅ |
 | Rapid Reset mitigation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| CONTINUATION flood mitigation | ⚠️ (partial) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CONTINUATION flood mitigation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Configurable concurrency cap | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Configurable initial window | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Virtual-thread per stream | ✅ | ⚠️ (config) | ⚠️ (config) | ❌ (event loop) | ❌ | ⚠️[^nima] |
