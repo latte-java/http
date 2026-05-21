@@ -103,13 +103,13 @@ public class HTTP11SocketTest extends BaseSocketTest {
   }
 
   /**
-   * RFC 9110 §7.6.1: Connection is a comma-separated list of tokens. A real-world request that wants to upgrade and close
-   * after the upgrade response will send {@code Connection: close, upgrade}. Our server must honor the {@code close}
-   * token and end the connection, even when other tokens appear alongside it.
+   * RFC 9110 §7.6.1: Connection is a comma-separated list of tokens. A real-world request that wants to upgrade and
+   * close after the upgrade response will send {@code Connection: close, upgrade}. Our server must honor the
+   * {@code close} token and end the connection, even when other tokens appear alongside it.
    * <p>
-   * Use case: client speaking HTTP/1.1 to a backend that emits something like {@code Connection: close, upgrade} when it
-   * does not want the connection reused after this exchange. Misclassifying this as keep-alive would leak connections
-   * and contradict the client's stated intent.
+   * Use case: client speaking HTTP/1.1 to a backend that emits something like {@code Connection: close, upgrade} when
+   * it does not want the connection reused after this exchange. Misclassifying this as keep-alive would leak
+   * connections and contradict the client's stated intent.
    */
   @Test
   public void connection_close_token_among_others_HTTP11() throws Exception {

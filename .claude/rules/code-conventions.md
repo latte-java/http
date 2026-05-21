@@ -119,24 +119,6 @@ import module java.base;
 
 Add a blank line between import groups.
 
-### Disambiguating same-named types across modules
-
-When two readable modules export a class with the same simple name, a `import module` declaration alone leaves the reference ambiguous and the file will not compile. Add a single-type import for the type you want — single-type imports take precedence over `import module` declarations and resolve the ambiguity without giving up the convention. Place the disambiguating import in its own group, after the module imports.
-
-### Example
-
-```java
-// Wrong — Cookie is ambiguous between org.lattejava.http.Cookie and com.inversoft.http.Cookie
-import module java.base;
-import module org.lattejava.http;
-
-// Right — single-type import wins
-import module java.base;
-import module org.lattejava.http;
-
-import org.lattejava.http.Cookie;
-```
-
 ## Order inside classes
 
 Inside a class, the order should always be:
@@ -149,3 +131,7 @@ Inside a class, the order should always be:
 - Inner classes (ordered by visibility then alphabetically)
 - Enum constants (ordered alphabetically)
 - Nested classes (ordered alphabetically)
+
+## Javadoc
+
+When Javadoc is written, use sentence structure, punctuation, and capitalization of common American English publications. This rule applies to @param, @return, @throws, and the main comment block.

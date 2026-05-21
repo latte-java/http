@@ -364,11 +364,13 @@ public final class HTTPTools {
         RequestPreambleState nextState = state.next(ch);
         if (nextState != state) {
           switch (state) {
-            case RequestMethod -> request.setMethod(HTTPMethod.of(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8)));
+            case RequestMethod ->
+                request.setMethod(HTTPMethod.of(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8)));
             case RequestPath -> request.setPath(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
             case RequestProtocol -> request.setProtocol(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
             case HeaderName -> headerName = new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8);
-            case HeaderValue -> request.addHeader(headerName, new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
+            case HeaderValue ->
+                request.addHeader(headerName, new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
           }
 
           // If the next state is storing, reset the buffer and seed it with the transition byte.
