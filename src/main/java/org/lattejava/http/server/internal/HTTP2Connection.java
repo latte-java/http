@@ -354,6 +354,15 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       } catch (HTTP2Settings.HTTP2SettingsException e) {
         // SETTINGS parameter validation failures bubble up from handleSettings(); convert to GOAWAY.
         goAway(e.errorCode);
+      } catch (Throwable t) {
+        // RFC 9113 §5.4.1 — any unhandled error during connection processing is a connection error.
+        // Emit GOAWAY(INTERNAL_ERROR) so the peer learns the connection died deliberately, not from a
+        // bare TCP FIN that looks indistinguishable from a network glitch. Must run before the finally
+        // enqueues the writer-shutdown sentinel, or the GOAWAY would be queued after the sentinel and
+        // never written. goAway is idempotent — safe even if an inner catch already emitted a more
+        // specific code.
+        logger.error("Unhandled exception in HTTP/2 reader; emitting GOAWAY(INTERNAL_ERROR)", t);
+        goAway(HTTP2ErrorCode.INTERNAL_ERROR);
       } finally {
         // Signal writer thread to exit cleanly.
         try {
