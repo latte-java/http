@@ -8,6 +8,8 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
+import org.lattejava.http.server.internal.HTTP2ErrorCode;
+
 import static org.testng.Assert.*;
 
 /**
@@ -136,6 +138,62 @@ public class HTTP2SecurityTest extends BaseTest {
         sock.setSoTimeout(5000);
         int errorCode = readUntilGoaway(sock.getInputStream());
         assertEquals(errorCode, 0x9, "Expected GOAWAY(COMPRESSION_ERROR=0x9); got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.1.2.6 — a malformed content-length (unparseable or negative) is a stream error of type
+   * PROTOCOL_ERROR. nghttp2, Caddy, and Apache Traffic Server all treat this consistently. Previously was
+   * silently ignored, letting the handler run with {@code declaredContentLength == -1} which disabled
+   * DATA-frame overflow protection.
+   */
+  @Test
+  public void malformed_content_length_yields_rst_stream_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // POST with content-length: "abc". HPACK encoding:
+        //   :method POST       (static idx 3)
+        //   :path /            (static idx 4)
+        //   :scheme http       (static idx 6)
+        //   :authority localhost (literal-with-indexing, name idx 1)
+        //   content-length abc (literal-with-indexing, name idx 28 [content-length], value "abc")
+        byte[] headers = new byte[]{
+            (byte) 0x83,
+            (byte) 0x84,
+            (byte) 0x86,
+            (byte) 0x41, 0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't',
+            (byte) 0x5c, 0x03, 'a', 'b', 'c'
+        };
+        writeFrameHeader(out, headers.length, 0x1, 0x4, 1); // HEADERS, END_HEADERS, no END_STREAM
+        out.write(headers);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        int rstStreamErrorCode = -1;
+        while (rstStreamErrorCode == -1) {
+          byte[] hdr = in.readNBytes(9);
+          if (hdr.length < 9) {
+            break;
+          }
+          int len = ((hdr[0] & 0xFF) << 16) | ((hdr[1] & 0xFF) << 8) | (hdr[2] & 0xFF);
+          int type = hdr[3] & 0xFF;
+          byte[] payload = in.readNBytes(len);
+          if (payload.length < len) {
+            break;
+          }
+          if (type == 0x3 && payload.length >= 4) {
+            // RST_STREAM: 4-byte error code.
+            rstStreamErrorCode = ((payload[0] & 0xFF) << 24) | ((payload[1] & 0xFF) << 16)
+                | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+          }
+        }
+        assertEquals(rstStreamErrorCode, HTTP2ErrorCode.PROTOCOL_ERROR.value,
+            "Expected RST_STREAM(PROTOCOL_ERROR=" + HTTP2ErrorCode.PROTOCOL_ERROR.value + "); got [" + rstStreamErrorCode + "]");
       }
     }
   }

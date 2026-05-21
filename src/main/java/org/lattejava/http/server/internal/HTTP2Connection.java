@@ -479,9 +479,19 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     for (var f : fields) {
       if (f.name().equals("content-length")) {
         try {
-          stream.setDeclaredContentLength(Long.parseLong(f.value()));
-        } catch (NumberFormatException ignore) {
-          // Malformed content-length — let handler deal with it.
+          long cl = Long.parseLong(f.value());
+          if (cl < 0) {
+            // RFC 9113 §8.1.2.6 — negative content-length is malformed; stream error PROTOCOL_ERROR.
+            logger.debug("Negative content-length [{}] on stream [{}]", cl, streamId);
+            rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+            return;
+          }
+          stream.setDeclaredContentLength(cl);
+        } catch (NumberFormatException e) {
+          // RFC 9113 §8.1.2.6 — unparseable content-length is a stream error of type PROTOCOL_ERROR.
+          logger.debug("Malformed content-length [{}] on stream [{}]", f.value(), streamId);
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return;
         }
         break;
       }
