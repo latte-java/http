@@ -426,7 +426,15 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   private void finalizeHeaderBlock(int streamId, int flags, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
-    List<HPACKDynamicTable.HeaderField> fields = decoder.decode(headerAccum.toByteArray());
+    List<HPACKDynamicTable.HeaderField> fields;
+    try {
+      fields = decoder.decode(headerAccum.toByteArray());
+    } catch (IOException e) {
+      // RFC 7541 §2.1 / RFC 9113 §4.3 — HPACK decode failure is a connection error of type COMPRESSION_ERROR.
+      logger.debug("HPACK decode failed on stream [{}]: [{}]", streamId, e.getMessage());
+      goAway(HTTP2ErrorCode.COMPRESSION_ERROR);
+      return;
+    }
 
     // Trailers path — a HEADERS block decoded for a stream that already exists. RFC 9113 §8.1.
     HTTP2Stream existingStream = streams.get(streamId);

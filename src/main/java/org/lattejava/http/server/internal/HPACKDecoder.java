@@ -86,9 +86,9 @@ public class HPACKDecoder {
     return ((long) v << 32) | (i & 0xFFFFFFFFL);
   }
 
-  private HPACKDynamicTable.HeaderField lookup(int index) {
+  private HPACKDynamicTable.HeaderField lookup(int index) throws IOException {
     if (index == 0) {
-      throw new IllegalStateException("HPACK index [0] is invalid per RFC 7541 §2.1");
+      throw new IOException("HPACK index [0] is invalid per RFC 7541 §2.1");
     }
     if (index <= HPACKStaticTable.SIZE) {
       return HPACKStaticTable.lookup(index);

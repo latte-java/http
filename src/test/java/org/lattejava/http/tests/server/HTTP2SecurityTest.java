@@ -116,6 +116,30 @@ public class HTTP2SecurityTest extends BaseTest {
     }
   }
 
+  /**
+   * RFC 7541 §2.1 — HPACK index 0 is invalid. RFC 9113 §4.3 — HPACK malformations are connection errors with
+   * code COMPRESSION_ERROR. Locks in the specific error-code mapping; the Task 3 "any GOAWAY" safety net stays
+   * in place as a backstop for genuinely unhandled exceptions.
+   */
+  @Test
+  public void hpack_index_zero_yields_goaway_compression_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS payload = 0x80 (indexed header field, index 0 — invalid per RFC 7541 §2.1).
+        writeFrameHeader(out, 1, 0x1 /* HEADERS */, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(new byte[]{(byte) 0x80});
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x9, "Expected GOAWAY(COMPRESSION_ERROR=0x9); got: " + errorCode);
+      }
+    }
+  }
+
   @Test
   public void ping_flood_triggers_goaway() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);

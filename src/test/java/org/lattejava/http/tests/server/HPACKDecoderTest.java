@@ -74,6 +74,17 @@ public class HPACKDecoderTest {
     assertEquals(table.maxSize(), 0);
   }
 
+  // RFC 7541 §2.1 — the zero index is reserved and MUST NOT be used. An indexed-header representation with index 0
+  // must surface as COMPRESSION_ERROR (IOException), not an unchecked IllegalStateException that escapes to the
+  // connection-level reader loop.
+  @Test(expectedExceptions = IOException.class,
+        expectedExceptionsMessageRegExp = ".*index.*0.*")
+  public void decode_index_zero_throws_ioexception_per_rfc_7541_section_2_1() throws Exception {
+    // RFC 7541 §6.1 indexed header field representation: high bit + 7-bit index. 0x80 = indexed, index 0 (invalid).
+    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    decoder.decode(new byte[]{(byte) 0x80});
+  }
+
   // RFC 7541 §3.3 — malformed input must surface as COMPRESSION_ERROR (IOException), not a runtime crash.
   // Truncated continuation: indexed-header field with prefix saturated (0xFF) plus a single continuation byte
   // whose high bit is set, with no following byte to read.

@@ -818,32 +818,6 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §5.4.1 — any unhandled exception during connection processing MUST result in a GOAWAY frame
-   * with an appropriate error code (INTERNAL_ERROR for unexpected exceptions) before the socket is closed.
-   * Trigger: HPACK index 0 currently throws an unchecked IllegalStateException that escapes the inner catches.
-   * Until Task 6 converts this to a proper COMPRESSION_ERROR path, the connection-level safety net must still
-   * emit GOAWAY(INTERNAL_ERROR) rather than dropping the socket silently.
-   */
-  @Test
-  public void unhandled_reader_exception_emits_goaway_before_close() throws Exception {
-    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
-    try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
-        var out = sock.getOutputStream();
-        // HEADERS payload = 0x80 (indexed header field, index 0 — invalid per RFC 7541 §2.1).
-        writeFrameHeader(out, 1, 0x1 /* HEADERS */, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
-        out.write(new byte[]{(byte) 0x80});
-        out.flush();
-
-        sock.setSoTimeout(5000);
-        int errorCode = readUntilGoaway(sock.getInputStream());
-        assertEquals(errorCode, 0x2, "Expected GOAWAY(INTERNAL_ERROR=0x2) for unhandled reader exception; got: " + errorCode);
-      }
-    }
-  }
-
-  /**
    * Drain inbound frames until RST_STREAM (type {@code 0x3}) arrives or the connection closes.
    * Returns the RST_STREAM error code, or {@code -1} if EOF or GOAWAY arrived first.
    */
