@@ -45,7 +45,7 @@ Class layout in `org.lattejava.http.server.internal`:
 |---|---|---|
 | h2 over TLS via ALPN (RFC 7301) | ✅ | Default-on for TLS listeners. Server advertises `["h2", "http/1.1"]`. Off-switch: `HTTPListenerConfiguration.enableHTTP2 = false`. — `HTTP2BasicTest`, `HTTP2ALPNTest` |
 | h2c prior-knowledge (cleartext) | ✅ | Opt-in: `HTTPListenerConfiguration.enableH2cPriorKnowledge = true`. Selector peeks the first 24 bytes for the connection preface. — `HTTP2H2cPriorKnowledgeTest` |
-| h2c via `Upgrade`/101 (cleartext) | ✅ | Opt-in via `withH2cUpgradeEnabled` (default-off). RFC 9113 deprecated the Upgrade flow in favor of prior-knowledge; default-off avoids conflicts with JDK `HttpClient`'s eager `Upgrade: h2c` on HTTP/1.1 connections. Retained for back-compat with older clients. — `HTTP2H2cUpgradeTest` |
+| h2c via `Upgrade`/101 (cleartext) | ✅ | Opt-in via `withH2cUpgradeEnabled` (default-off). RFC 9113 deprecated the Upgrade flow in favor of prior-knowledge; default-off avoids conflicts with JDK `HttpClient`'s eager `Upgrade: h2c` on HTTP/1.1 connections. Retained for back-compat with older clients. **h2c Upgrade requests with a body are rejected with 400 Bad Request** (`HTTP1Worker.validatePreamble`, short-circuits before 101). RFC 9113 §3.2 does not permit the original HTTP/1.1 body to carry over the 101 Switching Protocols boundary; until a future implementation maps the original request into implicit stream 1, body bytes would remain on the socket after the 101 and be mis-interpreted by the new HTTP/2 reader as frames — a request-smuggling / protocol-confusion footgun. — `HTTP2H2cUpgradeTest`, `ProtocolSwitchTest.h2c_upgrade_with_request_body_rejected_with_400`, `ProtocolSwitchTest.h2c_upgrade_with_chunked_body_rejected_with_400` |
 | Connection preface validation | ✅ | Exact bytes `PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n` required; mismatch → connection close. — `HTTP2ConnectionPrefaceTest` |
 | TLS 1.2 minimum (§9.2.1) | ✅ | JDK 21 disables TLSv1.0/1.1 by default. Implicit via JDK 21. |
 | TLS 1.2 cipher blocklist (§9.2.2) | ❌ | After ALPN selects `h2`, check `SSLSession.getCipherSuite()` against Appendix A blocklist; blocklisted → `GOAWAY(INADEQUATE_SECURITY)`. |
@@ -88,6 +88,8 @@ Class layout in `org.lattejava.http.server.internal`:
 | Header-value validation | ⚠️ | HPACK decoder writes ASCII; explicit bare CR/LF/NUL rejection deferred to Plan F. |
 | `MAX_HEADER_LIST_SIZE` enforcement | ✅ | Cumulative byte budget enforced on the HEADERS+CONTINUATION accumulator in `HTTP2Connection.handleHeadersFrame` and `handleContinuationFrame`. GOAWAY(ENHANCE_YOUR_CALM) when exceeded. — `HTTP2SecurityTest.continuation_flood_triggers_goaway` |
 
+**HPACK index 0** in an indexed-header-field representation is invalid (RFC 7541 §6.1 reserves index 0). The decoder throws `IOException`; `HTTP2Connection.finalizeHeaderBlock` maps that to `GOAWAY(COMPRESSION_ERROR)` (RFC 9113 §4.3 — HPACK malformations are connection errors). — `HPACKDecoderTest.decode_index_zero_throws_ioexception_per_rfc_7541_section_2_1`, `HTTP2SecurityTest.hpack_index_zero_yields_goaway_compression_error`
+
 ---
 
 ## 4. Stream lifecycle (RFC 9113 §5.1)
@@ -114,6 +116,8 @@ Class layout in `org.lattejava.http.server.internal`:
 | `SETTINGS_INITIAL_WINDOW_SIZE` | ✅ | Default 65535 (RFC default), configurable via `withHTTP2InitialWindowSize`. |
 | Window-size change retroactive adjustment (§6.9.2) | ✅ | When peer's `INITIAL_WINDOW_SIZE` changes mid-connection, all open streams' send-windows adjusted by the delta. — `HTTP2Connection.handleSettings`, `HTTP2FlowControlTest.send_window_can_go_negative_after_settings_decrease` |
 | Flow-control disabled for DATA flag | 🚫 | RFC 9113 doesn't define a way to disable flow control. |
+
+**Send-window signed-comparison invariant.** RFC 9113 §6.9.2 allows the send-window to become **negative** when peer SETTINGS retroactively shrinks `INITIAL_WINDOW_SIZE` below the bytes a sender has already in flight. Code that gates a send on available credit MUST use signed comparison (`window >= bytes`), not `window > 0`, and the window field must stay an `int` (not `long`/`unsigned`). This is an easy regression — a "harden against negative" refactor that flips to unsigned arithmetic would silently break §6.9.2 conformance. The current flow-control accounting in `HTTP2Stream` and `HTTP2OutputStream` follows this convention. — `HTTP2FlowControlTest.send_window_can_go_negative_after_settings_decrease`
 
 ---
 
@@ -183,6 +187,8 @@ All standard error codes implemented and emitted at the appropriate trigger:
 | `INADEQUATE_SECURITY` (0xc) | TLS 1.2 negotiated cipher in blocklist (§9.2.2). |
 | `HTTP_1_1_REQUIRED` (0xd) | Reserved; not currently emitted (we don't downgrade). |
 
+**Malformed `content-length` header.** An unparseable or negative value is a stream error of type `PROTOCOL_ERROR` (RFC 9113 §8.1.2.6). The check runs in `HTTP2Connection.finalizeHeaderBlock` before the handler is spawned; the stream is RST_STREAMed and never enters the `streams` map. This matches the behavior of nghttp2, Caddy, and Apache Traffic Server. — `HTTP2SecurityTest.malformed_content_length_yields_rst_stream_protocol_error`
+
 ---
 
 ## 10. Security and DoS mitigations
@@ -197,6 +203,7 @@ All standard error codes implemented and emitted at the appropriate trigger:
 | Empty-DATA flood (zero-length DATA without END_STREAM) | ⚠️ | Default: >100 in 30 s. Counter exists; dedicated test deferred (noted in `HTTP2SecurityTest`). |
 | WINDOW_UPDATE flood | ✅ | Default: >100/s. — `HTTP2SecurityTest.window_update_flood_triggers_goaway` |
 | Slow-read | ⚠️ | Existing `MinimumWriteThroughput` instrumentation flows through writer thread; dedicated test deferred. |
+| Slow / stuck handler stalling other streams on the same connection | ✅ | Connection-reader's `pipe.offer(timeout)` (`withHTTP2HandlerReadTimeout`, default 10 s) → `RST_STREAM(CANCEL)` on timeout. Prevents one slow handler from freezing every other stream on the connection. Not RFC-mandated; defensive — RFC 9113 §5.2 covers the legitimate back-pressure path via flow control. |
 | Header-name/value validation | ⚠️ | Reuses `HTTPTools.isTokenCharacter` and `isValueCharacter`. Explicit enforcement deferred to Plan F. |
 | Response-splitting defense | ✅ | Reuses choke point at `HTTPResponse.setHeader/addHeader/sendRedirect/Cookie` (audit Vuln 4 fix). Implicit via existing h1.1 defense. |
 
@@ -226,6 +233,7 @@ All standard error codes implemented and emitted at the appropriate trigger:
 
 | Knob | Default | RFC reference |
 |---|---|---|
+| `withHTTP2HandlerReadTimeout(Duration)` | 10 s | Bounds the connection-reader thread's `pipe.offer(...)` to the per-stream input pipe. If a handler virtual-thread does not consume its body within this window, the reader RST_STREAMs the offending stream with `CANCEL` and proceeds. RFC 9113 §5.2 flow control is the intended back-pressure mechanism — this is a safety net against handlers that genuinely fail to read. See §10. |
 | `withHTTP2HeaderTableSize(int)` | 4096 | §6.5.2 |
 | `withHTTP2InitialWindowSize(int)` | 65535 | §6.5.2 |
 | `withHTTP2MaxConcurrentStreams(int)` | 100 | §6.5.2 |
