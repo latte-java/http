@@ -202,35 +202,15 @@ _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 
 See [benchmarks/README.md](benchmarks/README.md) for full usage and options.
 
-## Todos and Roadmap
+## Protocol support
 
-### Server tasks
+Detailed conformance status lives in the per-version spec docs:
 
-* [x] Basic HTTP 1.1
-* [x] Support Accept-Encoding (gzip, deflate), by default and per response options.
-* [x] Support Content-Encoding (gzip, deflate)
-* [x] Support Keep-Alive
-* [x] Support Expect-Continue 100
-* [x] Support Transfer-Encoding: chunked on request for streaming.
-* [x] Support Transfer-Encoding: chunked on response
-* [x] Support cookies in request and response
-* [x] Support form data
-* [x] Support multipart form data
-* [x] Support TLS
-* [ ] Support trailers
-* [ ] Support HTTP 2
+- [HTTP/1.1](docs/specs/HTTP1.1.md) — implemented
+- [HTTP/2](docs/specs/HTTP2.md) — implemented (RFC 9113, HPACK, h2c, ALPN, gRPC)
+- [HTTP/3](docs/specs/HTTP3.md) — out of scope until JDK QUIC API
 
-### Client tasks
-
-* [ ] Basic HTTP 1.1
-* [ ] Support Keep-Alive
-* [ ] Support TLS
-* [ ] Support Expect-Continue 100
-* [ ] Support chunked request and response
-* [ ] Support streaming entity bodies
-* [ ] Support form data
-* [ ] Support multipart form data
-* [ ] Support HTTP 2
+The HTTP client is not yet implemented.
 
 ## FAQ
 
