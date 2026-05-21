@@ -40,7 +40,14 @@ public class HTTP2Settings {
                 | ((payload[i + 4] & 0xFF) << 8)  |  (payload[i + 5] & 0xFF);
 
       switch (id) {
-        case SETTINGS_HEADER_TABLE_SIZE -> headerTableSize = value;
+        case SETTINGS_HEADER_TABLE_SIZE -> {
+          // RFC 9113 §6.5.2: HEADER_TABLE_SIZE is unsigned 32-bit. Negative when read as signed int means the
+          // value exceeds 2^31-1 — treat as PROTOCOL_ERROR rather than silently clamping or disabling the table.
+          if (value < 0) {
+            throw new HTTP2SettingsException("HEADER_TABLE_SIZE exceeds 2^31-1 [" + (value & 0xFFFFFFFFL) + "]", HTTP2ErrorCode.PROTOCOL_ERROR);
+          }
+          headerTableSize = value;
+        }
         case SETTINGS_ENABLE_PUSH -> {
           // RFC 9113 §6.5.2: ENABLE_PUSH must be 0 or 1; any other value is a PROTOCOL_ERROR.
           if (value != 0 && value != 1) {
@@ -48,7 +55,14 @@ public class HTTP2Settings {
           }
           enablePush = value;
         }
-        case SETTINGS_MAX_CONCURRENT_STREAMS -> maxConcurrentStreams = value;
+        case SETTINGS_MAX_CONCURRENT_STREAMS -> {
+          // RFC 9113 §6.5.2: MAX_CONCURRENT_STREAMS is unsigned 32-bit. Negative means the peer claimed a value
+          // above 2^31-1; treat as PROTOCOL_ERROR rather than letting the negative int silently disable streams.
+          if (value < 0) {
+            throw new HTTP2SettingsException("MAX_CONCURRENT_STREAMS exceeds 2^31-1 [" + (value & 0xFFFFFFFFL) + "]", HTTP2ErrorCode.PROTOCOL_ERROR);
+          }
+          maxConcurrentStreams = value;
+        }
         case SETTINGS_INITIAL_WINDOW_SIZE -> {
           // RFC 9113 §6.5.2: values above 2^31-1 are a FLOW_CONTROL_ERROR.
           // Java interprets the 4-byte unsigned value as signed; values > 2^31-1 appear negative.
@@ -64,7 +78,14 @@ public class HTTP2Settings {
           }
           maxFrameSize = value;
         }
-        case SETTINGS_MAX_HEADER_LIST_SIZE -> maxHeaderListSize = value;
+        case SETTINGS_MAX_HEADER_LIST_SIZE -> {
+          // RFC 9113 §6.5.2 doesn't bound MAX_HEADER_LIST_SIZE explicitly, but it's an unsigned 32-bit count.
+          // A negative signed int (> 2^31-1) would break the cumulative-bytes guard in handleHeadersFrame.
+          if (value < 0) {
+            throw new HTTP2SettingsException("MAX_HEADER_LIST_SIZE exceeds 2^31-1 [" + (value & 0xFFFFFFFFL) + "]", HTTP2ErrorCode.PROTOCOL_ERROR);
+          }
+          maxHeaderListSize = value;
+        }
         default -> {} // unknown settings silently ignored per §6.5.2
       }
     }

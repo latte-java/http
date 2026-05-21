@@ -61,6 +61,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final Socket socket;
   private final long startInstant;
   private final Map<Integer, HTTP2Stream> streams = new ConcurrentHashMap<>();
+  // Active handler virtual-threads. Each handler adds itself on entry and removes itself in finally. The connection's
+  // teardown path interrupts every thread in this set so handlers parked on writerQueue.put() or in HTTP2OutputStream's
+  // flow-control wait loop unblock and propagate InterruptedIOException out of the user handler instead of leaking.
+  private final Set<Thread> handlerThreads = ConcurrentHashMap.newKeySet();
   private final Map<Integer, BlockingQueue<byte[]>> streamPipes = new ConcurrentHashMap<>();
   private final Throughput throughput;
   private final BlockingQueue<HTTP2Frame> writerQueue = new LinkedBlockingQueue<>(128);
@@ -279,10 +283,31 @@ public class HTTP2Connection implements ClientConnection, Runnable {
                 goAway(HTTP2ErrorCode.STREAM_CLOSED);
                 return;
               }
-              // RFC 9113 §5.1 — HEADERS on an already-open stream (e.g. HALF_CLOSED_REMOTE) is a stream error
-              // STREAM_CLOSED, not a connection error. Emit RST_STREAM and continue serving the connection.
-              if (streams.containsKey(f.streamId())) {
-                rstStream(f.streamId(), HTTP2ErrorCode.STREAM_CLOSED);
+              // RFC 9113 §8.1 — a second HEADERS block is valid only as request trailers, which require END_STREAM
+              // AND the stream still being open in the client→server direction (state OPEN or HALF_CLOSED_LOCAL —
+              // i.e. the client has not yet END_STREAM'd). Anything else (no END_STREAM, or stream already in
+              // HALF_CLOSED_REMOTE/CLOSED) is an illegal mid-stream HEADERS — stream error STREAM_CLOSED per §5.1.
+              HTTP2Stream existing = streams.get(f.streamId());
+              if (existing != null) {
+                boolean hasEndStream = (f.flags() & HTTP2Frame.FLAG_END_STREAM) != 0;
+                HTTP2Stream.State streamState = existing.state();
+                boolean clientStillOpen = streamState == HTTP2Stream.State.OPEN || streamState == HTTP2Stream.State.HALF_CLOSED_LOCAL;
+                if (!hasEndStream || !clientStillOpen) {
+                  rstStream(f.streamId(), HTTP2ErrorCode.STREAM_CLOSED);
+                  break;
+                }
+                // Trailers path — bypass the MAX_CONCURRENT_STREAMS gate (the stream already counts toward
+                // the cap and we're not opening a new one). The accumulator + size guards still apply.
+                headerAccum.reset();
+                headerAccum.write(f.headerBlockFragment());
+                if (headerAccum.size() > localSettings.maxHeaderListSize()) {
+                  goAway(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
+                  return;
+                }
+                if ((f.flags() & HTTP2Frame.FLAG_END_HEADERS) != 0) {
+                  finalizeHeaderBlock(f.streamId(), f.flags(), headerAccum, decoder, encoder);
+                }
+                headerBlockStreamId = (f.flags() & HTTP2Frame.FLAG_END_HEADERS) == 0 ? f.streamId() : null;
                 break;
               }
               if (f.streamId() <= highestSeenStreamId) {
@@ -350,6 +375,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       } catch (InterruptedException ignore) {
         Thread.currentThread().interrupt();
       }
+      // Interrupt any handler virtual-threads still parked on writerQueue.put or in the per-stream send-window
+      // wait loop — the connection is dead and they would otherwise hang until JVM exit. Each handler propagates
+      // InterruptedIOException out of its write path and exits via its own finally.
+      for (Thread t : handlerThreads) {
+        t.interrupt();
+      }
       // Graceful TCP teardown: shut down the output side (sends FIN to peer), drain any already-buffered
       // inbound bytes, then close. Without draining, close() on a socket with unread receive-buffer data
       // causes the OS to emit a TCP RST instead of a clean FIN — the peer sees "connection reset by peer".
@@ -377,12 +408,44 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private void finalizeHeaderBlock(int streamId, int flags, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
     List<HPACKDynamicTable.HeaderField> fields = decoder.decode(headerAccum.toByteArray());
 
+    // Trailers path — a HEADERS block decoded for a stream that already exists. RFC 9113 §8.1.
+    HTTP2Stream existingStream = streams.get(streamId);
+    if (existingStream != null) {
+      if (!validateHeaders(fields, streamId, true)) {
+        return;
+      }
+      // Deliver trailers to the same HTTPRequest the handler is processing, then signal EOF on the body
+      // pipe so the handler unblocks from any pending read. Trailers MUST be set before the EOF sentinel
+      // so the handler that reads-then-getTrailer sees a populated trailer map.
+      HTTPRequest request = existingStream.request();
+      if (request != null) {
+        for (var field : fields) {
+          request.addTrailer(field.name(), field.value());
+        }
+      }
+      BlockingQueue<byte[]> pipe = streamPipes.get(streamId);
+      if (pipe != null) {
+        try {
+          pipe.put(HTTP2InputStream.eofSentinel());
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      try {
+        existingStream.applyEvent(HTTP2Stream.Event.RECV_HEADERS_END_STREAM);
+      } catch (IllegalStateException ignored) {
+        // Race with concurrent RST_STREAM — stream is already closed; nothing to do.
+      }
+      return;
+    }
+
     if (!validateHeaders(fields, streamId, false)) {
       return;
     }
 
     HTTPRequest request = buildRequestFromHeaders(fields, streamId);
     HTTP2Stream stream = new HTTP2Stream(streamId, localSettings.initialWindowSize(), peerSettings.initialWindowSize());
+    stream.setRequest(request);
 
     // §8.1.2.6: track declared content-length for DATA frame validation.
     for (var f : fields) {
@@ -820,6 +883,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   private void spawnHandlerThread(HTTPRequest request, HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder) {
     Thread.ofVirtual().name("h2-handler-" + stream.streamId()).start(() -> {
+      Thread self = Thread.currentThread();
+      handlerThreads.add(self);
       try {
         // Use a lazy-header output stream: HEADERS are emitted on the first write or flush so that the
         // handler can interleave request reads and response writes (required for bidi-streaming).
@@ -844,13 +909,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         streamPipes.remove(stream.streamId());
       } catch (Exception e) {
         logger.error("h2 handler exception", e);
-        try {
-          writerQueue.put(new HTTP2Frame.RSTStreamFrame(stream.streamId(), HTTP2ErrorCode.INTERNAL_ERROR.value));
-        } catch (InterruptedException ignore) {
-          Thread.currentThread().interrupt();
-        }
+        // offer (not put) — the writer may already be dead and the queue full during connection teardown; we don't
+        // want this cleanup path to block. A dropped RST_STREAM during teardown is harmless: the socket is closing.
+        writerQueue.offer(new HTTP2Frame.RSTStreamFrame(stream.streamId(), HTTP2ErrorCode.INTERNAL_ERROR.value));
         streams.remove(stream.streamId());
         streamPipes.remove(stream.streamId());
+      } finally {
+        handlerThreads.remove(self);
       }
     });
   }

@@ -354,6 +354,51 @@ public class CoreTest extends BaseTest {
     }
   }
 
+  /**
+   * Regression: when HTTP1Worker.state() collapses its private {@code KeepAlive} state into {@code State.Read}, the
+   * HTTPServerThread cleaner applies its slow-reader throughput check to idle keep-alive sockets and evicts them
+   * after one cleaner cycle. A long-lived keep-alive socket whose first request finishes quickly accumulates a
+   * tiny number of bytes over a now-long elapsed time, which computes below any reasonable minimum-throughput
+   * threshold. This test sends one request, idles past two cleaner cycles, then sends a second request on the same
+   * raw socket — proving the server did NOT evict the connection.
+   */
+  @Test
+  public void keepAlive_idle_socket_not_evicted_by_throughput_cleaner() throws Exception {
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      res.setContentLength(0L);
+    };
+    try (var ignore = makeServer("http", handler)
+        .withKeepAliveTimeoutDuration(Duration.ofSeconds(60))
+        .start()) {
+      try (var sock = new java.net.Socket("127.0.0.1", 4242)) {
+        sock.setSoTimeout(15_000);
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+
+        out.write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n".getBytes());
+        out.flush();
+        byte[] buf1 = new byte[1024];
+        int n1 = in.read(buf1);
+        assertTrue(n1 > 0, "Should read first response");
+        assertTrue(new String(buf1, 0, n1).startsWith("HTTP/1.1 200"), "First response should be 200");
+
+        // The HTTPServerThread cleaner cycles every 2 seconds; sleep past at least two cycles so any incorrect
+        // eviction would already have closed our socket from the server side.
+        Thread.sleep(5_000);
+
+        // Second request on the same socket. If the cleaner had evicted the connection, the server would have
+        // closed its end and the read below would return -1 (EOF) or throw.
+        out.write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n".getBytes());
+        out.flush();
+        byte[] buf2 = new byte[1024];
+        int n2 = in.read(buf2);
+        assertTrue(n2 > 0, "Idle keep-alive socket was evicted by the cleaner — second request returned no response");
+        assertTrue(new String(buf2, 0, n2).startsWith("HTTP/1.1 200"), "Second response should be 200");
+      }
+    }
+  }
+
   @Test
   public void keepAlive_maxRequests() throws Exception {
     // While using a persistent connection, exceed the configured maximum requests per connection.

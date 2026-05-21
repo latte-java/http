@@ -78,6 +78,23 @@ public class HTTPInputStream extends InputStream {
     this.maximumContentLength = maximumContentLength;
   }
 
+  /**
+   * Constructor for subclasses that represent a stream with no underlying delegate (e.g. the bodyless-request
+   * singleton {@code EmptyHTTPInputStream}). All inherited fields are left null/zero; subclasses MUST override
+   * every public method that would otherwise dereference them.
+   */
+  protected HTTPInputStream() {
+    this.logger = null;
+    this.instrumenter = null;
+    this.request = null;
+    this.delegate = null;
+    this.pushbackInputStream = null;
+    this.chunkedBufferSize = 0;
+    this.maxRequestChunkSize = 0;
+    this.maximumBytesToDrain = 0;
+    this.maximumContentLength = 0;
+  }
+
   @Override
   public void close() throws IOException {
     if (closed) {

@@ -87,16 +87,17 @@ public class HTTP2OutputStream extends OutputStream {
     buffer.reset();
     int off = 0;
     while (off < all.length) {
-      // Block on flow-control if the send window is exhausted. Signed comparison: window may be negative after a
-      // SETTINGS-induced decrease (RFC 9113 §6.9.2). Block until at least 1 byte of credit is available.
-      while (stream.sendWindow() <= 0) {
-        try {
-          synchronized (stream) {
+      // Block on flow-control if the send window is exhausted. Check and wait under the stream monitor so a
+      // WINDOW_UPDATE notify between an unlocked read and the wait acquire can't be lost. Signed comparison —
+      // the window may be negative after a SETTINGS-induced INITIAL_WINDOW_SIZE decrease (RFC 9113 §6.9.2).
+      synchronized (stream) {
+        while (stream.sendWindow() <= 0) {
+          try {
             stream.wait(100);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new InterruptedIOException();
           }
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          throw new InterruptedIOException();
         }
       }
       // Cap the chunk to the current send window so we never wait when we have any credit.

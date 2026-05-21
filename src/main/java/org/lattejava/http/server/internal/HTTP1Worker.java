@@ -375,9 +375,10 @@ public class HTTP1Worker implements ClientConnection, Runnable {
   @Override
   public ClientConnection.State state() {
     return switch (workerState) {
-      case Read, KeepAlive -> ClientConnection.State.Read;
-      case Write -> ClientConnection.State.Write;
+      case KeepAlive -> ClientConnection.State.KeepAlive;
       case Process -> ClientConnection.State.Process;
+      case Read -> ClientConnection.State.Read;
+      case Write -> ClientConnection.State.Write;
     };
   }
 

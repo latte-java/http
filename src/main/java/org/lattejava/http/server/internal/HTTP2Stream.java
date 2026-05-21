@@ -4,6 +4,8 @@
  */
 package org.lattejava.http.server.internal;
 
+import org.lattejava.http.server.HTTPRequest;
+
 /**
  * Per-stream state — RFC 9113 §5.1 state machine plus send/receive window counters. Synchronized for cross-thread safety: the connection reader updates state via applyEvent, the writer thread checks/consumes the send window, the handler thread reads the receive window.
  *
@@ -14,6 +16,10 @@ public class HTTP2Stream {
   private long declaredContentLength = -1; // -1 means unset
   private long receiveWindow;
   private long receivedDataBytes;
+  // The HTTPRequest associated with this stream. Set by the connection reader once the initial HEADERS block has been
+  // decoded and the request constructed. Used by the trailers path so the reader can deliver request trailers to the
+  // same HTTPRequest the handler thread is processing (RFC 9113 §8.1).
+  private volatile HTTPRequest request;
   private long sendWindow;
   private State state = State.IDLE;
 
@@ -22,6 +28,10 @@ public class HTTP2Stream {
     this.receiveWindow = initialReceiveWindow;
     this.sendWindow = initialSendWindow;
   }
+
+  public HTTPRequest request() { return request; }
+
+  public void setRequest(HTTPRequest request) { this.request = request; }
 
   public synchronized void applyEvent(Event event) {
     state = transition(state, event);

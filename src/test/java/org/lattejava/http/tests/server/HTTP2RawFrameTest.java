@@ -151,6 +151,174 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
+   * RFC 9113 §4.3 / §6.10 — a header block whose encoded payload exceeds the peer's SETTINGS_MAX_FRAME_SIZE MUST be
+   * split across one HEADERS frame plus one or more CONTINUATION frames. Emitting a single oversize HEADERS frame
+   * either (a) crashes the writer (current bug — AIOOBE in HTTP2FrameWriter) or (b) violates FRAME_SIZE_ERROR.
+   */
+  @Test
+  public void large_response_headers_fragmented_into_continuation() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      // 250 unique headers × ~150 bytes each — encoded HPACK block will exceed peer's default 16384 max-frame-size.
+      for (int i = 0; i < 250; i++) {
+        res.setHeader("x-bulk-" + i, "v".repeat(150));
+      }
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        boolean headersStarted = false;
+        boolean endHeadersSeen = false;
+        int continuationCount = 0;
+        while (!endHeadersSeen) {
+          int b0 = in.read();
+          if (b0 == -1) {
+            fail("EOF before response HEADERS block completed; writer likely crashed on oversize HEADERS frame");
+          }
+          byte[] rest = new byte[8];
+          int read = in.readNBytes(rest, 0, 8);
+          assertEquals(read, 8, "Short frame header read");
+          int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
+          int type = rest[2] & 0xFF;
+          int flags = rest[3] & 0xFF;
+          assertTrue(length <= 16384, "Frame length [" + length + "] exceeds peer MAX_FRAME_SIZE [16384]");
+          in.readNBytes(length);
+          if (type == 0x1) {  // HEADERS
+            assertFalse(headersStarted, "Multiple HEADERS frames on the same stream");
+            headersStarted = true;
+            if ((flags & 0x4) != 0) endHeadersSeen = true;
+          } else if (type == 0x9) {  // CONTINUATION
+            assertTrue(headersStarted, "CONTINUATION without prior HEADERS");
+            continuationCount++;
+            if ((flags & 0x4) != 0) endHeadersSeen = true;
+          } else if (type == 0x7) {  // GOAWAY
+            fail("Server sent GOAWAY instead of fragmenting HEADERS into CONTINUATION");
+          }
+        }
+        assertTrue(continuationCount > 0,
+            "Expected at least one CONTINUATION frame for oversize HEADERS block; got [" + continuationCount + "]");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.1 — a second HEADERS block on a stream that has not END_STREAM'd carries request trailers and MUST
+   * be accepted. Current bug at HTTP2Connection.java:284-287 rejects every second HEADERS with RST_STREAM(STREAM_CLOSED).
+   */
+  @Test
+  public void request_trailers_accepted_not_reset_as_stream_closed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    AtomicReference<String> trailerValue = new AtomicReference<>();
+    HTTPHandler handler = (req, res) -> {
+      // Drain body so trailers are processed by the server.
+      req.getInputStream().readAllBytes();
+      String value = req.getTrailer("x-trailer");
+      if (value != null) {
+        trailerValue.set(value);
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // POST headers with TE: trailers (RFC 9113 §8.1 — required for the server to know trailers may follow).
+        // HPACK: :method POST (static idx 3 = 0x83), :path / (idx 4 = 0x84), :scheme http (idx 6 = 0x86),
+        //        content-length 4 (literal with indexing, name idx 28 = 0x5c, value "4"),
+        //        te trailers (literal w/o indexing, name idx 58 = 0x1a [no — te is not in static table for h2 reuse, encode as literal name])
+        // Simpler: use literal-without-indexing for te to avoid table mismatch.
+        byte[] postHeaders = new byte[]{
+            (byte) 0x83,                                              // :method: POST
+            (byte) 0x84,                                              // :path: /
+            (byte) 0x86,                                              // :scheme: http
+            (byte) 0x41, 0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't',  // :authority: localhost
+            (byte) 0x5c, 0x01, '4',                                   // content-length: 4
+            (byte) 0x00, 0x02, 't', 'e', 0x08, 't', 'r', 'a', 'i', 'l', 'e', 'r', 's'  // te: trailers
+        };
+        writeFrameHeader(out, postHeaders.length, 0x1, 0x4 /* END_HEADERS, no END_STREAM */, 1);
+        out.write(postHeaders);
+
+        // DATA frame with 4-byte body, no END_STREAM (trailers will carry it).
+        writeFrameHeader(out, 4, 0x0, 0, 1);
+        out.write("body".getBytes());
+
+        // Trailers: HEADERS with END_HEADERS | END_STREAM, single literal "x-trailer: end".
+        byte[] trailers = new byte[]{
+            (byte) 0x00, 0x09, 'x', '-', 't', 'r', 'a', 'i', 'l', 'e', 'r', 0x03, 'e', 'n', 'd'
+        };
+        writeFrameHeader(out, trailers.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(trailers);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        int responseStreamId = readUntilResponseHeaders(in);
+        assertEquals(responseStreamId, 1,
+            "Expected response HEADERS on stream 1 (current bug: trailers HEADERS triggers RST_STREAM(STREAM_CLOSED))");
+        assertEquals(trailerValue.get(), "end", "Server should expose request trailer via req.getTrailers()");
+      }
+    }
+  }
+
+  /**
+   * When the writer thread exits and the connection is dead, an in-flight handler virtual-thread must not park
+   * indefinitely on {@code writerQueue.put()} or in the {@code HTTP2OutputStream} flow-control wait loop.
+   *
+   * <p>Reproduction: client sends GET, then closes the socket before the response can be written. The reader
+   * thread exits and the writer thread drains its sentinel and exits. The handler (mid-write of a large body) must
+   * detect the dead connection within a bounded time and exit, instead of spinning forever on flow control or
+   * blocking forever on a full {@code writerQueue}.
+   */
+  @Test
+  public void handler_thread_does_not_hang_after_writer_dies() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    AtomicBoolean handlerCompleted = new AtomicBoolean(false);
+    CountDownLatch handlerStarted = new CountDownLatch(1);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      handlerStarted.countDown();
+      try {
+        // Write 1 MB. With default initial window 65535, the handler will exhaust the window quickly and
+        // block in HTTP2OutputStream's flow-control wait loop. Once the client closes, no WINDOW_UPDATE
+        // will arrive and the loop must abort instead of spinning forever.
+        byte[] payload = new byte[1024 * 1024];
+        res.getOutputStream().write(payload);
+        res.getOutputStream().flush();
+      } catch (IOException ignored) {
+        // Expected once the connection is detected dead.
+      }
+      handlerCompleted.set(true);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      var sock = openH2cConnection(server.getActualPort());
+      var out = sock.getOutputStream();
+      writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+      out.write(MINIMAL_HPACK_GET);
+      out.flush();
+
+      assertTrue(handlerStarted.await(5, TimeUnit.SECONDS), "Handler should start within 5s");
+      // Brief pause to let the handler enter the write/flow-control path.
+      Thread.sleep(100);
+      // Abruptly close the client socket. Server reader notices EOF, finally enqueues sentinel, writer
+      // takes sentinel and exits. Connection is dead. Handler must detect this and abort.
+      sock.close();
+
+      long deadline = System.currentTimeMillis() + 10_000;
+      while (!handlerCompleted.get() && System.currentTimeMillis() < deadline) {
+        Thread.sleep(50);
+      }
+      assertTrue(handlerCompleted.get(),
+          "Handler did not exit within 10s of client close — likely hung in flow-control wait or writerQueue.put()");
+    }
+  }
+
+  /**
    * RFC 9113 §5.5 — unknown frame types MUST be ignored. Send an unknown frame (type {@code 0xFE}), then a normal
    * HEADERS request. The server should respond successfully, proving the unknown frame was silently discarded.
    */
