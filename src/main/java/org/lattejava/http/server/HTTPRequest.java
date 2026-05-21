@@ -803,6 +803,13 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
+   * @return True if this request was received over HTTP/2 (protocol set to {@code HTTP/2.0}).
+   */
+  public boolean isHTTP2() {
+    return "HTTP/2.0".equals(protocol);
+  }
+
+  /**
    * Determines if the request is asking for the server to keep the connection alive. This is based on the Connection
    * header.
    * <p>
@@ -813,7 +820,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @return True if the Connection header is missing or not `Close`.
    */
   public boolean isKeepAlive() {
-    if ("HTTP/2.0".equals(getProtocol())) {
+    if (isHTTP2()) {
       return true;
     }
 

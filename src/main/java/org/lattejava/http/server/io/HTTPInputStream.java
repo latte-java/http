@@ -209,6 +209,12 @@ public class HTTPInputStream extends InputStream {
         if (instrumenter != null) {
           instrumenter.chunkedRequest();
         }
+      } else if (request.isHTTP2()) {
+        // HTTP/2 request: the frame layer (HTTP2Connection.handleData) enforces content-length against DATA frame
+        // payload totals, and HTTP2InputStream signals EOF only when END_STREAM arrives (on DATA or on trailers HEADERS).
+        // Wrapping in FixedLengthInputStream here would EOF at content-length bytes — before request trailers can be
+        // delivered, breaking RFC 9113 §8.1 trailer semantics.
+        delegate = pushbackInputStream;
       } else {
         logger.trace("Client indicated it was sending an entity-body in the request. Handling body using Content-Length header {}.", contentLength);
         delegate = new FixedLengthInputStream(pushbackInputStream, contentLength);
@@ -239,9 +245,9 @@ public class HTTPInputStream extends InputStream {
       //   read bytes until the end of the InputStream is reached. This would assume Connection: close was also sent because if we do not know
       //   how to delimit the request we cannot use a persistent connection.
       // - We aren't doing any of that - if the client wants to send bytes, it needs to send a Content-Length header, or specify Transfer-Encoding: chunked.
-      // - HTTP/2 streams use maximumContentLength == -1 as a sentinel: gRPC and other h2 requests don't send Content-Length or Transfer-Encoding,
-      //   so hasBody() returns false. The underlying HTTP2InputStream signals EOF at END_STREAM, so delegate through to pushbackInputStream.
-      if (maximumContentLength == -1) {
+      // - HTTP/2 streams may omit Content-Length and Transfer-Encoding (gRPC for example), so hasBody() returns false. The underlying
+      //   HTTP2InputStream signals EOF at END_STREAM, so delegate through to pushbackInputStream rather than nullInputStream().
+      if (request.isHTTP2()) {
         delegate = pushbackInputStream;
       } else {
         logger.trace("Client indicated it was NOT sending an entity-body in the request");
