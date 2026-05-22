@@ -207,6 +207,8 @@ All standard error codes implemented and emitted at the appropriate trigger:
 | Header-name/value validation | ⚠️ | Reuses `HTTPTools.isTokenCharacter` and `isValueCharacter`. Explicit enforcement deferred to Plan F. |
 | Response-splitting defense | ✅ | Reuses choke point at `HTTPResponse.setHeader/addHeader/sendRedirect/Cookie` (audit Vuln 4 fix). Implicit via existing h1.1 defense. |
 
+**Body-size limits.** `HTTPServerConfiguration.maxRequestBodySize` (a per-Content-Type map with wildcard support) is enforced on HTTP/2 requests via the same `HTTPInputStream` boundary check used on HTTP/1.1. The cap is resolved per request via `HTTPTools.getMaxRequestBodySize` against `request.getContentType()` and passed to the `HTTPInputStream` constructor in `HTTP2Connection.spawnRequestHandler`. The `MultipartConfiguration` (file upload policy, `maxFileSize`, `maxFileCount`) is applied to each request's `MultipartStreamProcessor` immediately before the `HTTPInputStream` is constructed, matching `HTTP1Worker` behavior. A `ContentTooLargeException` from the read path surfaces as a 413 response on both transports.
+
 ---
 
 ## 11. Server push (RFC 9113 §8.4)

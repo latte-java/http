@@ -215,6 +215,11 @@ public interface Configurable<T extends Configurable<T>> {
    * Set any value to -1 to disable this limitation.
    * <p>
    * Defaults to 128 Megabytes for the default "*" and 10 Megabytes for "application/x-www-form-urlencoded".
+   * <p>
+   * This is the single total-body size cap for all request bodies, including multipart uploads. The
+   * {@link MultipartConfiguration} bounds per-file size ({@code maxFileSize}) and file count ({@code maxFileCount})
+   * within that envelope. At server start, the configuration is rejected if {@code maxFileSize} exceeds the
+   * effective {@code maxRequestBodySize} for {@code multipart/form-data}.
    *
    * @param maxRequestBodySize a map specifying the maximum size in bytes for the HTTP request body by Content-Type
    * @return This.
@@ -333,6 +338,10 @@ public interface Configurable<T extends Configurable<T>> {
    * Sets the multipart processor configuration.
    * <p>
    * This configuration is used when parsing a multipart HTTP request that includes files.
+   * <p>
+   * The {@link MultipartConfiguration} controls only file-shape concerns: the upload policy, per-file size
+   * limit, and file-count limit. The total multipart request body is bounded by
+   * {@link #withMaxRequestBodySize}, which applies uniformly to all content types.
    *
    * @param multipartStreamConfiguration The configuration.
    * @return This
