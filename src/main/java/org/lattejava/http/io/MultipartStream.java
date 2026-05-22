@@ -326,6 +326,10 @@ public class MultipartStream {
       if (isFile) {
         if (multipartConfiguration.getFileUploadPolicy() == MultipartFileUploadPolicy.Allow) {
           files.add(processor.toFileInfo());
+          int maxFileCount = multipartConfiguration.getMaxFileCount();
+          if (maxFileCount != -1 && files.size() > maxFileCount) {
+            throw new ContentTooLargeException(maxFileCount, "The maximum number of files in a multipart stream has been exceeded. The maximum file count is [" + maxFileCount + "].");
+          }
         }
       } else {
         parameters.computeIfAbsent(name, _ -> new LinkedList<>()).add(processor.toValue());

@@ -26,19 +26,13 @@ import module java.base;
 @SuppressWarnings("UnusedReturnValue")
 public class MultipartConfiguration {
   private boolean deleteTemporaryFiles = true;
-
   private MultipartFileUploadPolicy fileUploadPolicy = MultipartFileUploadPolicy.Reject;
-
+  private int maxFileCount = 20;
   private long maxFileSize = 1024 * 1024; // 1 Megabyte
-
   private long maxRequestSize = 10 * 1024 * 1024; // 10 Megabytes
-
   private int multipartBufferSize = 8 * 1024; // 8 Kilobytes
-
   private String temporaryFileLocation = System.getProperty("java.io.tmpdir");
-
   private String temporaryFilenamePrefix = "latte-http";
-
   private String temporaryFilenameSuffix = "file-upload";
 
   public MultipartConfiguration() {
@@ -47,6 +41,7 @@ public class MultipartConfiguration {
   public MultipartConfiguration(MultipartConfiguration other) {
     this.deleteTemporaryFiles = other.deleteTemporaryFiles;
     this.fileUploadPolicy = other.fileUploadPolicy;
+    this.maxFileCount = other.maxFileCount;
     this.maxFileSize = other.maxFileSize;
     this.maxRequestSize = other.maxRequestSize;
     this.multipartBufferSize = other.multipartBufferSize;
@@ -66,6 +61,7 @@ public class MultipartConfiguration {
     }
     return deleteTemporaryFiles == that.deleteTemporaryFiles &&
         fileUploadPolicy == that.fileUploadPolicy &&
+        maxFileCount == that.maxFileCount &&
         maxFileSize == that.maxFileSize &&
         maxRequestSize == that.maxRequestSize &&
         multipartBufferSize == that.multipartBufferSize &&
@@ -76,6 +72,10 @@ public class MultipartConfiguration {
 
   public MultipartFileUploadPolicy getFileUploadPolicy() {
     return fileUploadPolicy;
+  }
+
+  public int getMaxFileCount() {
+    return maxFileCount;
   }
 
   public long getMaxFileSize() {
@@ -107,6 +107,7 @@ public class MultipartConfiguration {
     return Objects.hash(
         deleteTemporaryFiles,
         fileUploadPolicy,
+        maxFileCount,
         maxFileSize,
         maxRequestSize,
         multipartBufferSize,
@@ -142,6 +143,21 @@ public class MultipartConfiguration {
   public MultipartConfiguration withFileUploadPolicy(MultipartFileUploadPolicy fileUploadPolicy) {
     Objects.requireNonNull(fileUploadPolicy, "You cannot set the fileUploadPolicy to null");
     this.fileUploadPolicy = fileUploadPolicy;
+    return this;
+  }
+
+  /**
+   * The maximum number of files allowed in a single multipart request.
+   *
+   * @param maxFileCount the maximum file count. Must be greater than 0, or -1 to disable the limit.
+   * @return This.
+   */
+  public MultipartConfiguration withMaxFileCount(int maxFileCount) {
+    if (maxFileCount != -1 && maxFileCount <= 0) {
+      throw new IllegalArgumentException("The maximum file count must be greater than 0. Set to [-1] to disable this limitation.");
+    }
+
+    this.maxFileCount = maxFileCount;
     return this;
   }
 
