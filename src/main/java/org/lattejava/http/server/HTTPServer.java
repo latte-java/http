@@ -124,6 +124,18 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
     return this;
   }
 
+  /**
+   * Specify the full configuration object for the server rather than using the {@code with} builder methods.
+   *
+   * @param configuration The configuration for the server.
+   * @return This.
+   */
+  public HTTPServer withConfiguration(HTTPServerConfiguration configuration) {
+    this.configuration = configuration;
+    this.logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
+    return this;
+  }
+
   private void validateConfiguration() {
     MultipartConfiguration multipart = configuration.getMultipartConfiguration();
 
@@ -144,17 +156,5 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
     if (maxFileSize > effectiveCap) {
       throw new IllegalStateException("The MultipartConfiguration maxFileSize [" + maxFileSize + "] must not exceed the maxRequestBodySize for [multipart/form-data], which resolves to [" + effectiveCap + "]. Either lower maxFileSize or raise maxRequestBodySize for [multipart/form-data] (or its wildcard parent).");
     }
-  }
-
-  /**
-   * Specify the full configuration object for the server rather than using the {@code with} builder methods.
-   *
-   * @param configuration The configuration for the server.
-   * @return This.
-   */
-  public HTTPServer withConfiguration(HTTPServerConfiguration configuration) {
-    this.configuration = configuration;
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
-    return this;
   }
 }
