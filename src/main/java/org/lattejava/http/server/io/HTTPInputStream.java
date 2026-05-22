@@ -170,7 +170,11 @@ public class HTTPInputStream extends InputStream {
     }
 
     // When a maximum content length has been specified, read at most one byte past the maximum.
-    int maxReadLen = maximumContentLength == -1 ? len : Math.min(len, maximumContentLength - bytesRead + 1);
+    // Use long arithmetic so a maximumContentLength of Integer.MAX_VALUE does not overflow when added to + 1.
+    // We still cap at one byte past the maximum so the streaming check below can trip with a single boundary read.
+    int maxReadLen = maximumContentLength == -1
+        ? len
+        : (int) Math.min((long) len, (long) maximumContentLength - bytesRead + 1L);
     int read = delegate.read(b, off, maxReadLen);
     if (read > 0) {
       bytesRead += read;
