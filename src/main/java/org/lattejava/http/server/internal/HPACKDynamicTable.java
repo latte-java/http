@@ -9,7 +9,8 @@ import module java.base;
 import java.util.ArrayDeque;
 
 /**
- * RFC 7541 §2.3.2 dynamic table. Entries indexed from most-recently-added (index 0) to oldest. Size is the sum of (name.length + value.length + 32) over all entries; entries evicted from the tail when adding would exceed maxSize.
+ * RFC 7541 §2.3.2 dynamic table. Entries indexed from most-recently-added (index 0) to oldest. Size is the sum of
+ * (name.length + value.length + 32) over all entries; entries evicted from the tail when adding would exceed maxSize.
  *
  * @author Daniel DeGroff
  */
@@ -34,7 +35,9 @@ public class HPACKDynamicTable {
     }
   }
 
-  public int entryCount() { return entries.size(); }
+  public int entryCount() {
+    return entries.size();
+  }
 
   public HeaderField get(int index) {
     int i = 0;
@@ -44,7 +47,9 @@ public class HPACKDynamicTable {
     throw new IndexOutOfBoundsException("Index [" + index + "] out of range; size [" + entries.size() + "]");
   }
 
-  public int maxSize() { return maxSize; }
+  public int maxSize() {
+    return maxSize;
+  }
 
   public void setMaxSize(int newMax) {
     this.maxSize = newMax;
@@ -54,7 +59,10 @@ public class HPACKDynamicTable {
     }
   }
 
-  public int size() { return size; }
+  public int size() {
+    return size;
+  }
 
-  public record HeaderField(String name, String value) {}
+  public record HeaderField(String name, String value) {
+  }
 }

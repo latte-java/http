@@ -25,13 +25,13 @@ public class ProtocolSwitchTest extends BaseTest {
         var out = sock.getOutputStream();
         String preamble =
             "POST / HTTP/1.1\r\n"
-            + "Host: localhost\r\n"
-            + "Connection: Upgrade, HTTP2-Settings\r\n"
-            + "Upgrade: h2c\r\n"
-            + "HTTP2-Settings: \r\n"
-            + "Transfer-Encoding: chunked\r\n"
-            + "\r\n"
-            + "4\r\nbody\r\n0\r\n\r\n";
+                + "Host: localhost\r\n"
+                + "Connection: Upgrade, HTTP2-Settings\r\n"
+                + "Upgrade: h2c\r\n"
+                + "HTTP2-Settings: \r\n"
+                + "Transfer-Encoding: chunked\r\n"
+                + "\r\n"
+                + "4\r\nbody\r\n0\r\n\r\n";
         out.write(preamble.getBytes());
         out.flush();
 
@@ -56,13 +56,13 @@ public class ProtocolSwitchTest extends BaseTest {
         var out = sock.getOutputStream();
         String preamble =
             "POST / HTTP/1.1\r\n"
-            + "Host: localhost\r\n"
-            + "Connection: Upgrade, HTTP2-Settings\r\n"
-            + "Upgrade: h2c\r\n"
-            + "HTTP2-Settings: \r\n"
-            + "Content-Length: 4\r\n"
-            + "\r\n"
-            + "body";
+                + "Host: localhost\r\n"
+                + "Connection: Upgrade, HTTP2-Settings\r\n"
+                + "Upgrade: h2c\r\n"
+                + "HTTP2-Settings: \r\n"
+                + "Content-Length: 4\r\n"
+                + "\r\n"
+                + "body";
         out.write(preamble.getBytes());
         out.flush();
 
@@ -127,13 +127,15 @@ public class ProtocolSwitchTest extends BaseTest {
   public void rejects_connection_header_in_additional_headers() {
     HTTPResponse res = new HTTPResponse();
     expectThrows(IllegalArgumentException.class, () ->
-        res.switchProtocols("test-proto", Map.of("Connection", "keep-alive"), socket -> {}));
+        res.switchProtocols("test-proto", Map.of("Connection", "keep-alive"), socket -> {
+        }));
   }
 
   @Test
   public void rejects_upgrade_header_in_additional_headers() {
     HTTPResponse res = new HTTPResponse();
     expectThrows(IllegalArgumentException.class, () ->
-        res.switchProtocols("test-proto", Map.of("Upgrade", "other-proto"), socket -> {}));
+        res.switchProtocols("test-proto", Map.of("Upgrade", "other-proto"), socket -> {
+        }));
   }
 }

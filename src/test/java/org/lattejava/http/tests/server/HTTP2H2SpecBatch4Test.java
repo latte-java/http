@@ -40,9 +40,8 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §5.1 — WINDOW_UPDATE on a half-closed (remote) stream (the client sent END_STREAM but the
-   * server has not yet responded) must be accepted without closing the connection. The server must still
-   * send its full response.
+   * RFC 9113 §5.1 — WINDOW_UPDATE on a half-closed (remote) stream (the client sent END_STREAM but the server has not
+   * yet responded) must be accepted without closing the connection. The server must still send its full response.
    *
    * <p>Previously the server threw {@code IllegalStateException} in the handler thread when the client
    * RST'd the stream during the response phase, causing the connection to close (h2spec saw EOF instead of DATA).
@@ -92,8 +91,8 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
   }
 
   /**
-   * RFC 9113 §5.1 — PRIORITY on a half-closed (remote) stream must be accepted. PRIORITY frames
-   * are advisory and do not change the stream state (§5.3).
+   * RFC 9113 §5.1 — PRIORITY on a half-closed (remote) stream must be accepted. PRIORITY frames are advisory and do not
+   * change the stream state (§5.3).
    */
   @Test
   public void priority_on_half_closed_remote_accepted() throws Exception {
@@ -144,13 +143,13 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * {@code withH2cPriorKnowledgeEnabled(true)} acts as a dual-protocol listener: it peeks the first 24 bytes
-   * and routes to HTTP/2 if they match the connection preface, or falls back to HTTP/1.1 otherwise. This allows
-   * the same port to serve both wrk (HTTP/1.1) and h2load (h2c) traffic in benchmark scenarios.
+   * {@code withH2cPriorKnowledgeEnabled(true)} acts as a dual-protocol listener: it peeks the first 24 bytes and routes
+   * to HTTP/2 if they match the connection preface, or falls back to HTTP/1.1 otherwise. This allows the same port to
+   * serve both wrk (HTTP/1.1) and h2load (h2c) traffic in benchmark scenarios.
    *
    * <p>A client that sends a non-preface opening (e.g. a plain {@code GET} request) receives a normal
-   * HTTP/1.1 response rather than a GOAWAY, because the peeked bytes are pushed back into the stream
-   * and the connection is handed off to {@link org.lattejava.http.server.internal.HTTP1Worker}.
+   * HTTP/1.1 response rather than a GOAWAY, because the peeked bytes are pushed back into the stream and the connection
+   * is handed off to {@link org.lattejava.http.server.internal.HTTP1Worker}.
    */
   @Test
   public void invalid_h2c_preface_falls_back_to_http1() throws Exception {
@@ -183,9 +182,9 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §6.8 — when the server receives a GOAWAY from the peer, it must drain pending frames
-   * (including a PING ACK if a PING was in-flight) and then close the connection cleanly with FIN,
-   * not TCP RST. A TCP RST causes "connection reset by peer" at h2spec.
+   * RFC 9113 §6.8 — when the server receives a GOAWAY from the peer, it must drain pending frames (including a PING ACK
+   * if a PING was in-flight) and then close the connection cleanly with FIN, not TCP RST. A TCP RST causes "connection
+   * reset by peer" at h2spec.
    */
   @Test
   public void goaway_from_peer_produces_clean_close() throws Exception {

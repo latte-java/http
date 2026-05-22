@@ -79,9 +79,9 @@ public class HTTPInputStream extends InputStream {
   }
 
   /**
-   * Constructor for subclasses that represent a stream with no underlying delegate (e.g. the bodyless-request
-   * singleton {@code EmptyHTTPInputStream}). All inherited fields are left null/zero; subclasses MUST override
-   * every public method that would otherwise dereference them.
+   * Constructor for subclasses that represent a stream with no underlying delegate (e.g. the bodyless-request singleton
+   * {@code EmptyHTTPInputStream}). All inherited fields are left null/zero; subclasses MUST override every public
+   * method that would otherwise dereference them.
    */
   protected HTTPInputStream() {
     this.logger = null;

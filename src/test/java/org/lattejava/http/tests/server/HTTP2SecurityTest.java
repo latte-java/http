@@ -14,16 +14,16 @@ import static org.testng.Assert.*;
 
 /**
  * DoS-class security tests for HTTP/2 rate limiting. Each test exercises one per-frame-type rate-limit check and
- * asserts that the server responds with {@code GOAWAY(ENHANCE_YOUR_CALM)} (error code {@code 0xb}) when the
- * threshold is exceeded.
+ * asserts that the server responds with {@code GOAWAY(ENHANCE_YOUR_CALM)} (error code {@code 0xb}) when the threshold
+ * is exceeded.
  *
  * <p>All tests use raw sockets over h2c prior-knowledge. The {@code openH2cConnection} helper establishes a
  * compliant handshake, and the {@code readUntilGoaway} helper drains frames until GOAWAY arrives.
  *
  * <p>Empty-DATA flood: intentionally omitted. A meaningful DATA flood test requires an open, half-open stream to
  * send DATA on, which substantially complicates test setup (requires a valid HEADERS frame with HPACK encoding first).
- * The empty-DATA rate-limit code path in {@link org.lattejava.http.server.internal.HTTP2Connection} is exercised by
- * the unit tests in {@link HTTP2RateLimitsTest}. A future plan (Plan F) should add the integration-level coverage.
+ * The empty-DATA rate-limit code path in {@link org.lattejava.http.server.internal.HTTP2Connection} is exercised by the
+ * unit tests in {@link HTTP2RateLimitsTest}. A future plan (Plan F) should add the integration-level coverage.
  *
  * @author Daniel DeGroff
  */
@@ -64,8 +64,8 @@ public class HTTP2SecurityTest extends BaseTest {
   }
 
   /**
-   * Drain inbound frames until a GOAWAY (type {@code 0x7}) is seen or the connection is closed. Returns the
-   * GOAWAY error code, or {@code -1} if EOF arrived first.
+   * Drain inbound frames until a GOAWAY (type {@code 0x7}) is seen or the connection is closed. Returns the GOAWAY
+   * error code, or {@code -1} if EOF arrived first.
    */
   private int readUntilGoaway(InputStream in) throws Exception {
     while (true) {
@@ -119,9 +119,9 @@ public class HTTP2SecurityTest extends BaseTest {
   }
 
   /**
-   * RFC 7541 §2.1 — HPACK index 0 is invalid. RFC 9113 §4.3 — HPACK malformations are connection errors with
-   * code COMPRESSION_ERROR. Locks in the specific error-code mapping; the Task 3 "any GOAWAY" safety net stays
-   * in place as a backstop for genuinely unhandled exceptions.
+   * RFC 7541 §2.1 — HPACK index 0 is invalid. RFC 9113 §4.3 — HPACK malformations are connection errors with code
+   * COMPRESSION_ERROR. Locks in the specific error-code mapping; the Task 3 "any GOAWAY" safety net stays in place as a
+   * backstop for genuinely unhandled exceptions.
    */
   @Test
   public void hpack_index_zero_yields_goaway_compression_error() throws Exception {
@@ -143,10 +143,9 @@ public class HTTP2SecurityTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1.2.6 — a malformed content-length (unparseable or negative) is a stream error of type
-   * PROTOCOL_ERROR. nghttp2, Caddy, and Apache Traffic Server all treat this consistently. Previously was
-   * silently ignored, letting the handler run with {@code declaredContentLength == -1} which disabled
-   * DATA-frame overflow protection.
+   * RFC 9113 §8.1.2.6 — a malformed content-length (unparseable or negative) is a stream error of type PROTOCOL_ERROR.
+   * nghttp2, Caddy, and Apache Traffic Server all treat this consistently. Previously was silently ignored, letting the
+   * handler run with {@code declaredContentLength == -1} which disabled DATA-frame overflow protection.
    */
   @Test
   public void malformed_content_length_yields_rst_stream_protocol_error() throws Exception {

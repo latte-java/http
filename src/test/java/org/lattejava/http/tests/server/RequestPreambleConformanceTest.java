@@ -7,9 +7,8 @@ package org.lattejava.http.tests.server;
 import module org.testng;
 
 /**
- * Raw-socket conformance tests for {@code RequestPreambleState}. Covers items that HTTP1.1.md §6 lists as ⚠️
- * "needs test" — the parser already rejects these per the security audit (Vuln 3 et al.); this file
- * locks that behavior in.
+ * Raw-socket conformance tests for {@code RequestPreambleState}. Covers items that HTTP1.1.md §6 lists as ⚠️ "needs
+ * test" — the parser already rejects these per the security audit (Vuln 3 et al.); this file locks that behavior in.
  *
  * @author Daniel DeGroff
  */
@@ -18,10 +17,10 @@ public class RequestPreambleConformanceTest extends BaseSocketTest {
   public void bare_cr_in_header_value_rejected() throws Exception {
     // RFC 9112 §5: bare CR (CR not followed by LF) inside a header value MUST be rejected. HeaderValue → HeaderCR; HeaderCR only accepts \n.
     withRequest("GET / HTTP/1.1\r\n" +
-                "Host: cyberdyne-systems.com\r\n" +
-                "X: bad\rmore\r\n" +
-                "Content-Length: 0\r\n" +
-                "\r\n"
+        "Host: cyberdyne-systems.com\r\n" +
+        "X: bad\rmore\r\n" +
+        "Content-Length: 0\r\n" +
+        "\r\n"
     ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r

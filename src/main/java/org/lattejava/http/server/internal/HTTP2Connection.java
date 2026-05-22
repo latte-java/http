@@ -358,7 +358,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
               goAway(HTTP2ErrorCode.PROTOCOL_ERROR); // Clients must not push.
               return;
             }
-            case HTTP2Frame.UnknownFrame ignored -> {} // §5.5 — ignore unknown frame types
+            case HTTP2Frame.UnknownFrame ignored -> {
+            } // §5.5 — ignore unknown frame types
           }
           // Rate-limit handlers call goAway() but return normally (they don't propagate the exit signal
           // by returning from run()). Check here so the frame loop doesn't keep processing flood frames.
@@ -535,10 +536,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   /**
-   * Enqueue a frame for the writer thread. Returns {@code false} (and logs at debug) if the writer is dead or the
-   * queue stays full past the timeout — caller decides what to do (typically: return, the connection is tearing
-   * down). Used by reader-side enqueues only; handler-side calls are covered by the existing handler-thread-interrupt
-   * mechanism in the reader's finally block.
+   * Enqueue a frame for the writer thread. Returns {@code false} (and logs at debug) if the writer is dead or the queue
+   * stays full past the timeout — caller decides what to do (typically: return, the connection is tearing down). Used
+   * by reader-side enqueues only; handler-side calls are covered by the existing handler-thread-interrupt mechanism in
+   * the reader's finally block.
    */
   private boolean enqueueForWriter(HTTP2Frame f) {
     if (writerDead) {
@@ -572,9 +573,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   /**
-   * Writes a GOAWAY frame directly to the wire — bypassing the writer queue. Used only during the connection
-   * preamble phase (before the writer virtual-thread is started) to ensure the peer receives the error frame
-   * before the TCP connection is closed.
+   * Writes a GOAWAY frame directly to the wire — bypassing the writer queue. Used only during the connection preamble
+   * phase (before the writer virtual-thread is started) to ensure the peer receives the error frame before the TCP
+   * connection is closed.
    */
   private void sendGoAwayDirect(HTTP2FrameWriter writer, OutputStream out, HTTP2ErrorCode code) {
     try {
@@ -586,8 +587,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   /**
-   * Sends a stream-level error by enqueueing an RST_STREAM frame for {@code streamId}.
-   * Use this for stream errors (RFC 9113 §5.4.2), not connection errors.
+   * Sends a stream-level error by enqueueing an RST_STREAM frame for {@code streamId}. Use this for stream errors (RFC
+   * 9113 §5.4.2), not connection errors.
    */
   private void rstStream(int streamId, HTTP2ErrorCode code) {
     enqueueForWriter(new HTTP2Frame.RSTStreamFrame(streamId, code.value));
@@ -837,8 +838,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   /**
-   * Validates the decoded header list per RFC 9113 §8.1.2.*. Returns {@code true} if valid.
-   * On any violation, enqueues RST_STREAM(PROTOCOL_ERROR) for {@code streamId} and returns {@code false}.
+   * Validates the decoded header list per RFC 9113 §8.1.2.*. Returns {@code true} if valid. On any violation, enqueues
+   * RST_STREAM(PROTOCOL_ERROR) for {@code streamId} and returns {@code false}.
    */
   private boolean validateHeaders(List<HPACKDynamicTable.HeaderField> fields, int streamId, boolean isTrailer) {
     boolean seenRegularHeader = false;
@@ -931,7 +932,8 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       switch (name) {
         case ":method" -> req.setMethod(HTTPMethod.of(value));
         case ":path" -> req.setPath(value); // setPath handles query-string splitting internally
-        case ":scheme" -> {} // Scheme derived from listener.getCertificate(); pseudo-header recorded but not applied
+        case ":scheme" -> {
+        } // Scheme derived from listener.getCertificate(); pseudo-header recorded but not applied
         case ":authority" -> req.addHeader("Host", value);
         default -> req.addHeader(name, value);
       }
@@ -972,7 +974,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         // backed-up writer-queue scenarios are visible.
         try {
           if (!writerQueue.offer(new HTTP2Frame.RSTStreamFrame(stream.streamId(), HTTP2ErrorCode.INTERNAL_ERROR.value),
-                                  100, TimeUnit.MILLISECONDS)) {
+              100, TimeUnit.MILLISECONDS)) {
             logger.debug("Dropped RST_STREAM(INTERNAL_ERROR) for stream [{}] — writer queue full or dead", stream.streamId());
           }
         } catch (InterruptedException ie) {
@@ -987,10 +989,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   /**
-   * Wraps the per-stream {@link HTTP2OutputStream} with lazy HEADERS emission. On the first write or
-   * flush the current response status and headers are encoded and enqueued as an HTTP/2 HEADERS frame;
-   * subsequent writes and flushes are delegated directly to the underlying stream, enabling bidi-streaming
-   * handlers to interleave request reads and response writes.
+   * Wraps the per-stream {@link HTTP2OutputStream} with lazy HEADERS emission. On the first write or flush the current
+   * response status and headers are encoded and enqueued as an HTTP/2 HEADERS frame; subsequent writes and flushes are
+   * delegated directly to the underlying stream, enabling bidi-streaming handlers to interleave request reads and
+   * response writes.
    *
    * <p>RFC 9113 §8.1 — HEADERS must precede DATA. This class enforces that invariant.
    */

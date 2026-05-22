@@ -10,14 +10,15 @@ import module java.base;
  * Zero-allocation singleton {@link HTTPInputStream} for requests known to carry no body.
  *
  * <p>Extends {@link HTTPInputStream} (rather than the raw {@link InputStream}) so callers can keep
- * {@code instanceof HTTPInputStream} checks and casts against {@link org.lattejava.http.server.HTTPRequest#getInputStream}.
- * Every public method on {@link HTTPInputStream} is overridden here to short-circuit to EOF / zero without touching
- * the null fields inherited via the protected no-arg constructor.
+ * {@code instanceof HTTPInputStream} checks and casts against
+ * {@link org.lattejava.http.server.HTTPRequest#getInputStream}. Every public method on {@link HTTPInputStream} is
+ * overridden here to short-circuit to EOF / zero without touching the null fields inherited via the protected no-arg
+ * constructor.
  *
  * <p>Avoids the JDK default {@link InputStream#readAllBytes()} / {@link InputStream#readNBytes(int)} behaviour of
- * allocating a 16 KB scratch buffer just to discover EOF — which is pure waste for the GET, HEAD and END_STREAM-on-HEADERS
- * cases that dominate real-world HTTP traffic. Use {@link #INSTANCE} as the request's input stream when the protocol layer
- * has already determined that no body bytes will arrive.
+ * allocating a 16 KB scratch buffer just to discover EOF — which is pure waste for the GET, HEAD and
+ * END_STREAM-on-HEADERS cases that dominate real-world HTTP traffic. Use {@link #INSTANCE} as the request's input
+ * stream when the protocol layer has already determined that no body bytes will arrive.
  *
  * @author Daniel DeGroff
  */

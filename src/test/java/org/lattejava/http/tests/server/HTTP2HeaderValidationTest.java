@@ -14,10 +14,9 @@ import org.lattejava.http.server.internal.HPACKEncoder;
 import static org.testng.Assert.*;
 
 /**
- * Unit tests for HPACK pseudo-header / connection-specific-header validation per RFC 9113 §8.1.2.*
- * Each test sends a hand-crafted HEADERS frame over a raw h2c prior-knowledge socket and asserts that
- * the server responds with RST_STREAM(PROTOCOL_ERROR) for violations, or with a 200 response for the
- * content-length sanity case.
+ * Unit tests for HPACK pseudo-header / connection-specific-header validation per RFC 9113 §8.1.2.* Each test sends a
+ * hand-crafted HEADERS frame over a raw h2c prior-knowledge socket and asserts that the server responds with
+ * RST_STREAM(PROTOCOL_ERROR) for violations, or with a 200 response for the content-length sanity case.
  *
  * @author Daniel DeGroff
  */
@@ -81,8 +80,8 @@ public class HTTP2HeaderValidationTest extends BaseTest {
   }
 
   /**
-   * Drain inbound frames until RST_STREAM (type {@code 0x3}) arrives.
-   * Returns the error code, or {@code -1} if GOAWAY or EOF arrived first.
+   * Drain inbound frames until RST_STREAM (type {@code 0x3}) arrives. Returns the error code, or {@code -1} if GOAWAY
+   * or EOF arrived first.
    */
   private int readUntilRstStream(InputStream in) throws Exception {
     while (true) {
@@ -191,8 +190,8 @@ public class HTTP2HeaderValidationTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1.2.1 — response pseudo-header {@code :status} in a client request
-   * MUST trigger RST_STREAM(PROTOCOL_ERROR).
+   * RFC 9113 §8.1.2.1 — response pseudo-header {@code :status} in a client request MUST trigger
+   * RST_STREAM(PROTOCOL_ERROR).
    */
   @Test
   public void response_pseudo_header_in_request_triggers_rst_stream() throws Exception {
@@ -220,8 +219,7 @@ public class HTTP2HeaderValidationTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1.2.1 — a pseudo-header appearing after a regular header MUST trigger
-   * RST_STREAM(PROTOCOL_ERROR).
+   * RFC 9113 §8.1.2.1 — a pseudo-header appearing after a regular header MUST trigger RST_STREAM(PROTOCOL_ERROR).
    */
   @Test
   public void pseudo_header_after_regular_header_triggers_rst_stream() throws Exception {
@@ -251,8 +249,8 @@ public class HTTP2HeaderValidationTest extends BaseTest {
   // ─── §8.1.2.2: connection-specific headers ──────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §8.1.2.2 — {@code Connection} is a connection-specific header forbidden in HTTP/2.
-   * Must trigger RST_STREAM(PROTOCOL_ERROR).
+   * RFC 9113 §8.1.2.2 — {@code Connection} is a connection-specific header forbidden in HTTP/2. Must trigger
+   * RST_STREAM(PROTOCOL_ERROR).
    */
   @Test
   public void connection_header_triggers_rst_stream() throws Exception {
@@ -274,8 +272,8 @@ public class HTTP2HeaderValidationTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1.2.2 — {@code TE} with any value other than {@code trailers} is forbidden.
-   * Must trigger RST_STREAM(PROTOCOL_ERROR).
+   * RFC 9113 §8.1.2.2 — {@code TE} with any value other than {@code trailers} is forbidden. Must trigger
+   * RST_STREAM(PROTOCOL_ERROR).
    */
   @Test
   public void te_gzip_header_triggers_rst_stream() throws Exception {
@@ -297,8 +295,8 @@ public class HTTP2HeaderValidationTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1.2.2 — {@code TE: trailers} is the only allowed TE value in HTTP/2. A valid
-   * request with {@code TE: trailers} MUST be accepted and return a 200 response.
+   * RFC 9113 §8.1.2.2 — {@code TE: trailers} is the only allowed TE value in HTTP/2. A valid request with
+   * {@code TE: trailers} MUST be accepted and return a 200 response.
    */
   @Test
   public void te_trailers_is_allowed() throws Exception {
@@ -484,8 +482,8 @@ public class HTTP2HeaderValidationTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1.2.6 sanity check — content-length declared as 5 with exactly 5-byte DATA
-   * payload MUST succeed and return a 200 response.
+   * RFC 9113 §8.1.2.6 sanity check — content-length declared as 5 with exactly 5-byte DATA payload MUST succeed and
+   * return a 200 response.
    */
   @Test
   public void content_length_exact_match_succeeds() throws Exception {

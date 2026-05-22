@@ -135,17 +135,18 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The duration the connection reader will wait for an HTTP/2 handler to consume a DATA frame from its per-stream
-   *     input pipe before cancelling the offending stream with RST_STREAM(CANCEL). Defaults to 10 seconds. Flow control
-   *     is the intended back-pressure mechanism — this is a safety net so a stuck or buggy handler cannot freeze every
-   *     other stream sharing the connection by blocking the reader thread on a full pipe.
+   * @return The duration the connection reader will wait for an HTTP/2 handler to consume a DATA frame from its
+   *     per-stream input pipe before cancelling the offending stream with RST_STREAM(CANCEL). Defaults to 10 seconds.
+   *     Flow control is the intended back-pressure mechanism — this is a safety net so a stuck or buggy handler cannot
+   *     freeze every other stream sharing the connection by blocking the reader thread on a full pipe.
    */
   public Duration getHTTP2HandlerReadTimeout() {
     return http2HandlerReadTimeout;
   }
 
   /**
-   * @return The interval at which the server sends HTTP/2 PING frames to keep connections alive, or null if keep-alive pings are disabled.
+   * @return The interval at which the server sends HTTP/2 PING frames to keep connections alive, or null if keep-alive
+   *     pings are disabled.
    */
   public Duration getHTTP2KeepAlivePingInterval() {
     return http2KeepAlivePingInterval;
@@ -166,7 +167,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The duration the server waits for a SETTINGS ACK from the client before treating the connection as failed. Defaults to 10 seconds.
+   * @return The duration the server waits for a SETTINGS ACK from the client before treating the connection as failed.
+   *     Defaults to 10 seconds.
    */
   public Duration getHTTP2SettingsAckTimeout() {
     return http2SettingsAckTimeout;
@@ -462,8 +464,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   /**
    * Sets the duration the connection reader will wait for an HTTP/2 handler to consume a DATA frame from its per-stream
-   * input pipe. When the timeout elapses the offending stream is cancelled with RST_STREAM(CANCEL) and the reader proceeds
-   * to serve other streams on the same connection. Defaults to 10 seconds. Cannot be null.
+   * input pipe. When the timeout elapses the offending stream is cancelled with RST_STREAM(CANCEL) and the reader
+   * proceeds to serve other streams on the same connection. Defaults to 10 seconds. Cannot be null.
    *
    * @param d The handler read timeout duration.
    * @return This.
@@ -475,7 +477,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * Sets the HPACK header table size advertised to the client in the initial SETTINGS frame. Defaults to 4096 (RFC 9113 §6.5.2).
+   * Sets the HPACK header table size advertised to the client in the initial SETTINGS frame. Defaults to 4096 (RFC 9113
+   * §6.5.2).
    *
    * @param size The header table size in bytes.
    * @return This.
@@ -486,7 +489,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * Sets the initial stream-level flow-control window size advertised to the client. Defaults to 65535 (RFC 9113 §6.9.2).
+   * Sets the initial stream-level flow-control window size advertised to the client. Defaults to 65535 (RFC 9113
+   * §6.9.2).
    *
    * @param size The initial window size in bytes.
    * @return This.
@@ -497,7 +501,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * Sets the interval at which the server sends HTTP/2 PING frames to keep idle connections alive. Set to null to disable.
+   * Sets the interval at which the server sends HTTP/2 PING frames to keep idle connections alive. Set to null to
+   * disable.
    *
    * @param d The ping interval duration, or null to disable keep-alive pings.
    * @return This.
@@ -519,7 +524,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * Sets the maximum HTTP/2 frame size the server is willing to receive. Must be in the range [16384, 16777215] per RFC 9113 §6.5.2. Defaults to 16384.
+   * Sets the maximum HTTP/2 frame size the server is willing to receive. Must be in the range [16384, 16777215] per RFC
+   * 9113 §6.5.2. Defaults to 16384.
    *
    * @param size The maximum frame size in bytes.
    * @return This.
@@ -541,7 +547,8 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * Sets the duration the server waits for a SETTINGS ACK from the client before treating the connection as failed. Defaults to 10 seconds.
+   * Sets the duration the server waits for a SETTINGS ACK from the client before treating the connection as failed.
+   * Defaults to 10 seconds.
    *
    * @param d The timeout duration. Cannot be null.
    * @return This.

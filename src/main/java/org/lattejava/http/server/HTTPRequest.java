@@ -260,7 +260,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * @return true if the client signaled {@code TE: trailers} per RFC 9110 §10.1.4 — trailer fields will be honored on the response.
+   * @return true if the client signaled {@code TE: trailers} per RFC 9110 §10.1.4 — trailer fields will be honored on
+   *     the response.
    */
   public boolean acceptsTrailers() {
     String te = getHeader(HTTPValues.Headers.TE);
@@ -431,8 +432,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Adds a single trailer field received from the client after the request body. Trailers are valid only on
-   * chunked HTTP/1.1 requests and on HTTP/2 streams where the client signaled them via {@code TE: trailers}.
+   * Adds a single trailer field received from the client after the request body. Trailers are valid only on chunked
+   * HTTP/1.1 requests and on HTTP/2 streams where the client signaled them via {@code TE: trailers}.
    *
    * @param name  The trailer field name (case-insensitive).
    * @param value The trailer field value.
@@ -1271,8 +1272,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Returns the first value of the named trailer field, or {@code null} if absent. Trailer fields are populated by
-   * the server after the request body has been fully read on chunked HTTP/1.1 and on HTTP/2 streams.
+   * Returns the first value of the named trailer field, or {@code null} if absent. Trailer fields are populated by the
+   * server after the request body has been fully read on chunked HTTP/1.1 and on HTTP/2 streams.
    *
    * @param name The trailer field name (case-insensitive).
    * @return The first trailer value, or {@code null} if no such trailer was received.
@@ -1286,8 +1287,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * @return An unmodifiable view of all trailer fields received with this request, keyed by lowercased name.
-   * Returns an empty map if no trailers were received.
+   * @return An unmodifiable view of all trailer fields received with this request, keyed by lowercased name. Returns an
+   *     empty map if no trailers were received.
    */
   public Map<String, List<String>> getTrailerMap() {
     return trailers == null ? Map.of() : trailers;

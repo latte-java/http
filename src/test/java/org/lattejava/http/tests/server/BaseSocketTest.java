@@ -62,8 +62,8 @@ public abstract class BaseSocketTest extends BaseTest {
 
   /**
    * Shared server-setup and socket I/O: builds the server, applies any {@code {body}} substitution to the request,
-   * opens a client socket, writes the request bytes, then invokes {@code socketConsumer} while the socket is still
-   * open so callers can perform their assertions against the live socket.
+   * opens a client socket, writes the request bytes, then invokes {@code socketConsumer} while the socket is still open
+   * so callers can perform their assertions against the live socket.
    */
   private void sendAndCapture(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler,
                               ThrowingConsumer<Socket> socketConsumer)

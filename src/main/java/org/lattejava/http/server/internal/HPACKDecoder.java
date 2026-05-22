@@ -126,7 +126,9 @@ public class HPACKDecoder {
     return new StringResult(s, start + len);
   }
 
-  private record NameValuePair(HPACKDynamicTable.HeaderField field, int nextIndex) {}
+  private record NameValuePair(HPACKDynamicTable.HeaderField field, int nextIndex) {
+  }
 
-  private record StringResult(String value, int nextIndex) {}
+  private record StringResult(String value, int nextIndex) {
+  }
 }

@@ -46,10 +46,14 @@ public class HPACKDecoderTest {
     var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
     var fields = decoder.decode(block);
     assertEquals(fields.size(), 4);
-    assertEquals(fields.get(0).name(), ":method");    assertEquals(fields.get(0).value(), "GET");
-    assertEquals(fields.get(1).name(), ":scheme");    assertEquals(fields.get(1).value(), "http");
-    assertEquals(fields.get(2).name(), ":path");      assertEquals(fields.get(2).value(), "/");
-    assertEquals(fields.get(3).name(), ":authority"); assertEquals(fields.get(3).value(), "www.example.com");
+    assertEquals(fields.get(0).name(), ":method");
+    assertEquals(fields.get(0).value(), "GET");
+    assertEquals(fields.get(1).name(), ":scheme");
+    assertEquals(fields.get(1).value(), "http");
+    assertEquals(fields.get(2).name(), ":path");
+    assertEquals(fields.get(2).value(), "/");
+    assertEquals(fields.get(3).name(), ":authority");
+    assertEquals(fields.get(3).value(), "www.example.com");
   }
 
   // RFC 7541 Appendix C.4.1: same request, Huffman-encoded
@@ -78,7 +82,7 @@ public class HPACKDecoderTest {
   // must surface as COMPRESSION_ERROR (IOException), not an unchecked IllegalStateException that escapes to the
   // connection-level reader loop.
   @Test(expectedExceptions = IOException.class,
-        expectedExceptionsMessageRegExp = ".*index.*0.*")
+      expectedExceptionsMessageRegExp = ".*index.*0.*")
   public void decode_index_zero_throws_ioexception_per_rfc_7541_section_2_1() throws Exception {
     // RFC 7541 §6.1 indexed header field representation: high bit + 7-bit index. 0x80 = indexed, index 0 (invalid).
     var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));

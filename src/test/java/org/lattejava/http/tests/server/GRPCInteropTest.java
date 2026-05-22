@@ -20,8 +20,8 @@ import org.lattejava.http.tests.grpc.EchoProto.EchoResponse;
 import static org.testng.Assert.*;
 
 /**
- * Hand-rolled gRPC interop tests that verify HTTP/2 framing, trailer emission, and the gRPC wire
- * format end-to-end using the grpc-java Netty client against our HTTPServer.
+ * Hand-rolled gRPC interop tests that verify HTTP/2 framing, trailer emission, and the gRPC wire format end-to-end
+ * using the grpc-java Netty client against our HTTPServer.
  *
  * <p>Each test boots a server on an OS-assigned port, exercises one RPC pattern, and tears down.
  * All four gRPC streaming variants are covered: unary, server-streaming, client-streaming, and
@@ -40,8 +40,8 @@ public class GRPCInteropTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     try (var server = makeServer("http", handler, listener).start()) {
       ManagedChannel channel = NettyChannelBuilder.forAddress("127.0.0.1", server.getActualPort())
-          .usePlaintext()
-          .build();
+                                                  .usePlaintext()
+                                                  .build();
       try {
         var stub = EchoGrpc.newBlockingStub(channel);
         var resp = stub.unary(EchoRequest.newBuilder().setMessage("world").build());
@@ -68,8 +68,8 @@ public class GRPCInteropTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     try (var server = makeServer("http", handler, listener).start()) {
       ManagedChannel channel = NettyChannelBuilder.forAddress("127.0.0.1", server.getActualPort())
-          .usePlaintext()
-          .build();
+                                                  .usePlaintext()
+                                                  .build();
       try {
         var stub = EchoGrpc.newBlockingStub(channel);
         var iter = stub.serverStream(EchoRequest.newBuilder().setMessage("stream").build());
@@ -95,17 +95,28 @@ public class GRPCInteropTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     try (var server = makeServer("http", handler, listener).start()) {
       ManagedChannel channel = NettyChannelBuilder.forAddress("127.0.0.1", server.getActualPort())
-          .usePlaintext()
-          .build();
+                                                  .usePlaintext()
+                                                  .build();
       try {
         var stub = EchoGrpc.newStub(channel);
         var responseLatch = new CountDownLatch(1);
         var received = new ArrayList<String>();
         var error = new AtomicReference<Throwable>();
         StreamObserver<EchoResponse> respObserver = new StreamObserver<>() {
-          public void onNext(EchoResponse value) { synchronized (received) { received.add(value.getMessage()); } }
-          public void onError(Throwable t) { error.set(t); responseLatch.countDown(); }
-          public void onCompleted() { responseLatch.countDown(); }
+          public void onNext(EchoResponse value) {
+            synchronized (received) {
+              received.add(value.getMessage());
+            }
+          }
+
+          public void onError(Throwable t) {
+            error.set(t);
+            responseLatch.countDown();
+          }
+
+          public void onCompleted() {
+            responseLatch.countDown();
+          }
         };
         var requestObserver = stub.bidiStream(respObserver);
         requestObserver.onNext(EchoRequest.newBuilder().setMessage("a").build());
@@ -141,17 +152,26 @@ public class GRPCInteropTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     try (var server = makeServer("http", handler, listener).start()) {
       ManagedChannel channel = NettyChannelBuilder.forAddress("127.0.0.1", server.getActualPort())
-          .usePlaintext()
-          .build();
+                                                  .usePlaintext()
+                                                  .build();
       try {
         var stub = EchoGrpc.newStub(channel);  // async stub for client-streaming
         var responseLatch = new CountDownLatch(1);
         var receivedResponse = new AtomicReference<EchoResponse>();
         var error = new AtomicReference<Throwable>();
         StreamObserver<EchoResponse> respObserver = new StreamObserver<>() {
-          public void onNext(EchoResponse value) { receivedResponse.set(value); }
-          public void onError(Throwable t) { error.set(t); responseLatch.countDown(); }
-          public void onCompleted() { responseLatch.countDown(); }
+          public void onNext(EchoResponse value) {
+            receivedResponse.set(value);
+          }
+
+          public void onError(Throwable t) {
+            error.set(t);
+            responseLatch.countDown();
+          }
+
+          public void onCompleted() {
+            responseLatch.countDown();
+          }
         };
         var requestObserver = stub.clientStream(respObserver);
         requestObserver.onNext(EchoRequest.newBuilder().setMessage("a").build());
@@ -182,13 +202,13 @@ public class GRPCInteropTest extends BaseTest {
       // Trust the full chain: root CA and intermediate. The server sends [server cert, intermediate CA]
       // in the TLS handshake; the client needs the root CA to complete the PKIX chain.
       var ssl = GrpcSslContexts.forClient()
-          .trustManager(
-              (java.security.cert.X509Certificate) rootCertificate,
-              (java.security.cert.X509Certificate) intermediateCertificate)
-          .build();
+                               .trustManager(
+                                   (java.security.cert.X509Certificate) rootCertificate,
+                                   (java.security.cert.X509Certificate) intermediateCertificate)
+                               .build();
       ManagedChannel channel = NettyChannelBuilder.forAddress("local.lattejava.org", server.getActualPort())
-          .sslContext(ssl)
-          .build();
+                                                  .sslContext(ssl)
+                                                  .build();
       try {
         var stub = EchoGrpc.newBlockingStub(channel);
         var resp = stub.unary(EchoRequest.newBuilder().setMessage("hi").build());
@@ -204,8 +224,8 @@ public class GRPCInteropTest extends BaseTest {
   // ============================================================
 
   /**
-   * Bidi-streaming HTTPHandler. Reads framed requests one at a time, applies impl, emits framed responses
-   * as each request arrives (interleaved). Ends with {@code grpc-status: 0}.
+   * Bidi-streaming HTTPHandler. Reads framed requests one at a time, applies impl, emits framed responses as each
+   * request arrives (interleaved). Ends with {@code grpc-status: 0}.
    *
    * @param impl the function mapping an EchoRequest to an EchoResponse for each message.
    * @return an HTTPHandler suitable for a gRPC bidi-streaming method.
@@ -241,8 +261,8 @@ public class GRPCInteropTest extends BaseTest {
   }
 
   /**
-   * Client-streaming HTTPHandler. Reads all framed protobuf request messages from the input stream,
-   * passes the collected list to impl, writes a single framed response, ends with {@code grpc-status: 0}.
+   * Client-streaming HTTPHandler. Reads all framed protobuf request messages from the input stream, passes the
+   * collected list to impl, writes a single framed response, ends with {@code grpc-status: 0}.
    *
    * @param impl the function mapping a list of EchoRequests to a single EchoResponse.
    * @return an HTTPHandler suitable for a gRPC client-streaming method.
@@ -278,8 +298,8 @@ public class GRPCInteropTest extends BaseTest {
   }
 
   /**
-   * Builds a unary HTTPHandler that reads one length-prefixed protobuf request, invokes the supplied
-   * function, writes one length-prefixed response, and ends with a {@code grpc-status: 0} trailer.
+   * Builds a unary HTTPHandler that reads one length-prefixed protobuf request, invokes the supplied function, writes
+   * one length-prefixed response, and ends with a {@code grpc-status: 0} trailer.
    *
    * @param impl the function mapping an EchoRequest to an EchoResponse.
    * @return an HTTPHandler suitable for a gRPC unary method.
@@ -315,8 +335,8 @@ public class GRPCInteropTest extends BaseTest {
   }
 
   /**
-   * Builds a server-streaming HTTPHandler that reads one request and emits a sequence of
-   * length-prefixed responses, ending with a {@code grpc-status: 0} trailer.
+   * Builds a server-streaming HTTPHandler that reads one request and emits a sequence of length-prefixed responses,
+   * ending with a {@code grpc-status: 0} trailer.
    *
    * @param impl the function mapping an EchoRequest to a list of EchoResponse messages.
    * @return an HTTPHandler suitable for a gRPC server-streaming method.

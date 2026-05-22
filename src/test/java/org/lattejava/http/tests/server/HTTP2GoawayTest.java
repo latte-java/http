@@ -17,8 +17,8 @@ import static org.testng.Assert.*;
  */
 public class HTTP2GoawayTest extends BaseTest {
   /**
-   * Establishes a prior-knowledge h2c connection, then closes the server and asserts that a GOAWAY frame
-   * (type {@code 0x7}) is received before the connection is torn down.
+   * Establishes a prior-knowledge h2c connection, then closes the server and asserts that a GOAWAY frame (type
+   * {@code 0x7}) is received before the connection is torn down.
    */
   @Test
   public void goaway_on_graceful_shutdown() throws Exception {

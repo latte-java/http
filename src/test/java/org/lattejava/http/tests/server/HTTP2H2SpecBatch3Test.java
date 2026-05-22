@@ -42,9 +42,9 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §8.1 — a second HEADERS frame received after END_STREAM (i.e. the stream is
-   * HALF_CLOSED_REMOTE from the server's perspective) must produce {@code RST_STREAM(STREAM_CLOSED)}.
-   * This is a stream error (§5.4.2), not a connection error — the connection must remain open.
+   * RFC 9113 §8.1 — a second HEADERS frame received after END_STREAM (i.e. the stream is HALF_CLOSED_REMOTE from the
+   * server's perspective) must produce {@code RST_STREAM(STREAM_CLOSED)}. This is a stream error (§5.4.2), not a
+   * connection error — the connection must remain open.
    *
    * <p>The handler holds the stream open briefly so the second HEADERS is processed before stream removal.
    */
@@ -53,7 +53,11 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     // Small delay ensures the stream is still registered when the second HEADERS arrives.
     HTTPHandler handler = (req, res) -> {
-      try { Thread.sleep(100); } catch (InterruptedException ignore) { Thread.currentThread().interrupt(); }
+      try {
+        Thread.sleep(100);
+      } catch (InterruptedException ignore) {
+        Thread.currentThread().interrupt();
+      }
       res.setStatus(200);
     };
     try (var server = makeServer("http", handler, listener).start()) {
@@ -80,14 +84,18 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   }
 
   /**
-   * Connection must remain open after RST_STREAM for a stream violation. A subsequent valid
-   * HEADERS request on a new stream ID must be served normally.
+   * Connection must remain open after RST_STREAM for a stream violation. A subsequent valid HEADERS request on a new
+   * stream ID must be served normally.
    */
   @Test
   public void connection_stays_open_after_stream_error() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> {
-      try { Thread.sleep(100); } catch (InterruptedException ignore) { Thread.currentThread().interrupt(); }
+      try {
+        Thread.sleep(100);
+      } catch (InterruptedException ignore) {
+        Thread.currentThread().interrupt();
+      }
       res.setStatus(200);
     };
     try (var server = makeServer("http", handler, listener).start()) {
@@ -120,8 +128,8 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §6.4 — RST_STREAM on an idle stream (an ID that was never opened, not recently closed)
-   * must produce {@code GOAWAY(PROTOCOL_ERROR)}.
+   * RFC 9113 §6.4 — RST_STREAM on an idle stream (an ID that was never opened, not recently closed) must produce
+   * {@code GOAWAY(PROTOCOL_ERROR)}.
    */
   @Test
   public void rst_stream_on_idle_stream_triggers_protocol_error() throws Exception {
@@ -148,8 +156,8 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §7 — an endpoint receiving an unknown error code in an RST_STREAM MUST NOT treat it
-   * as a connection error. The stream is cancelled; the connection stays open.
+   * RFC 9113 §7 — an endpoint receiving an unknown error code in an RST_STREAM MUST NOT treat it as a connection error.
+   * The stream is cancelled; the connection stays open.
    */
   @Test
   public void rst_stream_unknown_error_code_accepted() throws Exception {
@@ -182,9 +190,9 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §5.1.2 — when a HEADERS frame would exceed MAX_CONCURRENT_STREAMS the server MUST
-   * respond with {@code RST_STREAM(REFUSED_STREAM)} (error code {@code 0x7}). The connection
-   * stays open and subsequent requests on new streams are served normally.
+   * RFC 9113 §5.1.2 — when a HEADERS frame would exceed MAX_CONCURRENT_STREAMS the server MUST respond with
+   * {@code RST_STREAM(REFUSED_STREAM)} (error code {@code 0x7}). The connection stays open and subsequent requests on
+   * new streams are served normally.
    */
   @Test
   public void headers_exceeding_concurrent_stream_cap_triggers_refused_stream() throws Exception {
@@ -258,8 +266,8 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   }
 
   /**
-   * Drains inbound frames until GOAWAY (type {@code 0x7}) arrives or EOF. Returns the GOAWAY
-   * error code, or {@code -1} on EOF.
+   * Drains inbound frames until GOAWAY (type {@code 0x7}) arrives or EOF. Returns the GOAWAY error code, or {@code -1}
+   * on EOF.
    */
   private int readUntilGoaway(InputStream in) throws Exception {
     while (true) {
@@ -284,8 +292,8 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   }
 
   /**
-   * Drains inbound frames until RST_STREAM (type {@code 0x3}) arrives or EOF/GOAWAY. Returns the
-   * RST_STREAM error code, or {@code -1} if EOF or GOAWAY arrived first.
+   * Drains inbound frames until RST_STREAM (type {@code 0x3}) arrives or EOF/GOAWAY. Returns the RST_STREAM error code,
+   * or {@code -1} if EOF or GOAWAY arrived first.
    */
   private int readUntilRstStream(InputStream in) throws Exception {
     while (true) {
@@ -313,8 +321,8 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   }
 
   /**
-   * Drains inbound frames until a HEADERS frame (type {@code 0x1}) on the specified {@code targetStreamId}
-   * arrives. Returns {@code targetStreamId} on match, or {@code -1} on EOF.
+   * Drains inbound frames until a HEADERS frame (type {@code 0x1}) on the specified {@code targetStreamId} arrives.
+   * Returns {@code targetStreamId} on match, or {@code -1} on EOF.
    */
   private int readUntilResponseHeadersOnStream(InputStream in, int targetStreamId) throws Exception {
     while (true) {
@@ -337,8 +345,8 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   }
 
   /**
-   * Drains inbound frames until a HEADERS frame (type {@code 0x1}) arrives. Returns the stream ID
-   * of the response HEADERS frame, or {@code -1} on EOF.
+   * Drains inbound frames until a HEADERS frame (type {@code 0x1}) arrives. Returns the stream ID of the response
+   * HEADERS frame, or {@code -1} on EOF.
    */
   private int readUntilResponseHeaders(InputStream in) throws Exception {
     while (true) {

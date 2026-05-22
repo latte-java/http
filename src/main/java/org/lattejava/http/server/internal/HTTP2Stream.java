@@ -7,7 +7,9 @@ package org.lattejava.http.server.internal;
 import org.lattejava.http.server.HTTPRequest;
 
 /**
- * Per-stream state — RFC 9113 §5.1 state machine plus send/receive window counters. Synchronized for cross-thread safety: the connection reader updates state via applyEvent, the writer thread checks/consumes the send window, the handler thread reads the receive window.
+ * Per-stream state — RFC 9113 §5.1 state machine plus send/receive window counters. Synchronized for cross-thread
+ * safety: the connection reader updates state via applyEvent, the writer thread checks/consumes the send window, the
+ * handler thread reads the receive window.
  *
  * @author Daniel DeGroff
  */
@@ -29,19 +31,22 @@ public class HTTP2Stream {
     this.sendWindow = initialSendWindow;
   }
 
-  public HTTPRequest request() { return request; }
+  public HTTPRequest request() {
+    return request;
+  }
 
-  public void setRequest(HTTPRequest request) { this.request = request; }
+  public void setRequest(HTTPRequest request) {
+    this.request = request;
+  }
 
   public synchronized void applyEvent(Event event) {
     state = transition(state, event);
   }
 
   /**
-   * Accumulates the number of DATA bytes received on this stream and checks against the declared
-   * content-length (RFC 9113 §8.1.2.6). Returns {@code true} if the running total does not
-   * exceed the declared length; returns {@code false} if the declared length has been exceeded
-   * (caller must RST_STREAM immediately).
+   * Accumulates the number of DATA bytes received on this stream and checks against the declared content-length (RFC
+   * 9113 §8.1.2.6). Returns {@code true} if the running total does not exceed the declared length; returns
+   * {@code false} if the declared length has been exceeded (caller must RST_STREAM immediately).
    */
   public synchronized boolean appendDataBytes(int n) {
     receivedDataBytes += n;
@@ -49,8 +54,8 @@ public class HTTP2Stream {
   }
 
   /**
-   * Returns {@code true} if the total received DATA bytes match the declared content-length
-   * (or no content-length was declared). Called when END_STREAM arrives to detect under-delivery.
+   * Returns {@code true} if the total received DATA bytes match the declared content-length (or no content-length was
+   * declared). Called when END_STREAM arrives to detect under-delivery.
    */
   public synchronized boolean dataLengthMatches() {
     return declaredContentLength == -1 || receivedDataBytes == declaredContentLength;
@@ -82,15 +87,25 @@ public class HTTP2Stream {
     sendWindow = next;
   }
 
-  public synchronized long receiveWindow() { return receiveWindow; }
+  public synchronized long receiveWindow() {
+    return receiveWindow;
+  }
 
-  public synchronized long sendWindow() { return sendWindow; }
+  public synchronized long sendWindow() {
+    return sendWindow;
+  }
 
-  public synchronized void setDeclaredContentLength(long value) { declaredContentLength = value; }
+  public synchronized void setDeclaredContentLength(long value) {
+    declaredContentLength = value;
+  }
 
-  public synchronized State state() { return state; }
+  public synchronized State state() {
+    return state;
+  }
 
-  public int streamId() { return streamId; }
+  public int streamId() {
+    return streamId;
+  }
 
   private static State transition(State s, Event e) {
     return switch (s) {
@@ -103,7 +118,8 @@ public class HTTP2Stream {
         default -> throw new IllegalStateException("Event [" + e + "] illegal in state [IDLE]");
       };
       case OPEN -> switch (e) {
-        case RECV_DATA_NO_END_STREAM, SEND_DATA_NO_END_STREAM, RECV_HEADERS_NO_END_STREAM, SEND_HEADERS_NO_END_STREAM -> State.OPEN;
+        case RECV_DATA_NO_END_STREAM, SEND_DATA_NO_END_STREAM, RECV_HEADERS_NO_END_STREAM, SEND_HEADERS_NO_END_STREAM ->
+            State.OPEN;
         case RECV_DATA_END_STREAM, RECV_HEADERS_END_STREAM -> State.HALF_CLOSED_REMOTE;
         case SEND_DATA_END_STREAM, SEND_HEADERS_END_STREAM -> State.HALF_CLOSED_LOCAL;
         case RECV_RST_STREAM, SEND_RST_STREAM -> State.CLOSED;

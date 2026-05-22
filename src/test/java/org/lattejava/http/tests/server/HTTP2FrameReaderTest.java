@@ -17,9 +17,9 @@ import static org.testng.Assert.*;
 public class HTTP2FrameReaderTest {
   private byte[] header(int length, int type, int flags, int streamId) {
     return new byte[]{
-        (byte)((length >> 16) & 0xFF), (byte)((length >> 8) & 0xFF), (byte)(length & 0xFF),
+        (byte) ((length >> 16) & 0xFF), (byte) ((length >> 8) & 0xFF), (byte) (length & 0xFF),
         (byte) type, (byte) flags,
-        (byte)((streamId >> 24) & 0x7F), (byte)((streamId >> 16) & 0xFF), (byte)((streamId >> 8) & 0xFF), (byte)(streamId & 0xFF)
+        (byte) ((streamId >> 24) & 0x7F), (byte) ((streamId >> 16) & 0xFF), (byte) ((streamId >> 8) & 0xFF), (byte) (streamId & 0xFF)
     };
   }
 

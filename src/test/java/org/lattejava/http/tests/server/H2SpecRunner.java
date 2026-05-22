@@ -8,9 +8,9 @@ import module java.base;
 import module org.lattejava.http;
 
 /**
- * Standalone h2c server for ad-hoc h2spec runs. Boot via:
- *   latte build && java -cp build/classes/main:build/classes/test org.lattejava.http.tests.server.H2SpecRunner [port]
- * Then in another shell: build/h2spec -h 127.0.0.1 -p &lt;port&gt; --strict generic/1
+ * Standalone h2c server for ad-hoc h2spec runs. Boot via: latte build && java -cp build/classes/main:build/classes/test
+ * org.lattejava.http.tests.server.H2SpecRunner [port] Then in another shell: build/h2spec -h 127.0.0.1 -p &lt;port&gt;
+ * --strict generic/1
  *
  * @author Daniel DeGroff
  */

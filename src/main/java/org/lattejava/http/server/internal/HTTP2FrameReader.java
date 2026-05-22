@@ -9,7 +9,8 @@ import module java.base;
 import static org.lattejava.http.server.internal.HTTP2Frame.*;
 
 /**
- * Reads HTTP/2 frames from an InputStream. Owns the frame-read buffer (passed in by the caller, sized to MAX_FRAME_SIZE). Single-threaded — instance must not be shared across threads.
+ * Reads HTTP/2 frames from an InputStream. Owns the frame-read buffer (passed in by the caller, sized to
+ * MAX_FRAME_SIZE). Single-threaded — instance must not be shared across threads.
  *
  * @author Daniel DeGroff
  */
@@ -89,7 +90,8 @@ public class HTTP2FrameReader {
       case FRAME_TYPE_SETTINGS -> {
         // RFC 9113 §6.5: SETTINGS must have stream ID 0.
         if (streamId != 0) throw new ProtocolException("SETTINGS frame with non-zero stream ID [" + streamId + "]");
-        if ((flags & FLAG_ACK) != 0 && length != 0) throw new FrameSizeException("SETTINGS ACK must have empty payload");
+        if ((flags & FLAG_ACK) != 0 && length != 0)
+          throw new FrameSizeException("SETTINGS ACK must have empty payload");
         if (length % 6 != 0) throw new FrameSizeException("SETTINGS payload length [" + length + "] not multiple of 6");
         yield new SettingsFrame(flags, copyOf(buffer, length));
       }
@@ -138,8 +140,8 @@ public class HTTP2FrameReader {
   }
 
   /**
-   * Thrown when the frame reader detects a FRAME_SIZE_ERROR condition (RFC 9113 §6, §7).
-   * The connection handler must respond with GOAWAY(FRAME_SIZE_ERROR).
+   * Thrown when the frame reader detects a FRAME_SIZE_ERROR condition (RFC 9113 §6, §7). The connection handler must
+   * respond with GOAWAY(FRAME_SIZE_ERROR).
    */
   public static class FrameSizeException extends IOException {
     public FrameSizeException(String message) {
@@ -148,8 +150,8 @@ public class HTTP2FrameReader {
   }
 
   /**
-   * Thrown when the frame reader detects a PROTOCOL_ERROR condition (RFC 9113 §5.4.1, §7).
-   * The connection handler must respond with GOAWAY(PROTOCOL_ERROR).
+   * Thrown when the frame reader detects a PROTOCOL_ERROR condition (RFC 9113 §5.4.1, §7). The connection handler must
+   * respond with GOAWAY(PROTOCOL_ERROR).
    */
   public static class ProtocolException extends IOException {
     public ProtocolException(String message) {

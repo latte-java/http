@@ -217,10 +217,10 @@ public class HTTP2BasicTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §5.2 — one slow handler must not stall other streams on the same connection. Stream 1's handler
-   * blocks indefinitely without reading its body, filling the 16-slot input pipe and causing the connection
-   * reader to enqueue. The reader must time out on pipe.offer() and RST_STREAM(CANCEL) the offending stream
-   * rather than blocking — stream 3 must complete despite stream 1 being stuck.
+   * RFC 9113 §5.2 — one slow handler must not stall other streams on the same connection. Stream 1's handler blocks
+   * indefinitely without reading its body, filling the 16-slot input pipe and causing the connection reader to enqueue.
+   * The reader must time out on pipe.offer() and RST_STREAM(CANCEL) the offending stream rather than blocking — stream
+   * 3 must complete despite stream 1 being stuck.
    */
   @Test(timeOut = 30_000)
   public void slow_handler_does_not_stall_other_streams() throws Exception {

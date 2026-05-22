@@ -9,7 +9,8 @@ import module java.base;
 import static org.lattejava.http.server.internal.HTTP2Frame.*;
 
 /**
- * Writes HTTP/2 frames to an OutputStream. Owns the frame-write buffer (passed in by the caller, sized to 9 + MAX_FRAME_SIZE). Single-threaded — instance must not be shared across threads.
+ * Writes HTTP/2 frames to an OutputStream. Owns the frame-write buffer (passed in by the caller, sized to 9 +
+ * MAX_FRAME_SIZE). Single-threaded — instance must not be shared across threads.
  *
  * @author Daniel DeGroff
  */
@@ -24,7 +25,8 @@ public class HTTP2FrameWriter {
 
   public void writeFrame(HTTP2Frame frame) throws IOException {
     switch (frame) {
-      case ContinuationFrame f -> writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.headerBlockFragment());
+      case ContinuationFrame f ->
+          writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.headerBlockFragment());
       case DataFrame f -> writeWithPayload(FRAME_TYPE_DATA, f.flags(), f.streamId(), f.payload());
       case GoawayFrame f -> {
         byte[] payload = new byte[8 + f.debugData().length];
@@ -45,7 +47,8 @@ public class HTTP2FrameWriter {
       case RSTStreamFrame f -> writeFixedFourByte(FRAME_TYPE_RST_STREAM, 0, f.streamId(), f.errorCode());
       case SettingsFrame f -> writeWithPayload(FRAME_TYPE_SETTINGS, f.flags(), 0, f.payload());
       case UnknownFrame f -> writeWithPayload(f.type(), f.flags(), f.streamId(), f.payload());
-      case WindowUpdateFrame f -> writeFixedFourByte(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), f.windowSizeIncrement() & 0x7FFFFFFF);
+      case WindowUpdateFrame f ->
+          writeFixedFourByte(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), f.windowSizeIncrement() & 0x7FFFFFFF);
     }
   }
 
@@ -83,10 +86,10 @@ public class HTTP2FrameWriter {
   }
 
   /**
-   * Writes a header block as a single HEADERS (or PUSH_PROMISE) frame when it fits, or as one HEADERS frame
-   * followed by one or more CONTINUATION frames when it exceeds the negotiated MAX_FRAME_SIZE (RFC 9113 §4.3, §6.10).
-   * END_HEADERS is set on the final wire frame regardless of fragmentation. Caller flags other than END_HEADERS
-   * (e.g. END_STREAM) ride on the first frame so the receiver applies them to the stream as a whole.
+   * Writes a header block as a single HEADERS (or PUSH_PROMISE) frame when it fits, or as one HEADERS frame followed by
+   * one or more CONTINUATION frames when it exceeds the negotiated MAX_FRAME_SIZE (RFC 9113 §4.3, §6.10). END_HEADERS
+   * is set on the final wire frame regardless of fragmentation. Caller flags other than END_HEADERS (e.g. END_STREAM)
+   * ride on the first frame so the receiver applies them to the stream as a whole.
    */
   private void writeHeaderBlock(int firstFrameType, int callerFlags, int streamId, byte[] block) throws IOException {
     int maxPayload = buffer.length - 9;

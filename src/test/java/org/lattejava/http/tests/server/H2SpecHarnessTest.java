@@ -76,8 +76,8 @@ public class H2SpecHarnessTest extends BaseTest {
 
   /**
    * Parses h2spec's JUnit XML and returns the set of failing section identifiers (e.g. "6.5.3"). The h2spec JUnit
-   * report puts each section name in the {@code <testsuite name="...">} element and individual test cases under
-   * that suite with optional {@code <failure>} children. We collect the section names that have any failing case.
+   * report puts each section name in the {@code <testsuite name="...">} element and individual test cases under that
+   * suite with optional {@code <failure>} children. We collect the section names that have any failing case.
    */
   private static Set<String> parseFailingSections(Path reportPath) throws IOException {
     if (!Files.exists(reportPath)) {

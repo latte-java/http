@@ -8,8 +8,8 @@ import module java.base;
 import module org.lattejava.http;
 
 /**
- * RFC 7541 HPACK encoder. Encodes an ordered list of (name, value) pairs to a HEADERS+CONTINUATION block fragment.
- * v1: Huffman encoding deferred (literal-only) — Plan F can revisit after benchmarking.
+ * RFC 7541 HPACK encoder. Encodes an ordered list of (name, value) pairs to a HEADERS+CONTINUATION block fragment. v1:
+ * Huffman encoding deferred (literal-only) — Plan F can revisit after benchmarking.
  *
  * @author Daniel DeGroff
  */

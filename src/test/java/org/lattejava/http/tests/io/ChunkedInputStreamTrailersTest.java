@@ -41,10 +41,10 @@ public class ChunkedInputStreamTrailersTest {
   public void forbidden_trailer_names_silently_dropped() throws Exception {
     // RFC 9110 §6.5.2: framing/auth/etc. headers are forbidden as trailers. ChunkedInputStream silently drops them.
     String wire = "5\r\nhello\r\n0\r\n" +
-                  "Content-Length: 100\r\n" +     // forbidden — framing
-                  "Authorization: secret\r\n" +    // forbidden — auth
-                  "X-Allowed: kept\r\n" +
-                  "\r\n";
+        "Content-Length: 100\r\n" +     // forbidden — framing
+        "Authorization: secret\r\n" +    // forbidden — auth
+        "X-Allowed: kept\r\n" +
+        "\r\n";
     var pushback = new PushbackInputStream(new ByteArrayInputStream(wire.getBytes()), null);
     var chunked = new ChunkedInputStream(pushback, 1024, 1_000_000);
 

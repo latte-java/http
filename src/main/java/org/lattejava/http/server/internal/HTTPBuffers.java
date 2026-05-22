@@ -82,8 +82,8 @@ public class HTTPBuffers {
   }
 
   /**
-   * Ensures the frame read buffer has capacity for at least the given size. Grows the buffer if needed up to the
-   * RFC 9113 ceiling of 16777215 bytes.
+   * Ensures the frame read buffer has capacity for at least the given size. Grows the buffer if needed up to the RFC
+   * 9113 ceiling of 16777215 bytes.
    *
    * @param size The required size in bytes.
    * @throws IllegalArgumentException if size exceeds the RFC 9113 ceiling.

@@ -401,7 +401,8 @@ public class HTTPResponse {
   /**
    * Sets the raw output stream for protocols (e.g. HTTP/2) that bypass the HTTP/1.1 {@link HTTPOutputStream} wrapper.
    * When a raw output stream is set, {@link #getOutputStream()} returns it instead of the {@link HTTPOutputStream}.
-   * Methods that delegate to {@link HTTPOutputStream} (compress, commit, etc.) are not available when using a raw stream.
+   * Methods that delegate to {@link HTTPOutputStream} (compress, commit, etc.) are not available when using a raw
+   * stream.
    *
    * @param rawOutputStream the raw output stream to use for body emission.
    */
@@ -480,32 +481,32 @@ public class HTTPResponse {
   }
 
   /**
-   * @return The protocol-switch handler registered via {@link #switchProtocols}, or {@code null} if no
-   *     protocol switch was requested for this response.
+   * @return The protocol-switch handler registered via {@link #switchProtocols}, or {@code null} if no protocol switch
+   *     was requested for this response.
    */
   public ProtocolSwitchHandler getSwitchProtocolsHandler() {
     return switchProtocolsHandler;
   }
 
   /**
-   * @return The additional response headers to emit alongside the 101 Switching Protocols status, or an empty
-   *     map if none were specified.
+   * @return The additional response headers to emit alongside the 101 Switching Protocols status, or an empty map if
+   *     none were specified.
    */
   public Map<String, String> getSwitchProtocolsHeaders() {
     return switchProtocolsHeaders == null ? Map.of() : switchProtocolsHeaders;
   }
 
   /**
-   * @return The target protocol token (e.g. {@code "h2c"}) for a 101 Switching Protocols response, or
-   *     {@code null} if no protocol switch was requested.
+   * @return The target protocol token (e.g. {@code "h2c"}) for a 101 Switching Protocols response, or {@code null} if
+   *     no protocol switch was requested.
    */
   public String getSwitchProtocolsTarget() {
     return switchProtocolsTarget;
   }
 
   /**
-   * @return An unmodifiable view of all response trailers added via {@link #addTrailer(String, String)}.
-   *     Returns an empty map if no trailers were added.
+   * @return An unmodifiable view of all response trailers added via {@link #addTrailer(String, String)}. Returns an
+   *     empty map if no trailers were added.
    */
   public Map<String, List<String>> getTrailers() {
     return trailers == null ? Map.of() : trailers;
@@ -564,8 +565,8 @@ public class HTTPResponse {
    * via {@link #setCompress(boolean)}; whether compression is actually applied also depends on the request's accepted
    * encodings, which {@link #willCompress()} accounts for.
    *
-   * @return {@code true} if compression will be utilized when writing the HTTP OutputStream. Always false on the
-   *     HTTP/2 path (compression is handled at the TLS layer or not at all for h2c).
+   * @return {@code true} if compression will be utilized when writing the HTTP OutputStream. Always false on the HTTP/2
+   *     path (compression is handled at the TLS layer or not at all for h2c).
    */
   public boolean isCompress() {
     return rawOutputStream == null && outputStream.isCompress();
@@ -785,8 +786,8 @@ public class HTTPResponse {
    * only reports the configured intent, this also factors in everything currently known about the request and stream
    * state (such as the client's accepted encodings) to decide whether compression will really be applied.
    *
-   * @return {@code true} if compression has been requested and, as far as we know, it will be applied. Always false
-   *     on the HTTP/2 path (compression is handled at the TLS layer or not at all for h2c).
+   * @return {@code true} if compression has been requested and, as far as we know, it will be applied. Always false on
+   *     the HTTP/2 path (compression is handled at the TLS layer or not at all for h2c).
    */
   public boolean willCompress() {
     return rawOutputStream == null && outputStream.willCompress();

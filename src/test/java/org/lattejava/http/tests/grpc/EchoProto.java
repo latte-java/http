@@ -5,7 +5,9 @@
 package org.lattejava.http.tests.grpc;
 
 public final class EchoProto {
-  private EchoProto() {}
+  private EchoProto() {
+  }
+
   public static void registerAllExtensions(
       com.google.protobuf.ExtensionRegistryLite registry) {
   }
@@ -15,22 +17,27 @@ public final class EchoProto {
     registerAllExtensions(
         (com.google.protobuf.ExtensionRegistryLite) registry);
   }
+
   public interface EchoRequestOrBuilder extends
       // @@protoc_insertion_point(interface_extends:latte.echo.EchoRequest)
       com.google.protobuf.MessageOrBuilder {
 
     /**
      * <code>string message = 1;</code>
+     *
      * @return The message.
      */
     java.lang.String getMessage();
+
     /**
      * <code>string message = 1;</code>
+     *
      * @return The bytes for message.
      */
     com.google.protobuf.ByteString
-        getMessageBytes();
+    getMessageBytes();
   }
+
   /**
    * Protobuf type {@code latte.echo.EchoRequest}
    */
@@ -38,11 +45,13 @@ public final class EchoProto {
       com.google.protobuf.GeneratedMessageV3 implements
       // @@protoc_insertion_point(message_implements:latte.echo.EchoRequest)
       EchoRequestOrBuilder {
-  private static final long serialVersionUID = 0L;
+    private static final long serialVersionUID = 0L;
+
     // Use EchoRequest.newBuilder() to construct.
     private EchoRequest(com.google.protobuf.GeneratedMessageV3.Builder<?> builder) {
       super(builder);
     }
+
     private EchoRequest() {
       message_ = "";
     }
@@ -55,13 +64,13 @@ public final class EchoProto {
     }
 
     public static final com.google.protobuf.Descriptors.Descriptor
-        getDescriptor() {
+    getDescriptor() {
       return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoRequest_descriptor;
     }
 
     @java.lang.Override
     protected com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
-        internalGetFieldAccessorTable() {
+    internalGetFieldAccessorTable() {
       return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoRequest_fieldAccessorTable
           .ensureFieldAccessorsInitialized(
               org.lattejava.http.tests.grpc.EchoProto.EchoRequest.class, org.lattejava.http.tests.grpc.EchoProto.EchoRequest.Builder.class);
@@ -70,8 +79,10 @@ public final class EchoProto {
     public static final int MESSAGE_FIELD_NUMBER = 1;
     @SuppressWarnings("serial")
     private volatile java.lang.Object message_ = "";
+
     /**
      * <code>string message = 1;</code>
+     *
      * @return The message.
      */
     @java.lang.Override
@@ -80,23 +91,25 @@ public final class EchoProto {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         message_ = s;
         return s;
       }
     }
+
     /**
      * <code>string message = 1;</code>
+     *
      * @return The bytes for message.
      */
     @java.lang.Override
     public com.google.protobuf.ByteString
-        getMessageBytes() {
+    getMessageBytes() {
       java.lang.Object ref = message_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         message_ = b;
@@ -107,6 +120,7 @@ public final class EchoProto {
     }
 
     private byte memoizedIsInitialized = -1;
+
     @java.lang.Override
     public final boolean isInitialized() {
       byte isInitialized = memoizedIsInitialized;
@@ -119,7 +133,7 @@ public final class EchoProto {
 
     @java.lang.Override
     public void writeTo(com.google.protobuf.CodedOutputStream output)
-                        throws java.io.IOException {
+        throws java.io.IOException {
       if (!com.google.protobuf.GeneratedMessageV3.isStringEmpty(message_)) {
         com.google.protobuf.GeneratedMessageV3.writeString(output, 1, message_);
       }
@@ -143,7 +157,7 @@ public final class EchoProto {
     @java.lang.Override
     public boolean equals(final java.lang.Object obj) {
       if (obj == this) {
-       return true;
+        return true;
       }
       if (!(obj instanceof org.lattejava.http.tests.grpc.EchoProto.EchoRequest)) {
         return super.equals(obj);
@@ -175,38 +189,45 @@ public final class EchoProto {
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(
         java.nio.ByteBuffer data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(
         com.google.protobuf.ByteString data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(
         com.google.protobuf.ByteString data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(byte[] data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(
         byte[] data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(java.io.InputStream input)
         throws java.io.IOException {
       return com.google.protobuf.GeneratedMessageV3
           .parseWithIOException(PARSER, input);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(
         java.io.InputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
@@ -228,12 +249,14 @@ public final class EchoProto {
       return com.google.protobuf.GeneratedMessageV3
           .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(
         com.google.protobuf.CodedInputStream input)
         throws java.io.IOException {
       return com.google.protobuf.GeneratedMessageV3
           .parseWithIOException(PARSER, input);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoRequest parseFrom(
         com.google.protobuf.CodedInputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
@@ -243,13 +266,18 @@ public final class EchoProto {
     }
 
     @java.lang.Override
-    public Builder newBuilderForType() { return newBuilder(); }
+    public Builder newBuilderForType() {
+      return newBuilder();
+    }
+
     public static Builder newBuilder() {
       return DEFAULT_INSTANCE.toBuilder();
     }
+
     public static Builder newBuilder(org.lattejava.http.tests.grpc.EchoProto.EchoRequest prototype) {
       return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
     }
+
     @java.lang.Override
     public Builder toBuilder() {
       return this == DEFAULT_INSTANCE
@@ -262,6 +290,7 @@ public final class EchoProto {
       Builder builder = new Builder(parent);
       return builder;
     }
+
     /**
      * Protobuf type {@code latte.echo.EchoRequest}
      */
@@ -270,13 +299,13 @@ public final class EchoProto {
         // @@protoc_insertion_point(builder_implements:latte.echo.EchoRequest)
         org.lattejava.http.tests.grpc.EchoProto.EchoRequestOrBuilder {
       public static final com.google.protobuf.Descriptors.Descriptor
-          getDescriptor() {
+      getDescriptor() {
         return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoRequest_descriptor;
       }
 
       @java.lang.Override
       protected com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
-          internalGetFieldAccessorTable() {
+      internalGetFieldAccessorTable() {
         return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoRequest_fieldAccessorTable
             .ensureFieldAccessorsInitialized(
                 org.lattejava.http.tests.grpc.EchoProto.EchoRequest.class, org.lattejava.http.tests.grpc.EchoProto.EchoRequest.Builder.class);
@@ -292,6 +321,7 @@ public final class EchoProto {
         super(parent);
 
       }
+
       @java.lang.Override
       public Builder clear() {
         super.clear();
@@ -302,7 +332,7 @@ public final class EchoProto {
 
       @java.lang.Override
       public com.google.protobuf.Descriptors.Descriptor
-          getDescriptorForType() {
+      getDescriptorForType() {
         return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoRequest_descriptor;
       }
 
@@ -323,7 +353,9 @@ public final class EchoProto {
       @java.lang.Override
       public org.lattejava.http.tests.grpc.EchoProto.EchoRequest buildPartial() {
         org.lattejava.http.tests.grpc.EchoProto.EchoRequest result = new org.lattejava.http.tests.grpc.EchoProto.EchoRequest(this);
-        if (bitField0_ != 0) { buildPartial0(result); }
+        if (bitField0_ != 0) {
+          buildPartial0(result);
+        }
         onBuilt();
         return result;
       }
@@ -339,38 +371,44 @@ public final class EchoProto {
       public Builder clone() {
         return super.clone();
       }
+
       @java.lang.Override
       public Builder setField(
           com.google.protobuf.Descriptors.FieldDescriptor field,
           java.lang.Object value) {
         return super.setField(field, value);
       }
+
       @java.lang.Override
       public Builder clearField(
           com.google.protobuf.Descriptors.FieldDescriptor field) {
         return super.clearField(field);
       }
+
       @java.lang.Override
       public Builder clearOneof(
           com.google.protobuf.Descriptors.OneofDescriptor oneof) {
         return super.clearOneof(oneof);
       }
+
       @java.lang.Override
       public Builder setRepeatedField(
           com.google.protobuf.Descriptors.FieldDescriptor field,
           int index, java.lang.Object value) {
         return super.setRepeatedField(field, index, value);
       }
+
       @java.lang.Override
       public Builder addRepeatedField(
           com.google.protobuf.Descriptors.FieldDescriptor field,
           java.lang.Object value) {
         return super.addRepeatedField(field, value);
       }
+
       @java.lang.Override
       public Builder mergeFrom(com.google.protobuf.Message other) {
         if (other instanceof org.lattejava.http.tests.grpc.EchoProto.EchoRequest) {
-          return mergeFrom((org.lattejava.http.tests.grpc.EchoProto.EchoRequest)other);
+          return mergeFrom((org.lattejava.http.tests.grpc.EchoProto.EchoRequest) other);
         } else {
           super.mergeFrom(other);
           return this;
@@ -430,11 +468,14 @@ public final class EchoProto {
         } // finally
         return this;
       }
+
       private int bitField0_;
 
       private java.lang.Object message_ = "";
+
       /**
        * <code>string message = 1;</code>
+       *
        * @return The message.
        */
       public java.lang.String getMessage() {
@@ -449,15 +490,17 @@ public final class EchoProto {
           return (java.lang.String) ref;
         }
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @return The bytes for message.
        */
       public com.google.protobuf.ByteString
-          getMessageBytes() {
+      getMessageBytes() {
         java.lang.Object ref = message_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           message_ = b;
@@ -466,21 +509,27 @@ public final class EchoProto {
           return (com.google.protobuf.ByteString) ref;
         }
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @param value The message to set.
        * @return This builder for chaining.
        */
       public Builder setMessage(
           java.lang.String value) {
-        if (value == null) { throw new NullPointerException(); }
+        if (value == null) {
+          throw new NullPointerException();
+        }
         message_ = value;
         bitField0_ |= 0x00000001;
         onChanged();
         return this;
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @return This builder for chaining.
        */
       public Builder clearMessage() {
@@ -489,20 +538,25 @@ public final class EchoProto {
         onChanged();
         return this;
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @param value The bytes for message to set.
        * @return This builder for chaining.
        */
       public Builder setMessageBytes(
           com.google.protobuf.ByteString value) {
-        if (value == null) { throw new NullPointerException(); }
+        if (value == null) {
+          throw new NullPointerException();
+        }
         checkByteStringIsUtf8(value);
         message_ = value;
         bitField0_ |= 0x00000001;
         onChanged();
         return this;
       }
+
       @java.lang.Override
       public final Builder setUnknownFields(
           final com.google.protobuf.UnknownFieldSet unknownFields) {
@@ -521,6 +575,7 @@ public final class EchoProto {
 
     // @@protoc_insertion_point(class_scope:latte.echo.EchoRequest)
     private static final org.lattejava.http.tests.grpc.EchoProto.EchoRequest DEFAULT_INSTANCE;
+
     static {
       DEFAULT_INSTANCE = new org.lattejava.http.tests.grpc.EchoProto.EchoRequest();
     }
@@ -573,16 +628,20 @@ public final class EchoProto {
 
     /**
      * <code>string message = 1;</code>
+     *
      * @return The message.
      */
     java.lang.String getMessage();
+
     /**
      * <code>string message = 1;</code>
+     *
      * @return The bytes for message.
      */
     com.google.protobuf.ByteString
-        getMessageBytes();
+    getMessageBytes();
   }
+
   /**
    * Protobuf type {@code latte.echo.EchoResponse}
    */
@@ -590,11 +649,13 @@ public final class EchoProto {
       com.google.protobuf.GeneratedMessageV3 implements
       // @@protoc_insertion_point(message_implements:latte.echo.EchoResponse)
       EchoResponseOrBuilder {
-  private static final long serialVersionUID = 0L;
+    private static final long serialVersionUID = 0L;
+
     // Use EchoResponse.newBuilder() to construct.
     private EchoResponse(com.google.protobuf.GeneratedMessageV3.Builder<?> builder) {
       super(builder);
     }
+
     private EchoResponse() {
       message_ = "";
     }
@@ -607,13 +668,13 @@ public final class EchoProto {
     }
 
     public static final com.google.protobuf.Descriptors.Descriptor
-        getDescriptor() {
+    getDescriptor() {
       return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoResponse_descriptor;
     }
 
     @java.lang.Override
     protected com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
-        internalGetFieldAccessorTable() {
+    internalGetFieldAccessorTable() {
       return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoResponse_fieldAccessorTable
           .ensureFieldAccessorsInitialized(
               org.lattejava.http.tests.grpc.EchoProto.EchoResponse.class, org.lattejava.http.tests.grpc.EchoProto.EchoResponse.Builder.class);
@@ -622,8 +683,10 @@ public final class EchoProto {
     public static final int MESSAGE_FIELD_NUMBER = 1;
     @SuppressWarnings("serial")
     private volatile java.lang.Object message_ = "";
+
     /**
      * <code>string message = 1;</code>
+     *
      * @return The message.
      */
     @java.lang.Override
@@ -632,23 +695,25 @@ public final class EchoProto {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         message_ = s;
         return s;
       }
     }
+
     /**
      * <code>string message = 1;</code>
+     *
      * @return The bytes for message.
      */
     @java.lang.Override
     public com.google.protobuf.ByteString
-        getMessageBytes() {
+    getMessageBytes() {
       java.lang.Object ref = message_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         message_ = b;
@@ -659,6 +724,7 @@ public final class EchoProto {
     }
 
     private byte memoizedIsInitialized = -1;
+
     @java.lang.Override
     public final boolean isInitialized() {
       byte isInitialized = memoizedIsInitialized;
@@ -671,7 +737,7 @@ public final class EchoProto {
 
     @java.lang.Override
     public void writeTo(com.google.protobuf.CodedOutputStream output)
-                        throws java.io.IOException {
+        throws java.io.IOException {
       if (!com.google.protobuf.GeneratedMessageV3.isStringEmpty(message_)) {
         com.google.protobuf.GeneratedMessageV3.writeString(output, 1, message_);
       }
@@ -695,7 +761,7 @@ public final class EchoProto {
     @java.lang.Override
     public boolean equals(final java.lang.Object obj) {
       if (obj == this) {
-       return true;
+        return true;
       }
       if (!(obj instanceof org.lattejava.http.tests.grpc.EchoProto.EchoResponse)) {
         return super.equals(obj);
@@ -727,38 +793,45 @@ public final class EchoProto {
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(
         java.nio.ByteBuffer data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(
         com.google.protobuf.ByteString data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(
         com.google.protobuf.ByteString data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(byte[] data)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(
         byte[] data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
       return PARSER.parseFrom(data, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(java.io.InputStream input)
         throws java.io.IOException {
       return com.google.protobuf.GeneratedMessageV3
           .parseWithIOException(PARSER, input);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(
         java.io.InputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
@@ -780,12 +853,14 @@ public final class EchoProto {
       return com.google.protobuf.GeneratedMessageV3
           .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(
         com.google.protobuf.CodedInputStream input)
         throws java.io.IOException {
       return com.google.protobuf.GeneratedMessageV3
           .parseWithIOException(PARSER, input);
     }
+
     public static org.lattejava.http.tests.grpc.EchoProto.EchoResponse parseFrom(
         com.google.protobuf.CodedInputStream input,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
@@ -795,13 +870,18 @@ public final class EchoProto {
     }
 
     @java.lang.Override
-    public Builder newBuilderForType() { return newBuilder(); }
+    public Builder newBuilderForType() {
+      return newBuilder();
+    }
+
     public static Builder newBuilder() {
       return DEFAULT_INSTANCE.toBuilder();
     }
+
     public static Builder newBuilder(org.lattejava.http.tests.grpc.EchoProto.EchoResponse prototype) {
       return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
     }
+
     @java.lang.Override
     public Builder toBuilder() {
       return this == DEFAULT_INSTANCE
@@ -814,6 +894,7 @@ public final class EchoProto {
       Builder builder = new Builder(parent);
       return builder;
     }
+
     /**
      * Protobuf type {@code latte.echo.EchoResponse}
      */
@@ -822,13 +903,13 @@ public final class EchoProto {
         // @@protoc_insertion_point(builder_implements:latte.echo.EchoResponse)
         org.lattejava.http.tests.grpc.EchoProto.EchoResponseOrBuilder {
       public static final com.google.protobuf.Descriptors.Descriptor
-          getDescriptor() {
+      getDescriptor() {
         return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoResponse_descriptor;
       }
 
       @java.lang.Override
       protected com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
-          internalGetFieldAccessorTable() {
+      internalGetFieldAccessorTable() {
         return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoResponse_fieldAccessorTable
             .ensureFieldAccessorsInitialized(
                 org.lattejava.http.tests.grpc.EchoProto.EchoResponse.class, org.lattejava.http.tests.grpc.EchoProto.EchoResponse.Builder.class);
@@ -844,6 +925,7 @@ public final class EchoProto {
         super(parent);
 
       }
+
       @java.lang.Override
       public Builder clear() {
         super.clear();
@@ -854,7 +936,7 @@ public final class EchoProto {
 
       @java.lang.Override
       public com.google.protobuf.Descriptors.Descriptor
-          getDescriptorForType() {
+      getDescriptorForType() {
         return org.lattejava.http.tests.grpc.EchoProto.internal_static_latte_echo_EchoResponse_descriptor;
       }
 
@@ -875,7 +957,9 @@ public final class EchoProto {
       @java.lang.Override
       public org.lattejava.http.tests.grpc.EchoProto.EchoResponse buildPartial() {
         org.lattejava.http.tests.grpc.EchoProto.EchoResponse result = new org.lattejava.http.tests.grpc.EchoProto.EchoResponse(this);
-        if (bitField0_ != 0) { buildPartial0(result); }
+        if (bitField0_ != 0) {
+          buildPartial0(result);
+        }
         onBuilt();
         return result;
       }
@@ -891,38 +975,44 @@ public final class EchoProto {
       public Builder clone() {
         return super.clone();
       }
+
       @java.lang.Override
       public Builder setField(
           com.google.protobuf.Descriptors.FieldDescriptor field,
           java.lang.Object value) {
         return super.setField(field, value);
       }
+
       @java.lang.Override
       public Builder clearField(
           com.google.protobuf.Descriptors.FieldDescriptor field) {
         return super.clearField(field);
       }
+
       @java.lang.Override
       public Builder clearOneof(
           com.google.protobuf.Descriptors.OneofDescriptor oneof) {
         return super.clearOneof(oneof);
       }
+
       @java.lang.Override
       public Builder setRepeatedField(
           com.google.protobuf.Descriptors.FieldDescriptor field,
           int index, java.lang.Object value) {
         return super.setRepeatedField(field, index, value);
       }
+
       @java.lang.Override
       public Builder addRepeatedField(
           com.google.protobuf.Descriptors.FieldDescriptor field,
           java.lang.Object value) {
         return super.addRepeatedField(field, value);
       }
+
       @java.lang.Override
       public Builder mergeFrom(com.google.protobuf.Message other) {
         if (other instanceof org.lattejava.http.tests.grpc.EchoProto.EchoResponse) {
-          return mergeFrom((org.lattejava.http.tests.grpc.EchoProto.EchoResponse)other);
+          return mergeFrom((org.lattejava.http.tests.grpc.EchoProto.EchoResponse) other);
         } else {
           super.mergeFrom(other);
           return this;
@@ -982,11 +1072,14 @@ public final class EchoProto {
         } // finally
         return this;
       }
+
       private int bitField0_;
 
       private java.lang.Object message_ = "";
+
       /**
        * <code>string message = 1;</code>
+       *
        * @return The message.
        */
       public java.lang.String getMessage() {
@@ -1001,15 +1094,17 @@ public final class EchoProto {
           return (java.lang.String) ref;
         }
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @return The bytes for message.
        */
       public com.google.protobuf.ByteString
-          getMessageBytes() {
+      getMessageBytes() {
         java.lang.Object ref = message_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           message_ = b;
@@ -1018,21 +1113,27 @@ public final class EchoProto {
           return (com.google.protobuf.ByteString) ref;
         }
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @param value The message to set.
        * @return This builder for chaining.
        */
       public Builder setMessage(
           java.lang.String value) {
-        if (value == null) { throw new NullPointerException(); }
+        if (value == null) {
+          throw new NullPointerException();
+        }
         message_ = value;
         bitField0_ |= 0x00000001;
         onChanged();
         return this;
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @return This builder for chaining.
        */
       public Builder clearMessage() {
@@ -1041,20 +1142,25 @@ public final class EchoProto {
         onChanged();
         return this;
       }
+
       /**
        * <code>string message = 1;</code>
+       *
        * @param value The bytes for message to set.
        * @return This builder for chaining.
        */
       public Builder setMessageBytes(
           com.google.protobuf.ByteString value) {
-        if (value == null) { throw new NullPointerException(); }
+        if (value == null) {
+          throw new NullPointerException();
+        }
         checkByteStringIsUtf8(value);
         message_ = value;
         bitField0_ |= 0x00000001;
         onChanged();
         return this;
       }
+
       @java.lang.Override
       public final Builder setUnknownFields(
           final com.google.protobuf.UnknownFieldSet unknownFields) {
@@ -1073,6 +1179,7 @@ public final class EchoProto {
 
     // @@protoc_insertion_point(class_scope:latte.echo.EchoResponse)
     private static final org.lattejava.http.tests.grpc.EchoProto.EchoResponse DEFAULT_INSTANCE;
+
     static {
       DEFAULT_INSTANCE = new org.lattejava.http.tests.grpc.EchoProto.EchoResponse();
     }
@@ -1120,52 +1227,54 @@ public final class EchoProto {
   }
 
   private static final com.google.protobuf.Descriptors.Descriptor
-    internal_static_latte_echo_EchoRequest_descriptor;
-  private static final 
-    com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+      internal_static_latte_echo_EchoRequest_descriptor;
+  private static final
+  com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_latte_echo_EchoRequest_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
-    internal_static_latte_echo_EchoResponse_descriptor;
-  private static final 
-    com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+      internal_static_latte_echo_EchoResponse_descriptor;
+  private static final
+  com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_latte_echo_EchoResponse_fieldAccessorTable;
 
   public static com.google.protobuf.Descriptors.FileDescriptor
-      getDescriptor() {
+  getDescriptor() {
     return descriptor;
   }
-  private static  com.google.protobuf.Descriptors.FileDescriptor
+
+  private static com.google.protobuf.Descriptors.FileDescriptor
       descriptor;
+
   static {
     java.lang.String[] descriptorData = {
-      "\n\necho.proto\022\nlatte.echo\"\036\n\013EchoRequest\022" +
-      "\017\n\007message\030\001 \001(\t\"\037\n\014EchoResponse\022\017\n\007mess" +
-      "age\030\001 \001(\t2\221\002\n\004Echo\022:\n\005Unary\022\027.latte.echo" +
-      ".EchoRequest\032\030.latte.echo.EchoResponse\022C" +
-      "\n\014ServerStream\022\027.latte.echo.EchoRequest\032" +
-      "\030.latte.echo.EchoResponse0\001\022C\n\014ClientStr" +
-      "eam\022\027.latte.echo.EchoRequest\032\030.latte.ech" +
-      "o.EchoResponse(\001\022C\n\nBidiStream\022\027.latte.e" +
-      "cho.EchoRequest\032\030.latte.echo.EchoRespons" +
-      "e(\0010\001B*\n\035org.lattejava.http.tests.grpcB\t" +
-      "EchoProtob\006proto3"
+        "\n\necho.proto\022\nlatte.echo\"\036\n\013EchoRequest\022" +
+            "\017\n\007message\030\001 \001(\t\"\037\n\014EchoResponse\022\017\n\007mess" +
+            "age\030\001 \001(\t2\221\002\n\004Echo\022:\n\005Unary\022\027.latte.echo" +
+            ".EchoRequest\032\030.latte.echo.EchoResponse\022C" +
+            "\n\014ServerStream\022\027.latte.echo.EchoRequest\032" +
+            "\030.latte.echo.EchoResponse0\001\022C\n\014ClientStr" +
+            "eam\022\027.latte.echo.EchoRequest\032\030.latte.ech" +
+            "o.EchoResponse(\001\022C\n\nBidiStream\022\027.latte.e" +
+            "cho.EchoRequest\032\030.latte.echo.EchoRespons" +
+            "e(\0010\001B*\n\035org.lattejava.http.tests.grpcB\t" +
+            "EchoProtob\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
-      .internalBuildGeneratedFileFrom(descriptorData,
-        new com.google.protobuf.Descriptors.FileDescriptor[] {
-        });
+        .internalBuildGeneratedFileFrom(descriptorData,
+            new com.google.protobuf.Descriptors.FileDescriptor[]{
+            });
     internal_static_latte_echo_EchoRequest_descriptor =
-      getDescriptor().getMessageTypes().get(0);
+        getDescriptor().getMessageTypes().get(0);
     internal_static_latte_echo_EchoRequest_fieldAccessorTable = new
-      com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
+        com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_latte_echo_EchoRequest_descriptor,
-        new java.lang.String[] { "Message", });
+        new java.lang.String[]{"Message",});
     internal_static_latte_echo_EchoResponse_descriptor =
-      getDescriptor().getMessageTypes().get(1);
+        getDescriptor().getMessageTypes().get(1);
     internal_static_latte_echo_EchoResponse_fieldAccessorTable = new
-      com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
+        com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_latte_echo_EchoResponse_descriptor,
-        new java.lang.String[] { "Message", });
+        new java.lang.String[]{"Message",});
   }
 
   // @@protoc_insertion_point(outer_class_scope)

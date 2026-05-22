@@ -7,7 +7,8 @@ package org.lattejava.http.server.internal;
 import module java.base;
 
 /**
- * Per-stream input. Backed by an ArrayBlockingQueue<byte[]> filled by the connection reader thread. A zero-length byte[] is the EOF sentinel.
+ * Per-stream input. Backed by an ArrayBlockingQueue<byte[]> filled by the connection reader thread. A zero-length
+ * byte[] is the EOF sentinel.
  *
  * @author Daniel DeGroff
  */
@@ -24,7 +25,9 @@ public class HTTP2InputStream extends InputStream {
     this.queue = queue;
   }
 
-  public static byte[] eofSentinel() { return EOF_SENTINEL; }
+  public static byte[] eofSentinel() {
+    return EOF_SENTINEL;
+  }
 
   @Override
   public int read() throws IOException {

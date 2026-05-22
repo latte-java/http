@@ -7,8 +7,8 @@ package org.lattejava.http.server.internal;
 /**
  * Immutable configuration for the five DoS-class HTTP/2 rate limits (RST_STREAM, PING, SETTINGS, empty DATA,
  * WINDOW_UPDATE). Holds thresholds and windows; no mutable state. Each accepted connection obtains its own
- * {@link HTTP2RateLimitsTracker} via {@link #newTracker()} so per-connection sliding-window counters cannot
- * race — sharing a single tracker across connections corrupted the ArrayDeques under burst load.
+ * {@link HTTP2RateLimitsTracker} via {@link #newTracker()} so per-connection sliding-window counters cannot race —
+ * sharing a single tracker across connections corrupted the ArrayDeques under burst load.
  *
  * @author Daniel DeGroff
  */

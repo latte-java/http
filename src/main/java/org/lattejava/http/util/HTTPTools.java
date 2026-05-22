@@ -27,13 +27,13 @@ public final class HTTPTools {
   private static Logger logger;
 
   /**
-   * Lowercases an HTTP header-name-style string with no allocation when the input is already
-   * lowercase ASCII. {@link String#toLowerCase(Locale)} always copies, even when no transformation
-   * is needed; this scan-once helper returns the input unchanged in the common case.
+   * Lowercases an HTTP header-name-style string with no allocation when the input is already lowercase ASCII.
+   * {@link String#toLowerCase(Locale)} always copies, even when no transformation is needed; this scan-once helper
+   * returns the input unchanged in the common case.
    *
    * <p>Falls back to {@code String.toLowerCase(Locale.ROOT)} when any uppercase ASCII or non-ASCII
-   * character is present, so observable behavior is identical to the existing code for both
-   * well-formed and malformed inputs.
+   * character is present, so observable behavior is identical to the existing code for both well-formed and malformed
+   * inputs.
    *
    * @param s The header name (or any ASCII-token string) to lowercase.
    * @return {@code s} unchanged when it is already lowercase ASCII; otherwise the lowercased form.

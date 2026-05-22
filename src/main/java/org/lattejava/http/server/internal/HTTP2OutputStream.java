@@ -7,11 +7,13 @@ package org.lattejava.http.server.internal;
 import module java.base;
 
 /**
- * Per-stream output. Buffers writes locally; on flush/close, fragments against the peer-negotiated MAX_FRAME_SIZE and enqueues DATA frames to the connection writer queue. Blocks on the stream's send-window when out of credits; the connection reader thread signals via the per-stream monitor on WINDOW_UPDATE.
+ * Per-stream output. Buffers writes locally; on flush/close, fragments against the peer-negotiated MAX_FRAME_SIZE and
+ * enqueues DATA frames to the connection writer queue. Blocks on the stream's send-window when out of credits; the
+ * connection reader thread signals via the per-stream monitor on WINDOW_UPDATE.
  *
  * <p>When the response carries trailers, the caller must invoke {@link #setTrailersFollow(boolean)} with {@code true}
- * before calling {@link #close()}. This causes the final DATA frame to omit END_STREAM so that the subsequent
- * HEADERS (trailers) frame can carry it instead, as required by RFC 9113 §8.1.
+ * before calling {@link #close()}. This causes the final DATA frame to omit END_STREAM so that the subsequent HEADERS
+ * (trailers) frame can carry it instead, as required by RFC 9113 §8.1.
  *
  * @author Daniel DeGroff
  */
@@ -41,8 +43,8 @@ public class HTTP2OutputStream extends OutputStream {
 
   /**
    * Sets whether a HEADERS frame carrying trailers will follow this DATA stream. When {@code true}, the final DATA
-   * frame written by {@link #close()} will not carry END_STREAM, leaving the caller responsible for sending a
-   * HEADERS (trailers) frame with END_STREAM.
+   * frame written by {@link #close()} will not carry END_STREAM, leaving the caller responsible for sending a HEADERS
+   * (trailers) frame with END_STREAM.
    *
    * @param trailersFollow {@code true} if a trailers HEADERS frame will follow.
    */

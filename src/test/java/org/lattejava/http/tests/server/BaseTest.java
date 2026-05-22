@@ -233,8 +233,8 @@ public abstract class BaseTest {
   }
 
   /**
-   * Builds an {@link HTTPServer} with a caller-supplied listener configuration. Useful when the test needs a custom port
-   * (e.g. port 0 for OS-assigned) or non-default h2c flags.
+   * Builds an {@link HTTPServer} with a caller-supplied listener configuration. Useful when the test needs a custom
+   * port (e.g. port 0 for OS-assigned) or non-default h2c flags.
    *
    * @param scheme   {@code "http"} or {@code "https"}
    * @param handler  the request handler

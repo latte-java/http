@@ -15,8 +15,8 @@ import static org.testng.Assert.*;
  * Verifies ALPN protocol selection for HTTP/2 over TLS.
  *
  * <p>The first test confirms that the server advertises {@code h2} by default and that the JDK client
- * negotiates HTTP/2. The second test confirms that disabling HTTP/2 on the listener causes the server to
- * omit {@code h2} from its ALPN list so the JDK client falls back to HTTP/1.1.
+ * negotiates HTTP/2. The second test confirms that disabling HTTP/2 on the listener causes the server to omit
+ * {@code h2} from its ALPN list so the JDK client falls back to HTTP/1.1.
  *
  * @author Daniel DeGroff
  */

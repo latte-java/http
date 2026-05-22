@@ -68,9 +68,9 @@ public class HTTP2OutputStreamFragmentationTest {
   }
 
   /**
-   * RFC 9113 §6.9.1 — when the initial send-window is 1, the server must send 1 byte at a time, blocked until
-   * the peer sends WINDOW_UPDATE. Verifies that {@code HTTP2OutputStream.flushAndFragment} never waits for
-   * window >= chunk; it waits only until window > 0, then sends up to min(window, maxFrameSize, remaining).
+   * RFC 9113 §6.9.1 — when the initial send-window is 1, the server must send 1 byte at a time, blocked until the peer
+   * sends WINDOW_UPDATE. Verifies that {@code HTTP2OutputStream.flushAndFragment} never waits for window >= chunk; it
+   * waits only until window > 0, then sends up to min(window, maxFrameSize, remaining).
    */
   @Test
   public void flow_control_window_one_sends_byte_by_byte() throws Exception {

@@ -356,11 +356,11 @@ public class CoreTest extends BaseTest {
 
   /**
    * Regression: when HTTP1Worker.state() collapses its private {@code KeepAlive} state into {@code State.Read}, the
-   * HTTPServerThread cleaner applies its slow-reader throughput check to idle keep-alive sockets and evicts them
-   * after one cleaner cycle. A long-lived keep-alive socket whose first request finishes quickly accumulates a
-   * tiny number of bytes over a now-long elapsed time, which computes below any reasonable minimum-throughput
-   * threshold. This test sends one request, idles past two cleaner cycles, then sends a second request on the same
-   * raw socket — proving the server did NOT evict the connection.
+   * HTTPServerThread cleaner applies its slow-reader throughput check to idle keep-alive sockets and evicts them after
+   * one cleaner cycle. A long-lived keep-alive socket whose first request finishes quickly accumulates a tiny number of
+   * bytes over a now-long elapsed time, which computes below any reasonable minimum-throughput threshold. This test
+   * sends one request, idles past two cleaner cycles, then sends a second request on the same raw socket — proving the
+   * server did NOT evict the connection.
    */
   @Test
   public void keepAlive_idle_socket_not_evicted_by_throughput_cleaner() throws Exception {

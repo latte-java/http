@@ -59,7 +59,8 @@ public final class SecurityTools {
   }
 
   /**
-   * Configure ALPN on an accepted SSLSocket based on the listener config. Advertises ["h2", "http/1.1"] when HTTP/2 is enabled, ["http/1.1"] otherwise. Returns the same socket for chaining.
+   * Configure ALPN on an accepted SSLSocket based on the listener config. Advertises ["h2", "http/1.1"] when HTTP/2 is
+   * enabled, ["http/1.1"] otherwise. Returns the same socket for chaining.
    */
   public static SSLSocket configureALPN(SSLSocket socket, HTTPListenerConfiguration listener) {
     SSLParameters params = socket.getSSLParameters();

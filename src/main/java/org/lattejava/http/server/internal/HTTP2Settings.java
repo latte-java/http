@@ -5,7 +5,8 @@
 package org.lattejava.http.server.internal;
 
 /**
- * Per-connection HTTP/2 settings (RFC 9113 §6.5.2). Mutable so a single instance can be reused as the peer changes its settings mid-connection.
+ * Per-connection HTTP/2 settings (RFC 9113 §6.5.2). Mutable so a single instance can be reused as the peer changes its
+ * settings mid-connection.
  *
  * @author Daniel DeGroff
  */
@@ -37,7 +38,7 @@ public class HTTP2Settings {
     for (int i = 0; i < payload.length; i += 6) {
       int id = ((payload[i] & 0xFF) << 8) | (payload[i + 1] & 0xFF);
       int value = ((payload[i + 2] & 0xFF) << 24) | ((payload[i + 3] & 0xFF) << 16)
-                | ((payload[i + 4] & 0xFF) << 8)  |  (payload[i + 5] & 0xFF);
+          | ((payload[i + 4] & 0xFF) << 8) | (payload[i + 5] & 0xFF);
 
       switch (id) {
         case SETTINGS_HEADER_TABLE_SIZE -> {
@@ -86,17 +87,35 @@ public class HTTP2Settings {
           }
           maxHeaderListSize = value;
         }
-        default -> {} // unknown settings silently ignored per §6.5.2
+        default -> {
+        } // unknown settings silently ignored per §6.5.2
       }
     }
   }
 
-  public int enablePush() { return enablePush; }
-  public int headerTableSize() { return headerTableSize; }
-  public int initialWindowSize() { return initialWindowSize; }
-  public int maxConcurrentStreams() { return maxConcurrentStreams; }
-  public int maxFrameSize() { return maxFrameSize; }
-  public int maxHeaderListSize() { return maxHeaderListSize; }
+  public int enablePush() {
+    return enablePush;
+  }
+
+  public int headerTableSize() {
+    return headerTableSize;
+  }
+
+  public int initialWindowSize() {
+    return initialWindowSize;
+  }
+
+  public int maxConcurrentStreams() {
+    return maxConcurrentStreams;
+  }
+
+  public int maxFrameSize() {
+    return maxFrameSize;
+  }
+
+  public int maxHeaderListSize() {
+    return maxHeaderListSize;
+  }
 
   public HTTP2Settings withHeaderTableSize(int size) {
     this.headerTableSize = size;

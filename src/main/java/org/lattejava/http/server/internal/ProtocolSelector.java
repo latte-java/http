@@ -23,12 +23,12 @@ public class ProtocolSelector {
   /**
    * Selects the appropriate connection handler for the given socket.
    *
-   * @param socket          the accepted client socket
-   * @param configuration   the server configuration
-   * @param context         the server context
-   * @param instrumenter    the instrumenter, may be null
-   * @param listener        the listener configuration that accepted the connection
-   * @param throughput      the per-connection throughput tracker
+   * @param socket        the accepted client socket
+   * @param configuration the server configuration
+   * @param context       the server context
+   * @param instrumenter  the instrumenter, may be null
+   * @param listener      the listener configuration that accepted the connection
+   * @param throughput    the per-connection throughput tracker
    * @return a {@link ClientConnection} (also a {@link Runnable}) ready to be started on a virtual thread
    * @throws IOException if the socket or handshake fails before dispatch
    */

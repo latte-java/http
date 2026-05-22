@@ -3,6 +3,7 @@ package org.lattejava.http.tests.grpc;
 import static io.grpc.MethodDescriptor.generateFullMethodName;
 
 /**
+ *
  */
 @javax.annotation.processing.Generated(
     value = "by gRPC proto compiler (version 1.63.2)",
@@ -10,7 +11,8 @@ import static io.grpc.MethodDescriptor.generateFullMethodName;
 @io.grpc.stub.annotations.GrpcGenerated
 public final class EchoGrpc {
 
-  private EchoGrpc() {}
+  private EchoGrpc() {
+  }
 
   public static final java.lang.String SERVICE_NAME = "latte.echo.Echo";
 
@@ -31,15 +33,15 @@ public final class EchoGrpc {
         if ((getUnaryMethod = EchoGrpc.getUnaryMethod) == null) {
           EchoGrpc.getUnaryMethod = getUnaryMethod =
               io.grpc.MethodDescriptor.<org.lattejava.http.tests.grpc.EchoProto.EchoRequest, org.lattejava.http.tests.grpc.EchoProto.EchoResponse>newBuilder()
-              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
-              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "Unary"))
-              .setSampledToLocalTracing(true)
-              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
-              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
-              .setSchemaDescriptor(new EchoMethodDescriptorSupplier("Unary"))
-              .build();
+                                      .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+                                      .setFullMethodName(generateFullMethodName(SERVICE_NAME, "Unary"))
+                                      .setSampledToLocalTracing(true)
+                                      .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
+                                      .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
+                                      .setSchemaDescriptor(new EchoMethodDescriptorSupplier("Unary"))
+                                      .build();
         }
       }
     }
@@ -62,15 +64,15 @@ public final class EchoGrpc {
         if ((getServerStreamMethod = EchoGrpc.getServerStreamMethod) == null) {
           EchoGrpc.getServerStreamMethod = getServerStreamMethod =
               io.grpc.MethodDescriptor.<org.lattejava.http.tests.grpc.EchoProto.EchoRequest, org.lattejava.http.tests.grpc.EchoProto.EchoResponse>newBuilder()
-              .setType(io.grpc.MethodDescriptor.MethodType.SERVER_STREAMING)
-              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ServerStream"))
-              .setSampledToLocalTracing(true)
-              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
-              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
-              .setSchemaDescriptor(new EchoMethodDescriptorSupplier("ServerStream"))
-              .build();
+                                      .setType(io.grpc.MethodDescriptor.MethodType.SERVER_STREAMING)
+                                      .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ServerStream"))
+                                      .setSampledToLocalTracing(true)
+                                      .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
+                                      .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
+                                      .setSchemaDescriptor(new EchoMethodDescriptorSupplier("ServerStream"))
+                                      .build();
         }
       }
     }
@@ -93,15 +95,15 @@ public final class EchoGrpc {
         if ((getClientStreamMethod = EchoGrpc.getClientStreamMethod) == null) {
           EchoGrpc.getClientStreamMethod = getClientStreamMethod =
               io.grpc.MethodDescriptor.<org.lattejava.http.tests.grpc.EchoProto.EchoRequest, org.lattejava.http.tests.grpc.EchoProto.EchoResponse>newBuilder()
-              .setType(io.grpc.MethodDescriptor.MethodType.CLIENT_STREAMING)
-              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ClientStream"))
-              .setSampledToLocalTracing(true)
-              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
-              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
-              .setSchemaDescriptor(new EchoMethodDescriptorSupplier("ClientStream"))
-              .build();
+                                      .setType(io.grpc.MethodDescriptor.MethodType.CLIENT_STREAMING)
+                                      .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ClientStream"))
+                                      .setSampledToLocalTracing(true)
+                                      .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
+                                      .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
+                                      .setSchemaDescriptor(new EchoMethodDescriptorSupplier("ClientStream"))
+                                      .build();
         }
       }
     }
@@ -124,15 +126,15 @@ public final class EchoGrpc {
         if ((getBidiStreamMethod = EchoGrpc.getBidiStreamMethod) == null) {
           EchoGrpc.getBidiStreamMethod = getBidiStreamMethod =
               io.grpc.MethodDescriptor.<org.lattejava.http.tests.grpc.EchoProto.EchoRequest, org.lattejava.http.tests.grpc.EchoProto.EchoResponse>newBuilder()
-              .setType(io.grpc.MethodDescriptor.MethodType.BIDI_STREAMING)
-              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "BidiStream"))
-              .setSampledToLocalTracing(true)
-              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
-              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
-                  org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
-              .setSchemaDescriptor(new EchoMethodDescriptorSupplier("BidiStream"))
-              .build();
+                                      .setType(io.grpc.MethodDescriptor.MethodType.BIDI_STREAMING)
+                                      .setFullMethodName(generateFullMethodName(SERVICE_NAME, "BidiStream"))
+                                      .setSampledToLocalTracing(true)
+                                      .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoRequest.getDefaultInstance()))
+                                      .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                                          org.lattejava.http.tests.grpc.EchoProto.EchoResponse.getDefaultInstance()))
+                                      .setSchemaDescriptor(new EchoMethodDescriptorSupplier("BidiStream"))
+                                      .build();
         }
       }
     }
@@ -144,12 +146,12 @@ public final class EchoGrpc {
    */
   public static EchoStub newStub(io.grpc.Channel channel) {
     io.grpc.stub.AbstractStub.StubFactory<EchoStub> factory =
-      new io.grpc.stub.AbstractStub.StubFactory<EchoStub>() {
-        @java.lang.Override
-        public EchoStub newStub(io.grpc.Channel channel, io.grpc.CallOptions callOptions) {
-          return new EchoStub(channel, callOptions);
-        }
-      };
+        new io.grpc.stub.AbstractStub.StubFactory<EchoStub>() {
+          @java.lang.Override
+          public EchoStub newStub(io.grpc.Channel channel, io.grpc.CallOptions callOptions) {
+            return new EchoStub(channel, callOptions);
+          }
+        };
     return EchoStub.newStub(factory, channel);
   }
 
@@ -159,12 +161,12 @@ public final class EchoGrpc {
   public static EchoBlockingStub newBlockingStub(
       io.grpc.Channel channel) {
     io.grpc.stub.AbstractStub.StubFactory<EchoBlockingStub> factory =
-      new io.grpc.stub.AbstractStub.StubFactory<EchoBlockingStub>() {
-        @java.lang.Override
-        public EchoBlockingStub newStub(io.grpc.Channel channel, io.grpc.CallOptions callOptions) {
-          return new EchoBlockingStub(channel, callOptions);
-        }
-      };
+        new io.grpc.stub.AbstractStub.StubFactory<EchoBlockingStub>() {
+          @java.lang.Override
+          public EchoBlockingStub newStub(io.grpc.Channel channel, io.grpc.CallOptions callOptions) {
+            return new EchoBlockingStub(channel, callOptions);
+          }
+        };
     return EchoBlockingStub.newStub(factory, channel);
   }
 
@@ -174,34 +176,38 @@ public final class EchoGrpc {
   public static EchoFutureStub newFutureStub(
       io.grpc.Channel channel) {
     io.grpc.stub.AbstractStub.StubFactory<EchoFutureStub> factory =
-      new io.grpc.stub.AbstractStub.StubFactory<EchoFutureStub>() {
-        @java.lang.Override
-        public EchoFutureStub newStub(io.grpc.Channel channel, io.grpc.CallOptions callOptions) {
-          return new EchoFutureStub(channel, callOptions);
-        }
-      };
+        new io.grpc.stub.AbstractStub.StubFactory<EchoFutureStub>() {
+          @java.lang.Override
+          public EchoFutureStub newStub(io.grpc.Channel channel, io.grpc.CallOptions callOptions) {
+            return new EchoFutureStub(channel, callOptions);
+          }
+        };
     return EchoFutureStub.newStub(factory, channel);
   }
 
   /**
+   *
    */
   public interface AsyncService {
 
     /**
+     *
      */
     default void unary(org.lattejava.http.tests.grpc.EchoProto.EchoRequest request,
-        io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
+                       io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
       io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getUnaryMethod(), responseObserver);
     }
 
     /**
+     *
      */
     default void serverStream(org.lattejava.http.tests.grpc.EchoProto.EchoRequest request,
-        io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
+                              io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
       io.grpc.stub.ServerCalls.asyncUnimplementedUnaryCall(getServerStreamMethod(), responseObserver);
     }
 
     /**
+     *
      */
     default io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoRequest> clientStream(
         io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
@@ -209,6 +215,7 @@ public final class EchoGrpc {
     }
 
     /**
+     *
      */
     default io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoRequest> bidiStream(
         io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
@@ -222,7 +229,8 @@ public final class EchoGrpc {
   public static abstract class EchoImplBase
       implements io.grpc.BindableService, AsyncService {
 
-    @java.lang.Override public final io.grpc.ServerServiceDefinition bindService() {
+    @java.lang.Override
+    public final io.grpc.ServerServiceDefinition bindService() {
       return EchoGrpc.bindService(this);
     }
   }
@@ -244,22 +252,25 @@ public final class EchoGrpc {
     }
 
     /**
+     *
      */
     public void unary(org.lattejava.http.tests.grpc.EchoProto.EchoRequest request,
-        io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
+                      io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
       io.grpc.stub.ClientCalls.asyncUnaryCall(
           getChannel().newCall(getUnaryMethod(), getCallOptions()), request, responseObserver);
     }
 
     /**
+     *
      */
     public void serverStream(org.lattejava.http.tests.grpc.EchoProto.EchoRequest request,
-        io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
+                             io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
       io.grpc.stub.ClientCalls.asyncServerStreamingCall(
           getChannel().newCall(getServerStreamMethod(), getCallOptions()), request, responseObserver);
     }
 
     /**
+     *
      */
     public io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoRequest> clientStream(
         io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
@@ -268,6 +279,7 @@ public final class EchoGrpc {
     }
 
     /**
+     *
      */
     public io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoRequest> bidiStream(
         io.grpc.stub.StreamObserver<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> responseObserver) {
@@ -293,6 +305,7 @@ public final class EchoGrpc {
     }
 
     /**
+     *
      */
     public org.lattejava.http.tests.grpc.EchoProto.EchoResponse unary(org.lattejava.http.tests.grpc.EchoProto.EchoRequest request) {
       return io.grpc.stub.ClientCalls.blockingUnaryCall(
@@ -300,6 +313,7 @@ public final class EchoGrpc {
     }
 
     /**
+     *
      */
     public java.util.Iterator<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> serverStream(
         org.lattejava.http.tests.grpc.EchoProto.EchoRequest request) {
@@ -325,6 +339,7 @@ public final class EchoGrpc {
     }
 
     /**
+     *
      */
     public com.google.common.util.concurrent.ListenableFuture<org.lattejava.http.tests.grpc.EchoProto.EchoResponse> unary(
         org.lattejava.http.tests.grpc.EchoProto.EchoRequest request) {
@@ -387,40 +402,41 @@ public final class EchoGrpc {
 
   public static final io.grpc.ServerServiceDefinition bindService(AsyncService service) {
     return io.grpc.ServerServiceDefinition.builder(getServiceDescriptor())
-        .addMethod(
-          getUnaryMethod(),
-          io.grpc.stub.ServerCalls.asyncUnaryCall(
-            new MethodHandlers<
-              org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
-              org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
-                service, METHODID_UNARY)))
-        .addMethod(
-          getServerStreamMethod(),
-          io.grpc.stub.ServerCalls.asyncServerStreamingCall(
-            new MethodHandlers<
-              org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
-              org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
-                service, METHODID_SERVER_STREAM)))
-        .addMethod(
-          getClientStreamMethod(),
-          io.grpc.stub.ServerCalls.asyncClientStreamingCall(
-            new MethodHandlers<
-              org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
-              org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
-                service, METHODID_CLIENT_STREAM)))
-        .addMethod(
-          getBidiStreamMethod(),
-          io.grpc.stub.ServerCalls.asyncBidiStreamingCall(
-            new MethodHandlers<
-              org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
-              org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
-                service, METHODID_BIDI_STREAM)))
-        .build();
+                                          .addMethod(
+                                              getUnaryMethod(),
+                                              io.grpc.stub.ServerCalls.asyncUnaryCall(
+                                                  new MethodHandlers<
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
+                                                      service, METHODID_UNARY)))
+                                          .addMethod(
+                                              getServerStreamMethod(),
+                                              io.grpc.stub.ServerCalls.asyncServerStreamingCall(
+                                                  new MethodHandlers<
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
+                                                      service, METHODID_SERVER_STREAM)))
+                                          .addMethod(
+                                              getClientStreamMethod(),
+                                              io.grpc.stub.ServerCalls.asyncClientStreamingCall(
+                                                  new MethodHandlers<
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
+                                                      service, METHODID_CLIENT_STREAM)))
+                                          .addMethod(
+                                              getBidiStreamMethod(),
+                                              io.grpc.stub.ServerCalls.asyncBidiStreamingCall(
+                                                  new MethodHandlers<
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoRequest,
+                                                      org.lattejava.http.tests.grpc.EchoProto.EchoResponse>(
+                                                      service, METHODID_BIDI_STREAM)))
+                                          .build();
   }
 
   private static abstract class EchoBaseDescriptorSupplier
       implements io.grpc.protobuf.ProtoFileDescriptorSupplier, io.grpc.protobuf.ProtoServiceDescriptorSupplier {
-    EchoBaseDescriptorSupplier() {}
+    EchoBaseDescriptorSupplier() {
+    }
 
     @java.lang.Override
     public com.google.protobuf.Descriptors.FileDescriptor getFileDescriptor() {
@@ -435,7 +451,8 @@ public final class EchoGrpc {
 
   private static final class EchoFileDescriptorSupplier
       extends EchoBaseDescriptorSupplier {
-    EchoFileDescriptorSupplier() {}
+    EchoFileDescriptorSupplier() {
+    }
   }
 
   private static final class EchoMethodDescriptorSupplier
@@ -462,12 +479,12 @@ public final class EchoGrpc {
         result = serviceDescriptor;
         if (result == null) {
           serviceDescriptor = result = io.grpc.ServiceDescriptor.newBuilder(SERVICE_NAME)
-              .setSchemaDescriptor(new EchoFileDescriptorSupplier())
-              .addMethod(getUnaryMethod())
-              .addMethod(getServerStreamMethod())
-              .addMethod(getClientStreamMethod())
-              .addMethod(getBidiStreamMethod())
-              .build();
+                                                                .setSchemaDescriptor(new EchoFileDescriptorSupplier())
+                                                                .addMethod(getUnaryMethod())
+                                                                .addMethod(getServerStreamMethod())
+                                                                .addMethod(getClientStreamMethod())
+                                                                .addMethod(getBidiStreamMethod())
+                                                                .build();
         }
       }
     }

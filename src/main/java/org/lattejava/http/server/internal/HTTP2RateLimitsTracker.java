@@ -7,13 +7,13 @@ package org.lattejava.http.server.internal;
 import module java.base;
 
 /**
- * Per-connection sliding-window counters for the five DoS-class HTTP/2 attacks. Each {@code record*} call
- * appends now() to its deque, prunes entries older than the configured window, and returns {@code true} when
- * the per-window threshold has been crossed — the caller emits GOAWAY(ENHANCE_YOUR_CALM).
+ * Per-connection sliding-window counters for the five DoS-class HTTP/2 attacks. Each {@code record*} call appends now()
+ * to its deque, prunes entries older than the configured window, and returns {@code true} when the per-window threshold
+ * has been crossed — the caller emits GOAWAY(ENHANCE_YOUR_CALM).
  *
  * <p>Not thread-safe. Each accepted connection has one reader virtual-thread which is the sole caller for that
- * connection's tracker. Sharing a tracker across connections is a correctness bug: the ArrayDeques would race
- * and the shared counters would trip the threshold prematurely (and could NPE between {@code isEmpty()} and
+ * connection's tracker. Sharing a tracker across connections is a correctness bug: the ArrayDeques would race and the
+ * shared counters would trip the threshold prematurely (and could NPE between {@code isEmpty()} and
  * {@code peekFirst()}). Always obtain trackers via {@link HTTP2RateLimits#newTracker()}.
  *
  * @author Daniel DeGroff
@@ -30,15 +30,25 @@ public class HTTP2RateLimitsTracker {
     this.config = config;
   }
 
-  public boolean recordEmptyData() { return record(emptyData, config.emptyDataMax(), config.emptyDataWindowMs()); }
+  public boolean recordEmptyData() {
+    return record(emptyData, config.emptyDataMax(), config.emptyDataWindowMs());
+  }
 
-  public boolean recordPing() { return record(ping, config.pingMax(), config.pingWindowMs()); }
+  public boolean recordPing() {
+    return record(ping, config.pingMax(), config.pingWindowMs());
+  }
 
-  public boolean recordRstStream() { return record(rstStream, config.rstStreamMax(), config.rstStreamWindowMs()); }
+  public boolean recordRstStream() {
+    return record(rstStream, config.rstStreamMax(), config.rstStreamWindowMs());
+  }
 
-  public boolean recordSettings() { return record(settings, config.settingsMax(), config.settingsWindowMs()); }
+  public boolean recordSettings() {
+    return record(settings, config.settingsMax(), config.settingsWindowMs());
+  }
 
-  public boolean recordWindowUpdate() { return record(windowUpdate, config.windowUpdateMax(), config.windowUpdateWindowMs()); }
+  public boolean recordWindowUpdate() {
+    return record(windowUpdate, config.windowUpdateMax(), config.windowUpdateWindowMs());
+  }
 
   private static boolean record(ArrayDeque<Long> q, int max, long windowMs) {
     long now = System.currentTimeMillis();

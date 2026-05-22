@@ -19,16 +19,18 @@ public interface ClientConnection {
   long getStartInstant();
 
   /**
-   * Aggregated state across the connection's threads. For HTTP/1.1 this is the worker's state; for HTTP/2 this is the worst-case role state across reader/writer/active handlers (Read if any thread is blocked reading, Write if any is blocked writing, otherwise Process).
+   * Aggregated state across the connection's threads. For HTTP/1.1 this is the worker's state; for HTTP/2 this is the
+   * worst-case role state across reader/writer/active handlers (Read if any thread is blocked reading, Write if any is
+   * blocked writing, otherwise Process).
    */
   State state();
 
   enum State {
     /**
-     * The connection is idle between requests on a persistent HTTP/1.1 socket. The slow-reader throughput check
-     * MUST NOT apply in this state — keep-alive sockets do not consume bytes, so any throughput sample taken now
-     * would compare bytes read during the prior request against an elapsed time that includes the idle period and
-     * the connection would be incorrectly evicted as a slow reader. Keep-alive expiry is governed instead by the
+     * The connection is idle between requests on a persistent HTTP/1.1 socket. The slow-reader throughput check MUST
+     * NOT apply in this state — keep-alive sockets do not consume bytes, so any throughput sample taken now would
+     * compare bytes read during the prior request against an elapsed time that includes the idle period and the
+     * connection would be incorrectly evicted as a slow reader. Keep-alive expiry is governed instead by the
      * socket-level {@code SO_TIMEOUT} that the worker sets when it transitions into this state.
      */
     KeepAlive,

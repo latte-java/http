@@ -188,11 +188,17 @@ public class HTTPListenerConfiguration {
     return privateKey;
   }
 
-  public boolean isH2cPriorKnowledgeEnabled() { return h2cPriorKnowledgeEnabled; }
+  public boolean isH2cPriorKnowledgeEnabled() {
+    return h2cPriorKnowledgeEnabled;
+  }
 
-  public boolean isH2cUpgradeEnabled() { return h2cUpgradeEnabled; }
+  public boolean isH2cUpgradeEnabled() {
+    return h2cUpgradeEnabled;
+  }
 
-  public boolean isHTTP2Enabled() { return http2Enabled; }
+  public boolean isHTTP2Enabled() {
+    return http2Enabled;
+  }
 
   public boolean isTLS() {
     return tls;

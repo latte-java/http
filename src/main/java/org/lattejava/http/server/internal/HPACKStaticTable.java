@@ -97,7 +97,8 @@ public final class HPACKStaticTable {
     NAME_INDEX = name;
   }
 
-  private HPACKStaticTable() {}
+  private HPACKStaticTable() {
+  }
 
   public static int indexFullMatch(String name, String value) {
     Integer idx = FULL_INDEX.get(new HPACKDynamicTable.HeaderField(name, value));

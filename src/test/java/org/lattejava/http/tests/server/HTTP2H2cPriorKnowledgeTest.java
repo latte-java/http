@@ -11,16 +11,16 @@ import module org.testng;
 import static org.testng.Assert.*;
 
 /**
- * Verifies that prior-knowledge h2c (cleartext HTTP/2 without the Upgrade handshake) is dispatched correctly
- * through {@link org.lattejava.http.server.internal.ProtocolSelector}.
+ * Verifies that prior-knowledge h2c (cleartext HTTP/2 without the Upgrade handshake) is dispatched correctly through
+ * {@link org.lattejava.http.server.internal.ProtocolSelector}.
  *
  * @author Daniel DeGroff
  */
 public class HTTP2H2cPriorKnowledgeTest extends BaseTest {
   /**
-   * Sends a plain HTTP/1.1 request to a listener with h2c prior-knowledge enabled and asserts that the server
-   * falls back to HTTP/1.1 and returns a 200 response. This guards against the bug where a non-preface client
-   * (e.g. wrk) was sent GOAWAY(PROTOCOL_ERROR) and disconnected instead of being served as HTTP/1.1.
+   * Sends a plain HTTP/1.1 request to a listener with h2c prior-knowledge enabled and asserts that the server falls
+   * back to HTTP/1.1 and returns a 200 response. This guards against the bug where a non-preface client (e.g. wrk) was
+   * sent GOAWAY(PROTOCOL_ERROR) and disconnected instead of being served as HTTP/1.1.
    */
   @Test
   public void h2c_prior_knowledge_h1_fallback() throws Exception {

@@ -24,8 +24,8 @@ import static org.testng.Assert.*;
  */
 public class HTTP2RawFrameTest extends BaseTest {
   /**
-   * Minimal HPACK block representing a valid GET / request over HTTP/2. Uses only indexed header field
-   * representations from the static table (RFC 7541 §6.1):
+   * Minimal HPACK block representing a valid GET / request over HTTP/2. Uses only indexed header field representations
+   * from the static table (RFC 7541 §6.1):
    * <ul>
    *   <li>{@code 0x82} — index 2: {@code :method: GET}</li>
    *   <li>{@code 0x84} — index 4: {@code :path: /}</li>
@@ -45,8 +45,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   };
 
   /**
-   * Open an h2c prior-knowledge connection and return the socket after the handshake is complete (server
-   * SETTINGS and SETTINGS ACK have been drained).
+   * Open an h2c prior-knowledge connection and return the socket after the handshake is complete (server SETTINGS and
+   * SETTINGS ACK have been drained).
    */
   private Socket openH2cConnection(int port) throws Exception {
     var sock = new Socket("127.0.0.1", port);
@@ -78,8 +78,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * Drain inbound frames until GOAWAY (type {@code 0x7}) arrives or the connection closes. Returns the GOAWAY
-   * error code, or {@code -1} if EOF arrived first.
+   * Drain inbound frames until GOAWAY (type {@code 0x7}) arrives or the connection closes. Returns the GOAWAY error
+   * code, or {@code -1} if EOF arrived first.
    */
   private int readUntilGoaway(InputStream in) throws Exception {
     while (true) {
@@ -105,8 +105,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * Read and discard frames until a HEADERS frame (type {@code 0x1}) arrives. Returns the stream-id of the
-   * response HEADERS frame, or {@code -1} on EOF.
+   * Read and discard frames until a HEADERS frame (type {@code 0x1}) arrives. Returns the stream-id of the response
+   * HEADERS frame, or {@code -1} on EOF.
    */
   private int readUntilResponseHeaders(InputStream in) throws Exception {
     while (true) {
@@ -212,8 +212,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1 — a second HEADERS block on a stream that has not END_STREAM'd carries request trailers and MUST
-   * be accepted. Current bug at HTTP2Connection.java:284-287 rejects every second HEADERS with RST_STREAM(STREAM_CLOSED).
+   * RFC 9113 §8.1 — a second HEADERS block on a stream that has not END_STREAM'd carries request trailers and MUST be
+   * accepted. Current bug at HTTP2Connection.java:284-287 rejects every second HEADERS with RST_STREAM(STREAM_CLOSED).
    */
   @Test
   public void request_trailers_accepted_not_reset_as_stream_closed() throws Exception {
@@ -270,9 +270,9 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §8.1 — response trailers MUST be sent as a HEADERS frame with END_STREAM AFTER the final DATA frame,
-   * and the final DATA frame MUST NOT have END_STREAM set. Currently exercised only indirectly via GRPCInteropTest;
-   * this direct test pins the wire-level behavior so a regression in setTrailersFollow / emitTrailers fails fast.
+   * RFC 9113 §8.1 — response trailers MUST be sent as a HEADERS frame with END_STREAM AFTER the final DATA frame, and
+   * the final DATA frame MUST NOT have END_STREAM set. Currently exercised only indirectly via GRPCInteropTest; this
+   * direct test pins the wire-level behavior so a regression in setTrailersFollow / emitTrailers fails fast.
    */
   @Test
   public void response_trailers_emitted_as_headers_frame_after_final_data() throws Exception {
@@ -326,7 +326,8 @@ public class HTTP2RawFrameTest extends BaseTest {
               sawDataFrame = true;
               lastDataFlags = flags;
             }
-            default -> {} // SETTINGS, WINDOW_UPDATE, etc. — ignore.
+            default -> {
+            } // SETTINGS, WINDOW_UPDATE, etc. — ignore.
           }
         }
 
@@ -342,7 +343,7 @@ public class HTTP2RawFrameTest extends BaseTest {
         var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
         var fields = decoder.decode(trailerBlock);
         boolean foundChecksum = fields.stream()
-            .anyMatch(f -> f.name().equals("x-checksum") && f.value().equals("abc123"));
+                                      .anyMatch(f -> f.name().equals("x-checksum") && f.value().equals("abc123"));
         assertTrue(foundChecksum, "Expected x-checksum: abc123 in trailer block; decoded: [" + fields + "]");
       }
     }
@@ -354,8 +355,8 @@ public class HTTP2RawFrameTest extends BaseTest {
    *
    * <p>Reproduction: client sends GET, then closes the socket before the response can be written. The reader
    * thread exits and the writer thread drains its sentinel and exits. The handler (mid-write of a large body) must
-   * detect the dead connection within a bounded time and exit, instead of spinning forever on flow control or
-   * blocking forever on a full {@code writerQueue}.
+   * detect the dead connection within a bounded time and exit, instead of spinning forever on flow control or blocking
+   * forever on a full {@code writerQueue}.
    */
   @Test
   public void handler_thread_does_not_hang_after_writer_dies() throws Exception {
@@ -428,8 +429,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §5.3.2 — PRIORITY frames are valid but advisory only; the server MUST parse and discard them.
-   * Send a PRIORITY frame, then a valid HEADERS request. The server should respond successfully.
+   * RFC 9113 §5.3.2 — PRIORITY frames are valid but advisory only; the server MUST parse and discard them. Send a
+   * PRIORITY frame, then a valid HEADERS request. The server should respond successfully.
    */
   @Test
   public void priority_frame_silently_ignored() throws Exception {
@@ -484,9 +485,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §5.1.1 — stream IDs MUST be strictly monotonically increasing. Sending a HEADERS on a stream
-   * whose ID is lower than a previously seen stream ID must result in {@code GOAWAY(PROTOCOL_ERROR)} (error code
-   * {@code 0x1}).
+   * RFC 9113 §5.1.1 — stream IDs MUST be strictly monotonically increasing. Sending a HEADERS on a stream whose ID is
+   * lower than a previously seen stream ID must result in {@code GOAWAY(PROTOCOL_ERROR)} (error code {@code 0x1}).
    */
   @Test
   public void decreasing_stream_id_triggers_protocol_error() throws Exception {
@@ -540,9 +540,9 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §6.10 — once a HEADERS frame without END_HEADERS is sent, the next frame on the connection MUST be
-   * a CONTINUATION on the same stream. Any other frame type or stream ID triggers {@code GOAWAY(PROTOCOL_ERROR)}
-   * (error code {@code 0x1}).
+   * RFC 9113 §6.10 — once a HEADERS frame without END_HEADERS is sent, the next frame on the connection MUST be a
+   * CONTINUATION on the same stream. Any other frame type or stream ID triggers {@code GOAWAY(PROTOCOL_ERROR)} (error
+   * code {@code 0x1}).
    */
   @Test
   public void interleaved_frame_during_headers_continuation_triggers_protocol_error() throws Exception {
@@ -592,8 +592,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §6.1 — DATA frame with an invalid pad length (padLen >= frame payload length)
-   * must trigger GOAWAY(PROTOCOL_ERROR).
+   * RFC 9113 §6.1 — DATA frame with an invalid pad length (padLen >= frame payload length) must trigger
+   * GOAWAY(PROTOCOL_ERROR).
    */
   @Test
   public void data_with_invalid_pad_length_triggers_protocol_error() throws Exception {
@@ -643,8 +643,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §5.1.1 — client-initiated streams must use odd stream IDs. A HEADERS frame
-   * with an even stream ID must trigger GOAWAY(PROTOCOL_ERROR).
+   * RFC 9113 §5.1.1 — client-initiated streams must use odd stream IDs. A HEADERS frame with an even stream ID must
+   * trigger GOAWAY(PROTOCOL_ERROR).
    */
   @Test
   public void headers_with_even_stream_id_triggers_protocol_error() throws Exception {
@@ -801,8 +801,7 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §6.9 — WINDOW_UPDATE with increment 0 on the connection (stream 0)
-   * must trigger GOAWAY(PROTOCOL_ERROR).
+   * RFC 9113 §6.9 — WINDOW_UPDATE with increment 0 on the connection (stream 0) must trigger GOAWAY(PROTOCOL_ERROR).
    */
   @Test
   public void window_update_zero_increment_on_connection_triggers_protocol_error() throws Exception {
@@ -831,7 +830,11 @@ public class HTTP2RawFrameTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> {
       // Slow handler to keep the stream open long enough for the client's WINDOW_UPDATE.
-      try { Thread.sleep(200); } catch (InterruptedException ignore) { Thread.currentThread().interrupt(); }
+      try {
+        Thread.sleep(200);
+      } catch (InterruptedException ignore) {
+        Thread.currentThread().interrupt();
+      }
       res.setStatus(200);
     };
     try (var server = makeServer("http", handler, listener).start()) {
@@ -854,8 +857,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * RFC 9113 §6.10 — CONTINUATION frame with no preceding HEADERS (no active header block)
-   * must trigger GOAWAY(PROTOCOL_ERROR).
+   * RFC 9113 §6.10 — CONTINUATION frame with no preceding HEADERS (no active header block) must trigger
+   * GOAWAY(PROTOCOL_ERROR).
    */
   @Test
   public void continuation_without_preceding_headers_triggers_protocol_error() throws Exception {
@@ -900,8 +903,8 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * Drain inbound frames until RST_STREAM (type {@code 0x3}) arrives or the connection closes.
-   * Returns the RST_STREAM error code, or {@code -1} if EOF or GOAWAY arrived first.
+   * Drain inbound frames until RST_STREAM (type {@code 0x3}) arrives or the connection closes. Returns the RST_STREAM
+   * error code, or {@code -1} if EOF or GOAWAY arrived first.
    */
   private int readUntilRstStream(InputStream in) throws Exception {
     while (true) {
