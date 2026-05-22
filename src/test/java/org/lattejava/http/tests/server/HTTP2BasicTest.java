@@ -186,6 +186,45 @@ public class HTTP2BasicTest extends BaseTest {
   }
 
   @Test
+  public void post_h2_enforces_maxRequestBodySize() throws Exception {
+    HTTPHandler handler = (req, res) -> {
+      byte[] body = req.getInputStream().readAllBytes();
+      res.setStatus(200);
+      res.getOutputStream().write(body);
+      res.getOutputStream().close();
+    };
+
+    var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
+    var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
+
+    try (var server = makeServer("https", handler, listener)
+        .withMaxRequestBodySize(Map.of("*", 1024))  // 1 KB cap
+        .start()) {
+
+      int port = server.getActualPort();
+      var sslContext = SecurityTools.clientContext(rootCertificate);
+      var client = HttpClient.newBuilder()
+                             .sslContext(sslContext)
+                             .version(HttpClient.Version.HTTP_2)
+                             .build();
+
+      // 2 KB body — exceeds the 1 KB cap.
+      String oversizedBody = "x".repeat(2048);
+      var resp = client.send(
+          HttpRequest.newBuilder(URI.create("https://local.lattejava.org:" + port + "/"))
+                     .POST(HttpRequest.BodyPublishers.ofString(oversizedBody))
+                     .build(),
+          HttpResponse.BodyHandlers.discarding());
+
+      assertEquals(resp.statusCode(), 413,
+          "HTTP/2 must enforce maxRequestBodySize — expected 413 for 2KB body against 1KB cap");
+      // The 413 is sent as a proper HTTP/2 HEADERS frame, so the response must be delivered over h2.
+      assertEquals(resp.version(), HttpClient.Version.HTTP_2,
+          "JDK HttpClient silently downgrades to h1.1 on ALPN failure — assert h2 explicitly");
+    }
+  }
+
+  @Test
   public void post_with_body_h2() throws Exception {
     HTTPHandler handler = (req, res) -> {
       byte[] body = req.getInputStream().readAllBytes();

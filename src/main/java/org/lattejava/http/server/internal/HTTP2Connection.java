@@ -527,10 +527,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       ArrayBlockingQueue<byte[]> pipe = new ArrayBlockingQueue<>(16);
       streamPipes.put(streamId, pipe);
       HTTP2InputStream inputStream = new HTTP2InputStream(pipe);
-      // Pass -1 for unlimited content length. Integer.MAX_VALUE would cause an integer overflow in
-      // HTTPInputStream's boundary check: maximumContentLength - bytesRead + 1 overflows to Integer.MIN_VALUE.
+      int maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
       request.setInputStream(new HTTPInputStream(configuration, request,
-          new PushbackInputStream(inputStream, instrumenter), -1));
+          new PushbackInputStream(inputStream, instrumenter), maximumContentLength));
     }
 
     HTTPResponse response = new HTTPResponse();
@@ -969,6 +968,20 @@ public class HTTP2Connection implements ClientConnection, Runnable {
           // cancels it. Not an error — this is normal during graceful teardown or test probing.
         }
 
+        streams.remove(stream.streamId());
+        streamPipes.remove(stream.streamId());
+      } catch (HTTPProcessingException e) {
+        // Expected processing errors (e.g. ContentTooLargeException → 413). Send a proper HTTP error response
+        // so the client receives the status code rather than a RST_STREAM(INTERNAL_ERROR).
+        logger.debug("h2 handler processing exception on stream [{}]: [{}]", stream.streamId(), e.getMessage());
+        try {
+          response.setStatus(e.getStatus());
+          var lazyOut = new LazyHeaderOutputStream(response, stream, encoder);
+          response.setRawOutputStream(lazyOut);
+          lazyOut.close();
+        } catch (Exception writeEx) {
+          logger.debug("Failed to write error response for stream [{}]", stream.streamId(), writeEx);
+        }
         streams.remove(stream.streamId());
         streamPipes.remove(stream.streamId());
       } catch (Exception e) {
