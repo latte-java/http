@@ -206,10 +206,11 @@ public class MultipartTest extends BaseTest {
         .withFileSize(1024 * 1024)   // 1 Megabyte
         .withFileCount(15)           // 15 files
         .withConfiguration(config -> config.withMultipartConfiguration(
-                                               // Set the multipart configuration to something very large.
+                                               // Set the per-file limit below the request body cap so the validator passes,
+                                               // but 15 files × 1 MB = 15 MB still exceeds the 3 MB request body cap.
                                                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
-                                                                           // Max file size is 2 GB bytes
-                                                                           .withMaxFileSize(2L * 1024 * 1024 * 1024)
+                                                                           // Max file size is 2 MB (within the 3 MB body cap)
+                                                                           .withMaxFileSize(2L * 1024 * 1024)
                                                                            // Max request size is 5 GB
                                                                            .withMaxRequestSize(5L * 1024 * 1024 * 1024))
                                            // Max request size is 3 Megabytes

@@ -18,6 +18,8 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
+import org.lattejava.http.io.MultipartConfiguration;
+import org.lattejava.http.io.MultipartFileUploadPolicy;
 import org.lattejava.http.server.internal.*;
 
 /**
@@ -91,6 +93,8 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
       return this;
     }
 
+    validateConfiguration();
+
     // Set up the server logger and the static loggers
     logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
     HTTPTools.initialize(configuration().getLoggerFactory());
@@ -118,6 +122,28 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
     }
 
     return this;
+  }
+
+  private void validateConfiguration() {
+    MultipartConfiguration multipart = configuration.getMultipartConfiguration();
+
+    // No file uploads → maxFileSize is irrelevant.
+    if (multipart.getFileUploadPolicy() != MultipartFileUploadPolicy.Allow) {
+      return;
+    }
+
+    long maxFileSize = multipart.getMaxFileSize();
+    // getMaxRequestBodySize never returns null because HTTPServerConfiguration.withMaxRequestBodySize always seeds the "*" fallback key.
+    int effectiveCap = HTTPTools.getMaxRequestBodySize("multipart/form-data", configuration.getMaxRequestBodySize());
+
+    // -1 means unlimited.
+    if (effectiveCap == -1) {
+      return;
+    }
+
+    if (maxFileSize > effectiveCap) {
+      throw new IllegalStateException("The MultipartConfiguration maxFileSize [" + maxFileSize + "] must not exceed the maxRequestBodySize for [multipart/form-data], which resolves to [" + effectiveCap + "]. Either lower maxFileSize or raise maxRequestBodySize for [multipart/form-data] (or its wildcard parent).");
+    }
   }
 
   /**
