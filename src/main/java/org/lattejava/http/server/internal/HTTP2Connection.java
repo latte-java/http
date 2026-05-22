@@ -514,6 +514,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     }
     streams.put(streamId, stream);
 
+    // Apply the server's MultipartConfiguration as a deep copy so the handler may mutate it per-request without
+    // affecting the shared server-level config. Matches HTTP1Worker.java behavior.
+    request.getMultiPartStreamProcessor().setMultipartConfiguration(new MultipartConfiguration(configuration.getMultipartConfiguration()));
+
     if ((flags & HTTP2Frame.FLAG_END_STREAM) != 0) {
       // No body will follow. Skip the per-stream pipe, HTTP2InputStream, PushbackInputStream, and HTTPInputStream
       // allocations entirely — the handler sees a zero-allocation empty stream. Any DATA frame that arrives after
