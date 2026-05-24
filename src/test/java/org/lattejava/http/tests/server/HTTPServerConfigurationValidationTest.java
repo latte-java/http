@@ -91,4 +91,22 @@ public class HTTPServerConfigurationValidationTest {
     IllegalStateException ex = expectThrows(IllegalStateException.class, server::start);
     assertTrue(ex.getMessage().contains("maxFileSize"));
   }
+
+  @Test
+  public void start_skips_validation_when_exact_multipart_key_is_unlimited() throws Exception {
+    // The exact "multipart/form-data" key is unlimited (-1); the wildcard "*" is finite.
+    // Exact-key match wins over the wildcard fallback, so the validator must see -1 and skip the check
+    // even though maxFileSize would exceed the wildcard cap.
+    HTTPServer server = new HTTPServer()
+        .withHandler((req, res) -> {})
+        .withListener(new HTTPListenerConfiguration(0))
+        .withMaxRequestBodySize(Map.of("multipart/form-data", -1L, "*", 1L * 1024 * 1024))
+        .withMultipartConfiguration(new MultipartConfiguration()
+            .withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
+            .withMaxFileSize(5L * 1024 * 1024));
+
+    try (HTTPServer ignored = server.start()) {
+      // Successful start — exact key overrides the more restrictive wildcard.
+    }
+  }
 }
