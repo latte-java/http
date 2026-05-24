@@ -224,6 +224,103 @@ public class HTTP2BasicTest extends BaseTest {
     }
   }
 
+  /**
+   * RFC 9113 §8.1 — after sending a complete response, the server MAY send {@code RST_STREAM(NO_ERROR)} to ask the
+   * client to abort transmission of the rest of the request body. Without this, a client that is still uploading
+   * after a 413 keeps wasting bandwidth (and locally allocated buffer/window) until it eventually notices the
+   * response. Uses an h2c prior-knowledge socket so the raw frame sequence is inspectable.
+   */
+  @Test
+  public void post_h2_rst_stream_no_error_after_413() throws Exception {
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+
+    try (var server = makeServer("http", handler, listener)
+        .withMaxRequestBodySize(Map.of("*", 1024L))  // 1 KB cap
+        .start()) {
+
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        sock.setSoTimeout(5000);
+
+        // POST / on stream 1 — HEADERS without END_STREAM, body follows. No content-length, so the cap is
+        // tripped by HTTPInputStream's streaming byte counter (not the early Content-Length reject branch).
+        byte[] postHeaders = new byte[]{
+            (byte) 0x83, // :method POST
+            (byte) 0x84, // :path /
+            (byte) 0x86, // :scheme http
+            (byte) 0x41, 0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'  // :authority literal, name idx 1
+        };
+        writeFrameHeader(out, postHeaders.length, 0x1 /* HEADERS */, 0x4 /* END_HEADERS, no END_STREAM */, 1);
+        out.write(postHeaders);
+
+        // DATA(2048) — exceeds the 1 KB cap; server should reject mid-read.
+        byte[] body = new byte[2048];
+        writeFrameHeader(out, body.length, 0x0 /* DATA */, 0, 1);
+        out.write(body);
+        out.flush();
+
+        // Drain frames until RST_STREAM(NO_ERROR) on stream 1. Record whether HEADERS preceded RST_STREAM —
+        // the RFC §8.1 invariant is "complete response before RST_STREAM(NO_ERROR)".
+        var in = sock.getInputStream();
+        boolean sawHeadersOnStream1 = false;
+        int rstCode = -1;
+        for (int i = 0; i < 50 && rstCode == -1; i++) {
+          byte[] hdr = in.readNBytes(9);
+          if (hdr.length < 9) {
+            break;
+          }
+          int len = ((hdr[0] & 0xFF) << 16) | ((hdr[1] & 0xFF) << 8) | (hdr[2] & 0xFF);
+          int type = hdr[3] & 0xFF;
+          int streamId = ((hdr[5] & 0x7F) << 24) | ((hdr[6] & 0xFF) << 16) | ((hdr[7] & 0xFF) << 8) | (hdr[8] & 0xFF);
+          byte[] payload = in.readNBytes(len);
+          if (payload.length < len) {
+            break;
+          }
+          if (type == 0x1 && streamId == 1) {
+            sawHeadersOnStream1 = true;
+          }
+          if (type == 0x3 && streamId == 1) {
+            rstCode = ((payload[0] & 0xFF) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+          }
+        }
+        assertTrue(sawHeadersOnStream1, "Expected response HEADERS on stream 1 before RST_STREAM (RFC 9113 §8.1)");
+        assertEquals(rstCode, 0x0, "Expected RST_STREAM(NO_ERROR=0x0) after 413; got error code [" + rstCode + "]");
+
+        // RFC 9113 §5.4.2 — RST_STREAM is a stream error, not a connection error. The connection must stay open
+        // so subsequent requests on fresh streams continue to work.
+        byte[] getHeaders = new byte[]{
+            (byte) 0x82, // :method GET
+            (byte) 0x84, // :path /
+            (byte) 0x86, // :scheme http
+            (byte) 0x41, 0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
+        };
+        writeFrameHeader(out, getHeaders.length, 0x1, 0x4 | 0x1, 3);
+        out.write(getHeaders);
+        out.flush();
+
+        boolean sawStream3Response = false;
+        for (int i = 0; i < 50 && !sawStream3Response; i++) {
+          byte[] hdr = in.readNBytes(9);
+          if (hdr.length < 9) {
+            break;
+          }
+          int len = ((hdr[0] & 0xFF) << 16) | ((hdr[1] & 0xFF) << 8) | (hdr[2] & 0xFF);
+          int type = hdr[3] & 0xFF;
+          int streamId = ((hdr[5] & 0x7F) << 24) | ((hdr[6] & 0xFF) << 16) | ((hdr[7] & 0xFF) << 8) | (hdr[8] & 0xFF);
+          in.readNBytes(len);
+          if (type == 0x1 && streamId == 3) {
+            sawStream3Response = true;
+          }
+        }
+        assertTrue(sawStream3Response, "Connection must stay open after RST_STREAM(NO_ERROR); stream 3 should respond");
+      }
+    }
+  }
+
   @Test
   public void post_with_body_h2() throws Exception {
     HTTPHandler handler = (req, res) -> {

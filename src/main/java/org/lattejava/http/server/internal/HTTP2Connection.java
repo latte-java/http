@@ -982,6 +982,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         } catch (Exception writeEx) {
           logger.debug("Failed to write error response for stream [{}]", stream.streamId(), writeEx);
         }
+        // RFC 9113 §8.1: after a complete response, the server MAY send RST_STREAM(NO_ERROR) to ask the client to
+        // stop uploading the rest of the request body. Without this, the client keeps sending DATA frames that we
+        // would silently drain (or the connection-level flow window would stall). Skip when the client has already
+        // reset the stream (RFC 9113 §5.4.2 forbids RST_STREAM in response to RST_STREAM).
+        if (stream.state() != HTTP2Stream.State.CLOSED) {
+          rstStream(stream.streamId(), HTTP2ErrorCode.NO_ERROR);
+        }
         streams.remove(stream.streamId());
         streamPipes.remove(stream.streamId());
       } catch (Exception e) {
