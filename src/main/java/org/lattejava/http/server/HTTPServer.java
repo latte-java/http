@@ -146,7 +146,7 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
 
     long maxFileSize = multipart.getMaxFileSize();
     // getMaxRequestBodySize never returns null because HTTPServerConfiguration.withMaxRequestBodySize always seeds the "*" fallback key.
-    int effectiveCap = HTTPTools.getMaxRequestBodySize("multipart/form-data", configuration.getMaxRequestBodySize());
+    long effectiveCap = HTTPTools.getMaxRequestBodySize("multipart/form-data", configuration.getMaxRequestBodySize());
 
     // -1 means unlimited.
     if (effectiveCap == -1) {

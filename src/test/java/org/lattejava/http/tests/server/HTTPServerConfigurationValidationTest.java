@@ -22,7 +22,7 @@ public class HTTPServerConfigurationValidationTest {
     HTTPServer server = new HTTPServer()
         .withHandler((req, res) -> {})
         .withListener(new HTTPListenerConfiguration(0))
-        .withMaxRequestBodySize(Map.of("*", 1 * 1024 * 1024))
+        .withMaxRequestBodySize(Map.of("*", 1L * 1024 * 1024))
         .withMultipartConfiguration(new MultipartConfiguration()
             .withFileUploadPolicy(MultipartFileUploadPolicy.Reject)
             .withMaxFileSize(5 * 1024 * 1024));
@@ -37,7 +37,7 @@ public class HTTPServerConfigurationValidationTest {
     HTTPServer server = new HTTPServer()
         .withHandler((req, res) -> {})
         .withListener(new HTTPListenerConfiguration(0))
-        .withMaxRequestBodySize(Map.of("*", -1))
+        .withMaxRequestBodySize(Map.of("*", -1L))
         .withMultipartConfiguration(new MultipartConfiguration()
             .withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
             .withMaxFileSize(5L * 1024 * 1024 * 1024));
@@ -52,7 +52,7 @@ public class HTTPServerConfigurationValidationTest {
     HTTPServer server = new HTTPServer()
         .withHandler((req, res) -> {})
         .withListener(new HTTPListenerConfiguration(0))
-        .withMaxRequestBodySize(Map.of("multipart/form-data", 10 * 1024 * 1024))
+        .withMaxRequestBodySize(Map.of("multipart/form-data", 10L * 1024 * 1024))
         .withMultipartConfiguration(new MultipartConfiguration()
             .withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
             .withMaxFileSize(5 * 1024 * 1024));
@@ -67,7 +67,7 @@ public class HTTPServerConfigurationValidationTest {
     HTTPServer server = new HTTPServer()
         .withHandler((req, res) -> {})
         .withListener(new HTTPListenerConfiguration(0))
-        .withMaxRequestBodySize(Map.of("multipart/form-data", 1 * 1024 * 1024))
+        .withMaxRequestBodySize(Map.of("multipart/form-data", 1L * 1024 * 1024))
         .withMultipartConfiguration(new MultipartConfiguration()
             .withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
             .withMaxFileSize(5 * 1024 * 1024));
@@ -83,7 +83,7 @@ public class HTTPServerConfigurationValidationTest {
     HTTPServer server = new HTTPServer()
         .withHandler((req, res) -> {})
         .withListener(new HTTPListenerConfiguration(0))
-        .withMaxRequestBodySize(Map.of("*", 1 * 1024 * 1024))
+        .withMaxRequestBodySize(Map.of("*", 1L * 1024 * 1024))
         .withMultipartConfiguration(new MultipartConfiguration()
             .withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
             .withMaxFileSize(5 * 1024 * 1024));

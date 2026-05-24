@@ -181,7 +181,7 @@ public class MultipartTest extends BaseTest {
         .withConfiguration(config -> config.withMultipartConfiguration(
                                                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
                                                                            .withMaxFileSize(2 * 1024 * 1024))
-                                           .withMaxRequestBodySize(Map.of("*", 3 * 1024 * 1024))
+                                           .withMaxRequestBodySize(Map.of("*", 3L * 1024 * 1024))
         )
         .expectResponse("""
             HTTP/1.1 413 \r
@@ -204,7 +204,7 @@ public class MultipartTest extends BaseTest {
         .withConfiguration(config -> config.withMultipartConfiguration(
                                                new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow))
                                            // Max request size is 3 Megabytes
-                                           .withMaxRequestBodySize(Map.of("*", 3 * 1024 * 1024))
+                                           .withMaxRequestBodySize(Map.of("*", 3L * 1024 * 1024))
         )
         .expectResponse("""
             HTTP/1.1 413 \r

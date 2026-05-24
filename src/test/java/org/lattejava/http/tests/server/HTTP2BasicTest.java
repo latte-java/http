@@ -198,7 +198,7 @@ public class HTTP2BasicTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
 
     try (var server = makeServer("https", handler, listener)
-        .withMaxRequestBodySize(Map.of("*", 1024))  // 1 KB cap
+        .withMaxRequestBodySize(Map.of("*", 1024L))  // 1 KB cap
         .start()) {
 
       int port = server.getActualPort();

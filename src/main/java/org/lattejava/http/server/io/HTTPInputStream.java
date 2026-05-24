@@ -45,13 +45,13 @@ public class HTTPInputStream extends InputStream {
 
   private final int maximumBytesToDrain;
 
-  private final int maximumContentLength;
+  private final long maximumContentLength;
 
   private final PushbackInputStream pushbackInputStream;
 
   private final HTTPRequest request;
 
-  private int bytesRead;
+  private long bytesRead;
 
   private ChunkedInputStream chunkedDelegate;
 
@@ -66,7 +66,7 @@ public class HTTPInputStream extends InputStream {
   private boolean trailersCopied;
 
   public HTTPInputStream(HTTPServerConfiguration configuration, HTTPRequest request, PushbackInputStream pushbackInputStream,
-                         int maximumContentLength) {
+                         long maximumContentLength) {
     this.logger = configuration.getLoggerFactory().getLogger(HTTPInputStream.class);
     this.instrumenter = configuration.getInstrumenter();
     this.request = request;
@@ -169,12 +169,12 @@ public class HTTPInputStream extends InputStream {
       initialize();
     }
 
-    // When a maximum content length has been specified, read at most one byte past the maximum.
-    // Use long arithmetic so a maximumContentLength of Integer.MAX_VALUE does not overflow when added to + 1.
-    // We still cap at one byte past the maximum so the streaming check below can trip with a single boundary read.
+    // When a maximum content length has been specified, read at most one byte past the maximum so the streaming check
+    // below can trip with a single boundary read. maximumContentLength is a long so the +1 cannot overflow at the int
+    // boundary, but we still clamp against len via Math.min before casting back to int.
     int maxReadLen = maximumContentLength == -1
         ? len
-        : (int) Math.min((long) len, (long) maximumContentLength - bytesRead + 1L);
+        : (int) Math.min((long) len, maximumContentLength - bytesRead + 1L);
     int read = delegate.read(b, off, maxReadLen);
     if (read > 0) {
       bytesRead += read;

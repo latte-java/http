@@ -27,14 +27,14 @@ import org.lattejava.http.server.internal.HTTP2Settings;
  * @author Brian Pontarelli
  */
 public class HTTPServerConfiguration implements Configurable<HTTPServerConfiguration> {
-  public static final Map<String, Integer> DefaultMaxRequestSizes = Map.of(
-      "*", 128 * 1024 * 1024,                                   // 128 Megabytes
-      "application/x-www-form-urlencoded", 10 * 1024 * 1024     // 10 Megabytes
+  public static final Map<String, Long> DefaultMaxRequestSizes = Map.of(
+      "*", 128L * 1024 * 1024,                                  // 128 Megabytes
+      "application/x-www-form-urlencoded", 10L * 1024 * 1024    // 10 Megabytes
   );
 
   private final List<HTTPListenerConfiguration> listeners = new ArrayList<>();
 
-  private final Map<String, Integer> maxRequestBodySize = new HashMap<>(DefaultMaxRequestSizes);
+  private final Map<String, Long> maxRequestBodySize = new HashMap<>(DefaultMaxRequestSizes);
 
   private Path baseDir = Path.of("");
   private int chunkedBufferSize = 4 * 1024; // 4 Kilobytes
@@ -255,7 +255,7 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * @return the map keyed by Content-Type indicating the maximum size in bytes of the HTTP request body.  Defaults to
    *     128 Megabytes as a default, and 10 Megabytes for application/x-www-form-urlencoded.
    */
-  public Map<String, Integer> getMaxRequestBodySize() {
+  public Map<String, Long> getMaxRequestBodySize() {
     return maxRequestBodySize;
   }
 
@@ -633,11 +633,11 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withMaxRequestBodySize(Map<String, Integer> maxRequestBodySize) {
+  public HTTPServerConfiguration withMaxRequestBodySize(Map<String, Long> maxRequestBodySize) {
     Objects.requireNonNull(maxRequestBodySize, "You cannot set the maximum request body size map to null");
     for (String contentType : maxRequestBodySize.keySet()) {
       Objects.requireNonNull(contentType, "You cannot specify a null value for content type");
-      Integer maxSize = maxRequestBodySize.get(contentType);
+      Long maxSize = maxRequestBodySize.get(contentType);
       Objects.requireNonNull(maxSize, "You may not specify a null value for the maximum request body size");
       if (maxSize != -1 && maxSize <= 0) {
         throw new IllegalArgumentException("The maximum request body size must be greater than 0 for [" + contentType + "]. Set to -1 to disable this limitation.");

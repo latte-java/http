@@ -56,14 +56,14 @@ public final class HTTPTools {
    * @param maxRequestBodySize the maximum request size configuration
    * @return the maximum request size, or -1 if no limit should be enforced.
    */
-  public static int getMaxRequestBodySize(String contentType, Map<String, Integer> maxRequestBodySize) {
+  public static long getMaxRequestBodySize(String contentType, Map<String, Long> maxRequestBodySize) {
     if (contentType == null) {
       return maxRequestBodySize.get("*");
     }
 
     // Exact match
     contentType = contentType.toLowerCase(Locale.ROOT);
-    Integer maximumSize = maxRequestBodySize.get(contentType);
+    Long maximumSize = maxRequestBodySize.get(contentType);
     if (maximumSize != null) {
       return maximumSize;
     }

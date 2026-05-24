@@ -224,7 +224,7 @@ public interface Configurable<T extends Configurable<T>> {
    * @param maxRequestBodySize a map specifying the maximum size in bytes for the HTTP request body by Content-Type
    * @return This.
    */
-  default T withMaxRequestBodySize(Map<String, Integer> maxRequestBodySize) {
+  default T withMaxRequestBodySize(Map<String, Long> maxRequestBodySize) {
     configuration().withMaxRequestBodySize(maxRequestBodySize);
     return (T) this;
   }

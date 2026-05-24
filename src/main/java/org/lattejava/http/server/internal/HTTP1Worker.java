@@ -143,7 +143,7 @@ public class HTTP1Worker implements ClientConnection, Runnable {
           instrumenter.acceptedRequest();
         }
 
-        int maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
+        long maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
         if (request.hasBody()) {
           httpInputStream = new HTTPInputStream(configuration, request, inputStream, maximumContentLength);
           request.setInputStream(httpInputStream);

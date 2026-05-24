@@ -527,7 +527,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       ArrayBlockingQueue<byte[]> pipe = new ArrayBlockingQueue<>(16);
       streamPipes.put(streamId, pipe);
       HTTP2InputStream inputStream = new HTTP2InputStream(pipe);
-      int maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
+      long maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
       request.setInputStream(new HTTPInputStream(configuration, request,
           new PushbackInputStream(inputStream, instrumenter), maximumContentLength));
     }
