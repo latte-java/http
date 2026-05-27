@@ -141,7 +141,12 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     try {
       var in = new ThroughputInputStream(socket.getInputStream(), throughput);
       socketIn = in;
-      var out = new ThroughputOutputStream(socket.getOutputStream(), throughput);
+      // 64 KiB userspace buffer between the frame writer and the socket. Without this, every writeFrame
+      // hit the socket as a separate write syscall — JFR (2026-05-19) attributed ~13% of writer-thread
+      // CPU to SocketDispatcher.write0. The BufferedOutputStream coalesces the frame-header + payload
+      // writes of a single writeFrame, AND coalesces multiple writeFrames between explicit flush() calls
+      // (Phase 2 of this plan exploits the latter via drainTo batching).
+      var out = new BufferedOutputStream(new ThroughputOutputStream(socket.getOutputStream(), throughput), 64 * 1024);
 
       // Pre-size buffers to our advertised SETTINGS_MAX_FRAME_SIZE so we can read inbound frames the peer
       // sends within the limit we declared, and write outbound frames up to the same size. The write buffer
