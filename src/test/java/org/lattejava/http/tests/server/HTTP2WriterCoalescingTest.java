@@ -1,0 +1,142 @@
+/*
+ * Copyright (c) 2026 The Latte Project
+ * SPDX-License-Identifier: MIT
+ */
+package org.lattejava.http.tests.server;
+
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
+
+import org.lattejava.http.server.internal.HTTP2Connection;
+import org.lattejava.http.server.internal.HTTP2Frame;
+import org.lattejava.http.server.internal.HTTP2FrameWriter;
+
+import static org.testng.Assert.*;
+
+/**
+ * Unit tests for the writer-thread loop (HTTP2Connection.runWriterLoop). Verifies that the loop batches frames already
+ * queued at drain time into a single flush, exits cleanly on the sentinel even when other frames are batched ahead of
+ * it, and propagates IOException from a mid-batch write so the caller can tear down the connection.
+ */
+public class HTTP2WriterCoalescingTest {
+
+  /**
+   * Counting OutputStream — records bytes written and counts flush() calls. Used to assert the number of flushes per
+   * batch.
+   */
+  static final class CountingOutputStream extends OutputStream {
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    int flushes;
+
+    @Override
+    public void flush() {
+      flushes++;
+    }
+
+    @Override
+    public void write(int b) {
+      bytes.write(b);
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) {
+      bytes.write(b, off, len);
+    }
+  }
+
+  /**
+   * Throwing OutputStream — used to verify that an IOException from mid-batch propagates correctly.
+   */
+  static final class ThrowingOutputStream extends OutputStream {
+    final int throwAfterBytes;
+    int written;
+
+    ThrowingOutputStream(int throwAfterBytes) {
+      this.throwAfterBytes = throwAfterBytes;
+    }
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void write(int b) throws IOException {
+      maybeThrow(1);
+      written++;
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) throws IOException {
+      maybeThrow(len);
+      written += len;
+    }
+
+    private void maybeThrow(int incoming) throws IOException {
+      if (written + incoming > throwAfterBytes) {
+        throw new IOException("simulated socket failure");
+      }
+    }
+  }
+
+  @Test(timeOut = 5_000)
+  public void batched_frames_produce_single_flush() throws Exception {
+    var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
+    var out = new CountingOutputStream();
+    var writer = new HTTP2FrameWriter(out, new byte[9 + 16384]);
+
+    // Pre-load 5 small DATA frames + the sentinel so drainTo grabs them all in one shot.
+    for (int i = 1; i <= 5; i++) {
+      queue.put(new HTTP2Frame.DataFrame(i, 0, ("frame-" + i).getBytes()));
+    }
+    queue.put(new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]));
+
+    HTTP2Connection.runWriterLoop(queue, writer, out);
+
+    // 5 frames written + sentinel observed → 1 flush, not 5.
+    assertEquals(out.flushes, 1, "Expected one flush for the batch of 5 frames; got [" + out.flushes + "]");
+    // Sanity: all 5 frames hit the byte stream (9-byte header + 7-byte payload each = 16 bytes per frame).
+    assertEquals(out.bytes.size(), 5 * 16, "Expected 5 frames × 16 bytes; got [" + out.bytes.size() + "]");
+  }
+
+  @Test(timeOut = 5_000)
+  public void sentinel_mid_batch_flushes_preceding_frames_then_exits() throws Exception {
+    var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
+    var out = new CountingOutputStream();
+    var writer = new HTTP2FrameWriter(out, new byte[9 + 16384]);
+
+    // Queue: 3 frames, then sentinel, then 2 more frames that should NOT be written.
+    queue.put(new HTTP2Frame.DataFrame(1, 0, "a".getBytes()));
+    queue.put(new HTTP2Frame.DataFrame(2, 0, "b".getBytes()));
+    queue.put(new HTTP2Frame.DataFrame(3, 0, "c".getBytes()));
+    queue.put(new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]));
+    queue.put(new HTTP2Frame.DataFrame(4, 0, "d".getBytes()));
+    queue.put(new HTTP2Frame.DataFrame(5, 0, "e".getBytes()));
+
+    HTTP2Connection.runWriterLoop(queue, writer, out);
+
+    // 3 frames × 10 bytes (9 header + 1 payload) = 30. Frames 4 and 5 must NOT be present.
+    assertEquals(out.bytes.size(), 30, "Pre-sentinel frames should hit the wire; got [" + out.bytes.size() + "] bytes");
+    assertEquals(out.flushes, 1, "Expected exactly one flush before sentinel exit; got [" + out.flushes + "]");
+    // Post-sentinel frames were drained into the batch by drainTo but not written — the loop exits on the sentinel
+    // before reaching them. They are not in the queue (drainTo moved them) and not in the output (loop exited).
+    assertTrue(queue.isEmpty(), "Queue should be empty — drainTo moved post-sentinel frames into the batch, which was discarded on sentinel exit; got queue size [" + queue.size() + "]");
+  }
+
+  @Test(timeOut = 5_000)
+  public void io_exception_mid_batch_propagates() throws Exception {
+    var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
+    // Throws on the 3rd frame. Each frame is 9 (header) + 5 (payload) = 14 bytes. 2 frames = 28 bytes ok;
+    // the 3rd push past 28 bytes triggers the throw.
+    var out = new ThrowingOutputStream(28);
+    var writer = new HTTP2FrameWriter(out, new byte[9 + 16384]);
+
+    for (int i = 1; i <= 5; i++) {
+      queue.put(new HTTP2Frame.DataFrame(i, 0, "data!".getBytes()));
+    }
+    queue.put(new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]));
+
+    assertThrows(IOException.class, () -> HTTP2Connection.runWriterLoop(queue, writer, out));
+    // Sanity: the loop wrote frames 1 and 2 successfully before failing on frame 3.
+    assertEquals(out.written, 28, "Expected 2 frames (28 bytes) before the throw; got [" + out.written + "]");
+  }
+}

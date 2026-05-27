@@ -39,6 +39,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   // Maximum number of recently-closed stream IDs to remember for §5.1 STREAM_CLOSED detection.
   private static final int MAX_RECENTLY_CLOSED = 100;
+  // Maximum number of frames the writer drains per loop iteration. The blocking head-take is unchanged; this caps
+  // the opportunistic drainTo that follows. 32 chosen so that even at peerMaxFrameSize=16384 a full batch is ~512KB,
+  // inside one TCP-window worth of data on a typical link; smaller batches reduce per-frame queue contention
+  // without holding many MB in userspace under sustained DATA bursts.
+  private static final int WRITER_BATCH_SIZE = 32;
 
   private final HTTPBuffers buffers;
   private final HTTPServerConfiguration configuration;
@@ -113,14 +118,29 @@ public class HTTP2Connection implements ClientConnection, Runnable {
    * {@code queue.take()} and rethrows {@link IOException} from {@code writer} / {@code out} so the caller (the
    * writer virtual-thread lambda) can run its teardown finally block.
    */
-  static void runWriterLoop(BlockingQueue<HTTP2Frame> queue, HTTP2FrameWriter writer, OutputStream out) throws IOException, InterruptedException {
+  public static void runWriterLoop(BlockingQueue<HTTP2Frame> queue, HTTP2FrameWriter writer, OutputStream out) throws IOException, InterruptedException {
+    List<HTTP2Frame> batch = new ArrayList<>(WRITER_BATCH_SIZE);
     while (true) {
-      HTTP2Frame f = queue.take();
-      if (f instanceof HTTP2Frame.GoawayFrame g && g.lastStreamId() == -1) {
-        return;
+      // Blocking head-take — preserves the idle-park behavior of the original loop. Wakes when a producer enqueues.
+      HTTP2Frame head = queue.take();
+      batch.add(head);
+      // Non-blocking opportunistic drain — pulls whatever additional frames concurrent producers have already
+      // enqueued. We do NOT wait for more; the cost of waiting would re-introduce per-frame latency. The win is
+      // amortizing the syscall (Lever A buffer + this single flush) and the queue-lock acquisition across the batch.
+      queue.drainTo(batch, WRITER_BATCH_SIZE - 1);
+
+      for (HTTP2Frame f : batch) {
+        if (f instanceof HTTP2Frame.GoawayFrame g && g.lastStreamId() == -1) {
+          // Sentinel mid-batch: flush whatever came before it to ensure those frames reach the wire, then exit.
+          // Frames after the sentinel in the batch are discarded — the contract is "writer-shutdown immediately"
+          // and any post-sentinel work was racing the shutdown anyway.
+          out.flush();
+          return;
+        }
+        writer.writeFrame(f);
       }
-      writer.writeFrame(f);
       out.flush();
+      batch.clear();
     }
   }
 
