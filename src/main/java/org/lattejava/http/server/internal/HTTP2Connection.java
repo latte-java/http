@@ -104,6 +104,26 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     this.startInstant = System.currentTimeMillis();
   }
 
+  /**
+   * Writer-thread loop body — drains {@code queue} into {@code writer} and flushes {@code out}, exiting cleanly when
+   * the sentinel frame (a {@link HTTP2Frame.GoawayFrame} with {@code lastStreamId == -1}) is dequeued. Extracted to a
+   * static method so the loop can be unit-tested without constructing a full {@link HTTP2Connection}.
+   *
+   * <p>Returns normally on clean shutdown (sentinel observed) and on {@link InterruptedException}; rethrows {@link
+   * IOException} from {@code writer} / {@code out} so the caller (the writer virtual-thread lambda) can run its
+   * teardown finally block.
+   */
+  static void runWriterLoop(BlockingQueue<HTTP2Frame> queue, HTTP2FrameWriter writer, OutputStream out) throws IOException, InterruptedException {
+    while (true) {
+      HTTP2Frame f = queue.take();
+      if (f instanceof HTTP2Frame.GoawayFrame g && g.lastStreamId() == -1) {
+        return;
+      }
+      writer.writeFrame(f);
+      out.flush();
+    }
+  }
+
   @Override
   public long getHandledRequests() {
     return handledRequests;
@@ -220,15 +240,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       OutputStream outForThread = out;
       writerThread = Thread.ofVirtual().name("h2-writer").start(() -> {
         try {
-          while (true) {
-            HTTP2Frame f = writerQueue.take();
-            if (f instanceof HTTP2Frame.GoawayFrame g && g.lastStreamId() == -1) {
-              // Sentinel: shut down the writer thread cleanly.
-              return;
-            }
-            writerForThread.writeFrame(f);
-            outForThread.flush();
-          }
+          runWriterLoop(writerQueue, writerForThread, outForThread);
         } catch (Exception e) {
           logger.debug("Writer thread ended unexpectedly; signaling reader", e);
         } finally {
