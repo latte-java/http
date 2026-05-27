@@ -89,8 +89,11 @@ public class HTTP2OutputStream extends OutputStream {
     buffer.reset();
     int off = 0;
     while (off < all.length) {
-      // Block on flow-control if the send window is exhausted. Check and wait under the stream monitor so a
-      // WINDOW_UPDATE notify between an unlocked read and the wait acquire can't be lost. Signed comparison —
+      // Block on flow-control if the send window is exhausted. The predicate MUST stay inside this
+      // synchronized block: a previous shape with the while-condition outside the monitor caused a
+      // classic lost-wakeup — a WINDOW_UPDATE-driven notifyAll arriving between the unlocked
+      // sendWindow() read and the wait() acquire would be lost, stalling the producer for the full
+      // 100 ms wait timeout per credit-starved chunk. Fixed in commit 2829cc4. Signed comparison —
       // the window may be negative after a SETTINGS-induced INITIAL_WINDOW_SIZE decrease (RFC 9113 §6.9.2).
       synchronized (stream) {
         while (stream.sendWindow() <= 0) {

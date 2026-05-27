@@ -565,9 +565,9 @@ Each new vendor was run in isolation (3 trials × 30 s × all 16 scenarios) with
 - **`h2-io`** at 6.8k is the worker-pool tax exactly as expected — XNIO worker threads block on `Thread.sleep` and the connection-level concurrency is capped by the pool size. Same shape as Jetty (11k) and Tomcat (15k).
 - **`h2-stream` / `h2-large-response`** at 20k / 32k confirms that NIO-with-coalesced-writes is also 5–8× faster than Latte's per-frame-syscall writer. Combined with Helidon's number, the gap to close is around 30–40k RPS on these scenarios.
 
-**Additional bottleneck identified: per-stream flow-control lost-wakeup.**
+**Additional bottleneck initially identified: per-stream flow-control lost-wakeup [SUPERSEDED — see correction 2026-05-26 below].**
 
-While investigating the `h2-stream` gap, found a classic lost-wakeup in `HTTP2OutputStream.flushAndFragment` (lines 92–101 in `src/main/java/org/lattejava/http/server/internal/HTTP2OutputStream.java`):
+While investigating the `h2-stream` gap, suspected a classic lost-wakeup in `HTTP2OutputStream.flushAndFragment`. The hypothesized buggy shape was:
 
 ```java
 while (stream.sendWindow() <= 0) {
@@ -579,11 +579,9 @@ while (stream.sendWindow() <= 0) {
 }
 ```
 
-The window check is **outside** the `synchronized (stream)` block. If a `WINDOW_UPDATE` arrives between the check and entering `wait()`, the `notifyAll()` from the reader thread fires while the handler isn't waiting yet; the handler then blocks for up to 100 ms before the next poll. This shows up as wall-clock latency, not CPU samples — which is why the 2026-05-19 JFR analysis missed it.
+The reasoning: the window check is outside `synchronized (stream)`. A `WINDOW_UPDATE`-driven `notifyAll()` arriving between the check and `wait()` would be lost, stalling the handler ~100 ms per credit-starved chunk. For `h2-stream` (128 KB / 16 × 8 KB chunks vs 65535 default window), the 9th-onwards chunks would hit the race; ~2–3 stalls × 100 ms × 10 connections / 100 streams ≈ 4 k RPS, matching the observed ceiling.
 
-For `h2-stream` (128KB / 16 × 8KB chunks vs 65535 default per-stream send-window), the handler runs out of credit after the 8th chunk; the 9th-onwards waits hit this race. At ~2–3 stalls per request × 100 ms each, the theoretical ceiling is ~3000–5000 RPS per connection × 10 connections / 100 streams in flight ≈ 4 k RPS, which matches the observed ceiling.
-
-Fix is mechanical — move the predicate inside the monitor:
+**Correction (2026-05-26):** the lost-wakeup analysis above is **wrong about the code state on this branch**. Commit `2829cc4` (2026-05-09, "h2spec final batch — flow-control window=1") had already moved the predicate inside the monitor by the time this finding was written. The current code at `HTTP2OutputStream.java:95-104` already has the correct shape:
 
 ```java
 synchronized (stream) {
@@ -593,13 +591,14 @@ synchronized (stream) {
 }
 ```
 
-This complements the existing Plan F "writer-thread architecture" item but is independent of it — even with the writer-thread coalescing optimization, the lost wakeup would still impose 100 ms tail-latency stalls on credit-starved streams. Worth fixing as a standalone change before or alongside the larger writer-thread refactor.
+The `h2-stream` 4 k RPS ceiling is therefore not explained by a lost-wakeup. The arithmetic agreement (~2–3 × 100 ms ≈ matches observed) was coincidence. The remaining bottleneck attribution falls entirely to the writer-thread architecture work described in the 2026-05-19 finding above (per-DATA-frame `write0` syscalls + producer/consumer contention on the per-connection `LinkedBlockingQueue<HTTP2Frame>`).
 
-**Action items added to the Plan F backlog.**
+A 2026-05-26 audit of every `wait`/`notify` site in the h2 path (`HTTP2Connection`, `HTTP2OutputStream`, `HTTP2Stream`) found **no other lost-wakeup sites**. One unrelated correctness gap surfaced: `HTTP2Connection.connectionSendWindow` is tracked and notified on `WINDOW_UPDATE` (lines 800-803) but nothing consumes it or waits on `connectionSendWindowLock` — connection-level send-window flow control per RFC 9113 §6.9.1 is not enforced on the send side. Tracked as a separate Plan F follow-up; not a perf issue under typical traffic since the default 65535 connection window rarely exhausts.
 
-- **Fix the `HTTP2OutputStream` lost-wakeup** (small, mechanical; estimate <1 h including a regression test that exercises window exhaustion + a delayed `WINDOW_UPDATE`).
-- **Writer-thread architecture work** (existing 2026-05-19 Plan F item, design options 1–3 already enumerated above). Helidon's 9× number on `h2-stream` is now the concrete target — closing 60–80 % of that gap is the success criterion for option 1 (coalesced socket writes).
-- **Verify other `wait`/`notify` sites in the h2 path** don't share the lost-wakeup pattern. Suspects: connection-level send-window block in `HTTP2Connection.handleSettings` retroactive adjustment path; any settings-ACK / GOAWAY wait paths.
+**Action items in the Plan F backlog.**
+
+- **Writer-thread architecture work** (existing 2026-05-19 Plan F item, design options 1–3 already enumerated above). Helidon's 9× number on `h2-stream` is now the concrete target — closing 60–80 % of that gap is the success criterion for option 1 (coalesced socket writes). With the lost-wakeup hypothesis falsified, this is the sole lever for `h2-stream` / `h2-large-response`.
+- **Connection-level send-window flow control enforcement** (audit follow-up from 2026-05-26; correctness, not perf-critical under typical default windows).
 
 **Verification of the new vendors.** Both Helidon and Undertow pass smoke tests for h1.1, h2c, and TLS+ALPN h2 on the standard `/` `/hello` `/load` `/compute` endpoints. Errors columns across the matrix are 0 for both vendors on every scenario except `baseline` (1 error for self, 1 for helidon, 25 for undertow — typical transient connect-error trial variance, not a server defect). Helidon and Undertow's `project.latte` setup added ~13 `.Final → semver` mappings each to satisfy Latte's SemVer validator on Helidon's umbrella BOM hierarchy and Undertow's jboss-* chain; this is documented as a one-time cost in the per-vendor `project.latte` files.
 
