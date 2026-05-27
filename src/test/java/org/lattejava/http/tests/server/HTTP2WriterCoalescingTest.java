@@ -46,7 +46,11 @@ public class HTTP2WriterCoalescingTest {
   }
 
   /**
-   * Throwing OutputStream — used to verify that an IOException from mid-batch propagates correctly.
+   * Throwing OutputStream — used to verify that an IOException from mid-batch propagates correctly. The byte
+   * threshold in the test ({@code throwAfterBytes}) assumes {@link HTTP2FrameWriter} issues one {@code write(byte[],
+   * int, int)} call per frame (header + payload concatenated into the shared write buffer). If that ever changes to
+   * split header and payload into separate writes, the threshold in {@code io_exception_mid_batch_propagates} will
+   * need to be recomputed.
    */
   static final class ThrowingOutputStream extends OutputStream {
     final int throwAfterBytes;
