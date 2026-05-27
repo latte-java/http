@@ -109,9 +109,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
    * the sentinel frame (a {@link HTTP2Frame.GoawayFrame} with {@code lastStreamId == -1}) is dequeued. Extracted to a
    * static method so the loop can be unit-tested without constructing a full {@link HTTP2Connection}.
    *
-   * <p>Returns normally on clean shutdown (sentinel observed) and on {@link InterruptedException}; rethrows {@link
-   * IOException} from {@code writer} / {@code out} so the caller (the writer virtual-thread lambda) can run its
-   * teardown finally block.
+   * <p>Returns normally on clean shutdown (sentinel observed); propagates {@link InterruptedException} from
+   * {@code queue.take()} and rethrows {@link IOException} from {@code writer} / {@code out} so the caller (the
+   * writer virtual-thread lambda) can run its teardown finally block.
    */
   static void runWriterLoop(BlockingQueue<HTTP2Frame> queue, HTTP2FrameWriter writer, OutputStream out) throws IOException, InterruptedException {
     while (true) {
