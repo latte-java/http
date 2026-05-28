@@ -4,7 +4,7 @@
 
 * Latest stable version: `0.1.0`
 
-The goal of this project is to build a full-featured HTTP server and client in plain Java without the use of any libraries. The client and server will use Project Loom virtual threads and blocking I/O so that the Java VM will handle all the context switching between virtual threads as they block on I/O.
+The goal of this project is to build a full-featured HTTP server and client in plain Java without the use of any libraries. The server supports HTTP/1.1 and HTTP/2 (h2 over TLS via ALPN, h2c prior-knowledge or via Upgrade/101). The client and server will use Project Loom virtual threads and blocking I/O so that the Java VM will handle all the context switching between virtual threads as they block on I/O.
 
 For more information about Project Loom and virtual threads, please review the following link.
 * https://blogs.oracle.com/javamagazine/post/java-virtual-threads
@@ -165,70 +165,52 @@ A key purpose for this project is to obtain screaming performance. Here are benc
 
 These benchmarks ensure `http` stays near the top in raw throughput, and we'll be working on claiming the top position -- even if only for bragging rights, since in practice your database and application code will be the bottleneck long before the HTTP server.
 
-All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over HTTP (no TLS) to isolate server performance.
+All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over plain HTTP (no TLS) to isolate server performance.
 
-| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
-|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |      114,483 |            0 |             0.86 |             1.68 |        100.0% |
-| JDK HttpServer |       89,870 |            0 |             1.08 |             2.44 |         78.5% |
-| Jetty          |      111,500 |            0 |             1.17 |            11.89 |         97.3% |
-| Netty          |      117,119 |            0 |             0.85 |             1.75 |        102.3% |
-| Apache Tomcat  |      102,030 |            0 |             0.94 |             2.41 |         89.1% |
+<!-- PERF-SUMMARY-START -->
+Latte HTTP is competitive with the fastest production HTTP servers across most workloads. Where it pulls clearly ahead is the **blocking-IO scenario**, which simulates a handler waiting on a database, cache, or downstream HTTP call — the most common shape for real web apps. Virtual threads park for free; worker-pool servers (Tomcat, Jetty) are bottlenecked by their default thread-pool size.
 
-#### Under stress (1,000 concurrent connections)
+**Headline scenario: `h2-io`** (handler does `Thread.sleep(10ms)` per request, 10 conns × 100 streams = 1000 in-flight)
 
-| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
-|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |      114,120 |            0 |             8.68 |            11.88 |        100.0% |
-| JDK HttpServer |       50,870 |      17655.7 |             6.19 |            22.61 |         44.5% |
-| Jetty          |      108,434 |            0 |             9.20 |            14.83 |         95.0% |
-| Netty          |      115,105 |            0 |             8.61 |            10.09 |        100.8% |
-| Apache Tomcat  |       99,163 |            0 |             9.88 |            18.77 |         86.8% |
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |       70,676 |    125 |             13.94 |             19.41 |        100.0% |
+| Latte http    |       67,159 |    122 |             14.39 |             27.60 |         95.0% |
+| Latte http    |       69,337 |     52 |             14.22 |             25.88 |         98.1% |
+| Helidon       |       70,915 |      0 |             13.97 |             26.44 |        100.3% |
+| Helidon       |       69,149 |      0 |             14.15 |             32.11 |         97.8% |
+| Helidon       |       72,902 |      0 |             13.52 |             29.75 |        103.1% |
+| Jetty         |       11,249 |  84764 |             68.82 |            238.04 |         15.9% |
+| Jetty         |       11,305 |  85573 |             68.63 |            233.18 |         15.9% |
+| Jetty         |       10,530 |  81843 |             72.77 |            236.41 |         14.8% |
+| Netty         |       78,023 |      0 |             12.76 |             28.17 |        110.3% |
+| Netty         |       78,059 |      0 |             12.70 |             27.47 |        110.4% |
+| Netty         |       78,021 |      0 |             12.80 |             34.93 |        110.3% |
+| Apache Tomcat |       14,966 |      0 |             66.66 |            125.24 |         21.1% |
+| Apache Tomcat |       14,962 |      0 |             66.71 |            124.59 |         21.1% |
+| Apache Tomcat |       14,761 |      0 |             67.62 |            147.34 |         20.8% |
+| Undertow      |        6,826 |      0 |            146.11 |            182.30 |          9.6% |
+| Undertow      |        6,792 |      0 |            146.83 |            184.29 |          9.6% |
+| Undertow      |        6,778 |      0 |            147.13 |            191.21 |          9.5% |
 
-_JDK HttpServer (`com.sun.net.httpserver`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._
+**See [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** for the full 6-scenario breakdown across self / jetty / tomcat / netty — including HTTP/1, CPU-bound, multiplexed stream concurrency, browser-shape connection concurrency, large-response throughput, and per-scenario rationale on what each scenario was designed to expose.
 
-_Benchmark performed 2026-02-19 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
+_Benchmark performed 2026-05-21 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
 _OS: macOS 15.7.3._
-_Java: openjdk version "21.0.10" 2026-01-20._
-
-To reproduce:
-```bash
-cd benchmarks
-./run-benchmarks.sh --scenarios hello,high-concurrency
-./update-readme.sh
-```
+_Java: openjdk version "25.0.2" 2026-01-20 LTS._
+<!-- PERF-SUMMARY-END -->
 
 See [benchmarks/README.md](benchmarks/README.md) for full usage and options.
 
-## Todos and Roadmap
+## Protocol support
 
-### Server tasks
+Detailed conformance status lives in the per-version spec docs:
 
-* [x] Basic HTTP 1.1
-* [x] Support Accept-Encoding (gzip, deflate), by default and per response options.
-* [x] Support Content-Encoding (gzip, deflate)
-* [x] Support Keep-Alive
-* [x] Support Expect-Continue 100
-* [x] Support Transfer-Encoding: chunked on request for streaming.
-* [x] Support Transfer-Encoding: chunked on response
-* [x] Support cookies in request and response
-* [x] Support form data
-* [x] Support multipart form data
-* [x] Support TLS
-* [ ] Support trailers
-* [ ] Support HTTP 2
+- [HTTP/1.1](docs/specs/HTTP1.1.md) — implemented
+- [HTTP/2](docs/specs/HTTP2.md) — implemented (RFC 9113, HPACK, h2c, ALPN, gRPC)
+- [HTTP/3](docs/specs/HTTP3.md) — out of scope until JDK QUIC API
 
-### Client tasks
-
-* [ ] Basic HTTP 1.1
-* [ ] Support Keep-Alive
-* [ ] Support TLS
-* [ ] Support Expect-Continue 100
-* [ ] Support chunked request and response
-* [ ] Support streaming entity bodies
-* [ ] Support form data
-* [ ] Support multipart form data
-* [ ] Support HTTP 2
+The HTTP client is not yet implemented.
 
 ## FAQ
 

@@ -35,13 +35,13 @@ public class HTTPToolsTest extends BaseTest {
   @Test
   public void getMaxRequestBodySize() {
     var configuration = Map.of(
-        "*", 1,
-        "application/*", 2,
-        "application/json", 3,
-        "application/x-www-form-urlencoded", 4,
-        "multipart/form-data", 5,
-        "text/*", 6,
-        "text/html", 7
+        "*", 1L,
+        "application/*", 2L,
+        "application/json", 3L,
+        "application/x-www-form-urlencoded", 4L,
+        "multipart/form-data", 5L,
+        "text/*", 6L,
+        "text/html", 7L
     );
 
     assertMaxConfiguredSize(null, 1, configuration);
@@ -284,7 +284,7 @@ public class HTTPToolsTest extends BaseTest {
     assertEquals(hex(s.getBytes(charset)), trimmed);
   }
 
-  private void assertMaxConfiguredSize(String contentType, int maximumSize, Map<String, Integer> maxRequestBodySize) {
+  private void assertMaxConfiguredSize(String contentType, long maximumSize, Map<String, Long> maxRequestBodySize) {
     assertEquals(HTTPTools.getMaxRequestBodySize(contentType, maxRequestBodySize), maximumSize);
   }
 

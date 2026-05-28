@@ -18,6 +18,8 @@ package org.lattejava.http.tests.server;
 import module java.base;
 import module org.lattejava.http;
 
+import java.time.Duration;
+
 import static org.testng.Assert.*;
 
 /**
@@ -32,6 +34,39 @@ public abstract class BaseSocketTest extends BaseTest {
   }
 
   private void assertResponse(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler, String response)
+      throws Exception {
+    sendAndCapture(request, chunkedExtension, maxRequestHeaderSize, handler, socket -> assertHTTPResponseEquals(socket, response));
+  }
+
+  private void assertResponseDoesNotContain(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler, String substring)
+      throws Exception {
+    sendAndCapture(request, chunkedExtension, maxRequestHeaderSize, handler, socket -> {
+      var is = socket.getInputStream();
+      byte[] buffer = new byte[8192];
+      int read = is.read(buffer);
+      var actualResponse = new String(buffer, 0, read, StandardCharsets.UTF_8);
+      assertFalse(actualResponse.contains(substring), "Expected response to NOT contain [" + substring + "] but got:\n" + actualResponse);
+    });
+  }
+
+  private void assertResponseSubstring(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler, String substring)
+      throws Exception {
+    sendAndCapture(request, chunkedExtension, maxRequestHeaderSize, handler, socket -> {
+      var is = socket.getInputStream();
+      byte[] buffer = new byte[8192];
+      int read = is.read(buffer);
+      var actualResponse = new String(buffer, 0, read, StandardCharsets.UTF_8);
+      assertTrue(actualResponse.contains(substring), "Expected response to contain [" + substring + "] but got:\n" + actualResponse);
+    });
+  }
+
+  /**
+   * Shared server-setup and socket I/O: builds the server, applies any {@code {body}} substitution to the request,
+   * opens a client socket, writes the request bytes, then invokes {@code socketConsumer} while the socket is still open
+   * so callers can perform their assertions against the live socket.
+   */
+  private void sendAndCapture(String request, String chunkedExtension, int maxRequestHeaderSize, HTTPHandler handler,
+                              ThrowingConsumer<Socket> socketConsumer)
       throws Exception {
     HTTPHandler effectiveHandler = handler != null ? handler : (req, res) -> {
       // Read the request body
@@ -91,17 +126,14 @@ public abstract class BaseSocketTest extends BaseTest {
       var os = socket.getOutputStream();
       os.write(request.getBytes(StandardCharsets.UTF_8));
 
-      assertHTTPResponseEquals(socket, response);
+      socketConsumer.accept(socket);
     }
   }
 
   protected class Builder {
     public String chunkedExtension;
-
     public HTTPHandler handler;
-
     public int maxRequestHeaderSize = -1;
-
     public String request;
 
     public Builder(String request) {
@@ -110,6 +142,16 @@ public abstract class BaseSocketTest extends BaseTest {
 
     public void expectResponse(String response) throws Exception {
       assertResponse(request, chunkedExtension, maxRequestHeaderSize, handler, response);
+    }
+
+    public Builder expectResponseDoesNotContain(String substring) throws Exception {
+      assertResponseDoesNotContain(request, chunkedExtension, maxRequestHeaderSize, handler, substring);
+      return this;
+    }
+
+    public Builder expectResponseSubstring(String substring) throws Exception {
+      assertResponseSubstring(request, chunkedExtension, maxRequestHeaderSize, handler, substring);
+      return this;
     }
 
     public Builder withChunkedExtension(String extension) {
@@ -126,5 +168,10 @@ public abstract class BaseSocketTest extends BaseTest {
       this.maxRequestHeaderSize = maxRequestHeaderSize;
       return this;
     }
+  }
+
+  @FunctionalInterface
+  private interface ThrowingConsumer<T> {
+    void accept(T t) throws Exception;
   }
 }

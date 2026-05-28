@@ -34,8 +34,8 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" >/dev/null && pwd)"
 
 # Defaults
-ALL_SERVERS="self jdk-httpserver jetty netty tomcat"
-ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers"
+ALL_SERVERS="self jdk-httpserver jetty netty tomcat helidon undertow"
+ALL_SCENARIOS="baseline hello post-load large-file high-concurrency mixed browser-headers h2-hello h2-high-stream-concurrency h2-high-connection-concurrency h2-compute h2-io h2-stream h2-large-response h2-tls-hello h2-tls-high-stream-concurrency"
 SERVERS="${ALL_SERVERS}"
 SCENARIOS="${ALL_SCENARIOS}"
 LABEL=""
@@ -87,6 +87,12 @@ check_command latte
 check_command java
 check_command curl
 check_command jq
+
+# h2load is optional — h2-* scenarios are skipped gracefully when it is absent.
+HAS_H2LOAD=1
+if ! command -v h2load &>/dev/null; then
+  HAS_H2LOAD=0
+fi
 
 # Tomcat's catalina.sh falls back to `/usr/libexec/java_home` when JAVA_HOME is unset. On macOS that returns whichever JDK Apple's
 # system-wide registry chooses (often the oldest one — on this dev machine, JDK 8), which does not recognize --add-opens and refuses
@@ -143,7 +149,16 @@ stop_timer() {
   fi
   TIMER_ELAPSED=$(( SECONDS - TIMER_START ))
 }
-trap stop_timer EXIT
+cleanup_on_exit() {
+  stop_timer
+  # If set -e or a Ctrl+C aborts the script mid-scenario, stop_server is never called explicitly.
+  # Try to clean up whatever server PID is currently tracked.
+  if [[ -n "${SERVER_PID:-}" ]]; then
+    kill -- -"${SERVER_PID}" 2>/dev/null || kill "${SERVER_PID}" 2>/dev/null || true
+    kill -9 -- -"${SERVER_PID}" 2>/dev/null || kill -9 "${SERVER_PID}" 2>/dev/null || true
+  fi
+}
+trap cleanup_on_exit EXIT
 
 # --- Banner ---
 
@@ -174,6 +189,10 @@ else
 fi
 JAVA_VERSION="$(java -version 2>&1 | head -1 || echo unknown)"
 WRK_VERSION="$(set +o pipefail; wrk -v 2>&1 | head -1)"
+H2LOAD_VERSION=""
+if [[ "${HAS_H2LOAD}" == "1" ]]; then
+  H2LOAD_VERSION="$(set +o pipefail; h2load --version 2>&1 | head -1)"
+fi
 
 echo "Machine:  ${MACHINE_MODEL}"
 echo "OS:       ${OS_VERSION}"
@@ -181,22 +200,39 @@ echo "System:   ${OS} ${ARCH}, ${CPU_CORES} cores, ${RAM_GB}GB RAM"
 echo "CPU:      ${CPU_MODEL}"
 echo "Java:     ${JAVA_VERSION}"
 echo "wrk:      ${WRK_VERSION}"
+if [[ "${HAS_H2LOAD}" == "1" ]]; then
+  echo "h2load:   ${H2LOAD_VERSION}"
+else
+  echo "h2load:   not installed (h2-* scenarios will be skipped; brew install nghttp2)"
+fi
 echo "Duration: ${DURATION} (${DURATION_SECS}s)"
 echo ""
 
 # --- Scenario configuration ---
-# Maps scenario name -> "threads connections endpoint"
+# Maps scenario name -> "tool threads connections [streams] endpoint"
+# tool is "wrk" or "h2load"
+# wrk entries:    tool threads connections endpoint
+# h2load entries: tool threads connections streams endpoint
 
 scenario_config() {
   case "$1" in
-    baseline)         echo "12 100 /" ;;
-    hello)            echo "12 100 /hello" ;;
-    post-load)        echo "12 100 /load" ;;
-    large-file)       echo "4 10 /file?size=1048576" ;;
-    high-concurrency) echo "12 1000 /" ;;
-    mixed)            echo "12 100 /" ;;
-    browser-headers)  echo "12 100 /" ;;
-    *)                echo ""; return 1 ;;
+    baseline)            echo "wrk    12 100    /" ;;
+    hello)               echo "wrk    12 100    /hello" ;;
+    post-load)           echo "wrk    12 100    /load" ;;
+    large-file)          echo "wrk    4  10     /file?size=1048576" ;;
+    high-concurrency)    echo "wrk    12 1000   /" ;;
+    mixed)               echo "wrk    12 100    /" ;;
+    browser-headers)     echo "wrk    12 100    /" ;;
+    h2-hello)                       echo "h2load 1  1    100 /hello" ;;                # 1 thread, 1 TCP connection, 100 streams
+    h2-high-stream-concurrency)     echo "h2load 4  10   100 /hello" ;;                # 10 conns x 100 streams: many-streams-per-conn (backend / proxy shape)
+    h2-high-connection-concurrency) echo "h2load 4  500  2   /hello" ;;                # 500 conns x 2 streams: many-conns-few-streams (browser / CDN shape)
+    h2-compute)                     echo "h2load 4  10   100 /compute?rounds=5000" ;;  # CPU-bound: chained SHA-256 ~500us-1ms/req
+    h2-io)                          echo "h2load 4  10   100 /io?ms=10" ;;             # blocking-IO: 10ms downstream call simulation
+    h2-stream)                      echo "h2load 4  10   100 /stream?size=131072" ;;   # 128KB chunked response per stream (handler forces per-chunk flush)
+    h2-large-response)              echo "h2load 4  10   100 /large-response?size=131072" ;;   # 128KB one-shot response (handler writes whole body, server chooses framing)
+    h2-tls-hello)                       echo "h2load 1  1    100 /hello" ;;            # same shape as h2-hello but over TLS+ALPN
+    h2-tls-high-stream-concurrency)     echo "h2load 4  10   100 /hello" ;;            # same shape as h2-high-stream-concurrency but over TLS+ALPN
+    *)                   echo ""; return 1 ;;
   esac
 }
 
@@ -227,10 +263,17 @@ start_server() {
 }
 
 wait_for_server() {
+  local server="$1"
   local timeout=30
   local elapsed=0
+  # The "self" server uses h2c prior-knowledge; plain HTTP/1.1 curl will fail.
+  # Use --http2-prior-knowledge for that server so the health-check actually connects.
+  local curl_extra_flags=""
+  if [[ "${server}" == "self" ]]; then
+    curl_extra_flags="--http2-prior-knowledge"
+  fi
   while [[ ${elapsed} -lt ${timeout} ]]; do
-    if curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null | grep -q "200"; then
+    if curl ${curl_extra_flags} -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/ 2>/dev/null | grep -q "200"; then
       return 0
     fi
     sleep 1
@@ -322,6 +365,126 @@ run_wrk_benchmark() {
     "${rps}" "${avg_lat}" "${p99_lat}" "${errors}" "${TIMER_ELAPSED}"
 }
 
+# --- Run a single h2load benchmark ---
+# Args: $1=server, $2=scenario, $3=threads, $4=connections, $5=streams, $6=endpoint, $7=trial
+# Appends result to RESULTS_JSON
+run_h2load_benchmark() {
+  local server="$1" scenario="$2" threads="$3" connections="$4" streams="$5" endpoint="$6" trial="$7"
+
+  local trial_label=""
+  if [[ "${TRIALS}" -gt 1 ]]; then
+    trial_label=" [trial ${trial}/${TRIALS}]"
+  fi
+  echo "  [h2load] Running: ${scenario} (${threads}t, ${connections}c, ${streams}s, ${DURATION}) -> ${endpoint}${trial_label}"
+
+  start_timer "[h2load] ${server}/${scenario}${trial_label}"
+
+  # h2-tls-* scenarios go over TLS+ALPN on port 8443; cleartext h2c uses port 8080.
+  # h2load uses SSL_VERIFY_NONE by default for client TLS — no flag needed to accept the
+  # self-signed benchmark cert. (--ca-file does not exist on h2load.)
+  local h2load_url
+  if [[ "${scenario}" == h2-tls-* ]]; then
+    h2load_url="https://127.0.0.1:8443${endpoint}"
+  else
+    h2load_url="http://127.0.0.1:8080${endpoint}"
+  fi
+
+  local h2load_output h2load_exit
+  set +e
+  h2load_output="$(h2load \
+    --duration="${DURATION_SECS}" \
+    --clients="${connections}" \
+    --max-concurrent-streams="${streams}" \
+    --threads="${threads}" \
+    "${h2load_url}" 2>&1)"
+  h2load_exit=$?
+  set -e
+  stop_timer
+
+  if [[ ${h2load_exit} -ne 0 ]]; then
+    echo "    h2load exited ${h2load_exit}; output:"
+    echo "${h2load_output}" | sed 's/^/      /'
+    # Don't bubble up — leave parsing to record zero metrics; the outer cleanup will still kill the server.
+  fi
+
+  # Parse h2load text output.
+  # h2load summary line: "finished in Xs, NNN.NN req/s, ..." -> rps
+  # h2load per-stat table columns: min, max, median, p95, p99, mean, sd, +/- sd
+  #   "request     :       81us     39.12ms       685us     1.45ms     2.12ms      792us   ..."
+  # "status codes: N 2xx, ..." -> errors = total - 2xx
+  local rps avg_lat_us p99_us errors total_req succeeded
+
+  rps="$(echo "${h2load_output}" | grep -E 'req/s' | grep -oE '[0-9]+(\.[0-9]+)?\s+req/s' | grep -oE '^[0-9]+(\.[0-9]+)?' | head -1)"
+  # Extract the p99 (5th time value) and mean (6th time value) from the "request     :" row.
+  # awk reads the row: fields are "request", ":", min, max, median, p95, p99, mean, ...
+  avg_lat_us="$(echo "${h2load_output}" | grep 'request' | grep -v 'requests:' | awk 'NR==1 {print $8}')"
+  p99_us="$(echo "${h2load_output}" | grep 'request' | grep -v 'requests:' | awk 'NR==1 {print $7}')"
+
+  # Convert latency strings like "1.23ms" or "456us" to microseconds
+  convert_to_us() {
+    local val="$1"
+    local num unit
+    num="$(echo "${val}" | grep -oE '^[0-9.]+')"
+    unit="$(echo "${val}" | grep -oE '[a-z]+$')"
+    case "${unit}" in
+      us)  printf "%.0f" "${num}" ;;
+      ms)  printf "%.0f" "$(echo "${num} * 1000" | bc)" ;;
+      s)   printf "%.0f" "$(echo "${num} * 1000000" | bc)" ;;
+      *)   echo "0" ;;
+    esac
+  }
+
+  avg_lat_us="$(convert_to_us "${avg_lat_us:-0us}")"
+  p99_us="$(convert_to_us "${p99_us:-0us}")"
+  rps="${rps:-0}"
+
+  # Count errors: total requests minus succeeded (2xx)
+  total_req="$(echo "${h2load_output}" | grep 'requests:' | grep -oE '[0-9]+ total' | grep -oE '^[0-9]+' | head -1)"
+  succeeded="$(echo "${h2load_output}" | grep 'status codes:' | grep -oE '[0-9]+ 2xx' | grep -oE '^[0-9]+' | head -1)"
+  total_req="${total_req:-0}"
+  succeeded="${succeeded:-0}"
+  errors=$(( total_req - succeeded ))
+  if [[ "${errors}" -lt 0 ]]; then errors=0; fi
+
+  if [[ "${rps}" == "0" ]]; then
+    echo "    WARNING: Could not parse h2load output for ${server}/${scenario}"
+    echo "    h2load output: ${h2load_output}"
+    return
+  fi
+
+  # Build the result entry
+  local result_entry
+  result_entry="$(jq -n \
+    --arg server "${server}" \
+    --arg tool "h2load" \
+    --arg protocol "h2c" \
+    --arg scenario "${scenario}" \
+    --argjson threads "${threads}" \
+    --argjson connections "${connections}" \
+    --argjson streams "${streams}" \
+    --arg duration "${DURATION}" \
+    --arg endpoint "${endpoint}" \
+    --argjson trial "${trial}" \
+    --argjson rps "${rps}" \
+    --argjson avg_latency_us "${avg_lat_us}" \
+    --argjson p99_us "${p99_us}" \
+    --argjson errors "${errors}" \
+    '{
+      server: $server,
+      tool: $tool,
+      protocol: $protocol,
+      scenario: $scenario,
+      config: { threads: $threads, connections: $connections, streams: $streams, duration: $duration, endpoint: $endpoint, trial: $trial },
+      metrics: { rps: $rps, avg_latency_us: $avg_latency_us, p99_us: $p99_us, errors_connect: 0, errors_read: 0, errors_write: 0, errors_timeout: 0, errors_other: $errors }
+    }'
+  )"
+
+  RESULTS_JSON="$(echo "${RESULTS_JSON}" | jq --argjson entry "${result_entry}" '. + [$entry]')"
+
+  printf "    RPS: %'.0f | Avg Latency: %'.0f us | P99: %'.0f us | Errors: %d | Duration: %ds\n" \
+    "${rps}" "${avg_lat_us}" "${p99_us}" "${errors}" "${TIMER_ELAPSED}"
+}
+
 # --- Run benchmarks ---
 
 SCENARIO_DIR="${SCRIPT_DIR}/scenarios"
@@ -360,7 +523,7 @@ for server in ${SERVERS}; do
   stop_server
   start_server "${server}"
 
-  if ! wait_for_server; then
+  if ! wait_for_server "${server}"; then
     echo "ERROR: ${server} failed to start, skipping."
     stop_server
     continue
@@ -375,10 +538,29 @@ for server in ${SERVERS}; do
       continue
     }
 
-    read -r threads connections endpoint <<< "${config}"
-    for trial in $(seq 1 "${TRIALS}"); do
-      run_wrk_benchmark "${server}" "${scenario}" "${threads}" "${connections}" "${endpoint}" "${trial}"
-    done
+    # First token is the tool selector; remainder is tool-specific params.
+    read -r tool rest_config <<< "${config}"
+
+    if [[ "${tool}" == "h2load" ]]; then
+      if [[ "${HAS_H2LOAD}" == "0" ]]; then
+        echo "    SKIPPED — h2load not installed (brew install nghttp2)"
+        continue
+      fi
+      # jdk-httpserver is HTTP/1.1-only; h2-* scenarios are not supported.
+      if [[ "${server}" == "jdk-httpserver" ]]; then
+        echo "  [h2load] SKIPPED — jdk-httpserver does not support HTTP/2"
+        continue
+      fi
+      read -r threads connections streams endpoint <<< "${rest_config}"
+      for trial in $(seq 1 "${TRIALS}"); do
+        run_h2load_benchmark "${server}" "${scenario}" "${threads}" "${connections}" "${streams}" "${endpoint}" "${trial}"
+      done
+    else
+      read -r threads connections endpoint <<< "${rest_config}"
+      for trial in $(seq 1 "${TRIALS}"); do
+        run_wrk_benchmark "${server}" "${scenario}" "${threads}" "${connections}" "${endpoint}" "${trial}"
+      done
+    fi
   done
 
   echo ""
@@ -402,6 +584,7 @@ FULL_RESULT="$(jq -n \
   --arg javaVersion "${JAVA_VERSION}" \
   --arg description "Local benchmark" \
   --arg wrkVersion "${WRK_VERSION}" \
+  --arg h2loadVersion "${H2LOAD_VERSION}" \
   --argjson results "${RESULTS_JSON}" \
   '{
     version: $version,
@@ -418,7 +601,8 @@ FULL_RESULT="$(jq -n \
       description: $description
     },
     tools: {
-      wrkVersion: $wrkVersion
+      wrkVersion: $wrkVersion,
+      h2loadVersion: $h2loadVersion
     },
     results: $results
   }'
@@ -435,7 +619,7 @@ echo ""
 printf "%-15s %-18s %12s %12s %12s %8s\n" "Server" "Scenario" "RPS" "Avg Lat(us)" "P99(us)" "Errors"
 printf "%-15s %-18s %12s %12s %12s %8s\n" "---------------" "------------------" "------------" "------------" "------------" "--------"
 
-echo "${RESULTS_JSON}" | jq -r '.[] | [.server, .scenario, (.metrics.rps | tostring), (.metrics.avg_latency_us | tostring), (.metrics.p99_us | tostring), ((.metrics.errors_connect + .metrics.errors_read + .metrics.errors_write + .metrics.errors_timeout) | tostring)] | @tsv' | \
+echo "${RESULTS_JSON}" | jq -r '.[] | [.server, .scenario, (.metrics.rps | tostring), (.metrics.avg_latency_us | tostring), (.metrics.p99_us | tostring), ((.metrics.errors_connect + .metrics.errors_read + .metrics.errors_write + .metrics.errors_timeout + (.metrics.errors_other // 0)) | tostring)] | @tsv' | \
   while IFS=$'\t' read -r srv scn rps avg p99 errs; do
     printf "%-15s %-18s %12.0f %12.0f %12d %8d\n" "${srv}" "${scn}" "${rps}" "${avg}" "${p99}" "${errs}"
   done

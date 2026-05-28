@@ -241,6 +241,27 @@ public class MultipartStreamTest {
   }
 
   @Test
+  public void parse_throws_when_maxFileCount_exceeded() throws IOException {
+    String boundary = "----WebKitFormBoundaryTWfMVJErBoLURJIe";
+    StringBuilder body = new StringBuilder();
+    for (int i = 0; i < 3; i++) {
+      body.append("--").append(boundary).append("\r\n")
+          .append("content-disposition: form-data; name=\"file\"; filename=\"f").append(i).append(".txt\"\r\n")
+          .append("content-type: text/plain\r\n\r\n")
+          .append("hello").append("\r\n");
+    }
+    body.append("--").append(boundary).append("--\r\n");
+
+    MultipartStream stream = new MultipartStream(
+        new ByteArrayInputStream(body.toString().getBytes()),
+        boundary.getBytes(),
+        fileManager,
+        new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow).withMaxFileCount(2));
+
+    assertThrows(ContentTooLargeException.class, () -> stream.process(new HashMap<>(), new ArrayList<>()));
+  }
+
+  @Test
   public void truncated() throws IOException {
     ByteArrayInputStream is = new ByteArrayInputStream("""
         ------WebKitFormBoundaryTWfMVJErBoLURJIe\r

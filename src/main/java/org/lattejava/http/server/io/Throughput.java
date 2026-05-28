@@ -18,8 +18,8 @@ package org.lattejava.http.server.io;
 import org.lattejava.http.server.internal.*;
 
 /**
- * This class allows the {@link HTTPWorker} to hook into other classes without passing around interfaces, loggers, and
- * configuration.
+ * This class allows the {@link org.lattejava.http.server.internal.HTTP1Worker} to hook into other classes without
+ * passing around interfaces, loggers, and configuration.
  *
  * @author Brian Pontarelli
  */

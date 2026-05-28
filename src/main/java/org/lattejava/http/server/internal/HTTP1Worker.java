@@ -20,13 +20,14 @@ import module org.lattejava.http;
 
 import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.server.io.EmptyHTTPInputStream;
 
 /**
  * An HTTP worker that is a delegate Runnable to an {@link HTTPHandler}.
  *
  * @author Brian Pontarelli
  */
-public class HTTPWorker implements Runnable {
+public class HTTP1Worker implements ClientConnection, Runnable {
   private final HTTPBuffers buffers;
 
   private final HTTPServerConfiguration configuration;
@@ -49,10 +50,10 @@ public class HTTPWorker implements Runnable {
 
   private long handledRequests;
 
-  private volatile State state;
+  private volatile WorkerState workerState;
 
-  public HTTPWorker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
-                    HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
+  public HTTP1Worker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                     HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
     this.socket = socket;
     this.configuration = configuration;
     this.context = context;
@@ -60,9 +61,30 @@ public class HTTPWorker implements Runnable {
     this.listener = listener;
     this.throughput = throughput;
     this.buffers = new HTTPBuffers(configuration);
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPWorker.class);
+    this.logger = configuration.getLoggerFactory().getLogger(HTTP1Worker.class);
     this.inputStream = new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter);
-    this.state = State.Read;
+    this.workerState = WorkerState.Read;
+    this.startInstant = System.currentTimeMillis();
+    logger.trace("[{}] Starting HTTP worker.", Thread.currentThread().threadId());
+  }
+
+  /**
+   * Alternate constructor used by {@link ProtocolSelector} when the h2c prior-knowledge peek path has already consumed
+   * bytes from the socket's InputStream and pushed them back into a pre-built {@link PushbackInputStream}. Passing the
+   * stream directly avoids a second wrapping and ensures no peeked bytes are lost.
+   */
+  public HTTP1Worker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                     HTTPListenerConfiguration listener, Throughput throughput, PushbackInputStream inputStream) throws IOException {
+    this.socket = socket;
+    this.configuration = configuration;
+    this.context = context;
+    this.instrumenter = instrumenter;
+    this.listener = listener;
+    this.throughput = throughput;
+    this.buffers = new HTTPBuffers(configuration);
+    this.logger = configuration.getLoggerFactory().getLogger(HTTP1Worker.class);
+    this.inputStream = inputStream;
+    this.workerState = WorkerState.Read;
     this.startInstant = System.currentTimeMillis();
     logger.trace("[{}] Starting HTTP worker.", Thread.currentThread().threadId());
   }
@@ -101,13 +123,13 @@ public class HTTPWorker implements Runnable {
         var throughputOutputStream = new ThroughputOutputStream(socket.getOutputStream(), throughput);
         response = new HTTPResponse();
 
-        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> state = State.Write);
+        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> workerState = WorkerState.Write);
         response.setOutputStream(outputStream);
 
         // Not this line of code will block
         // - When a client is using Keep-Alive - we will loop and block here while we wait for the client to send us bytes.
         byte[] requestBuffer = buffers.requestBuffer();
-        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> state = State.Read);
+        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> workerState = WorkerState.Read);
         if (logger.isTraceEnabled()) {
           int availableBufferedBytes = inputStream.getAvailableBufferedBytesRemaining();
           if (availableBufferedBytes != 0) {
@@ -121,9 +143,18 @@ public class HTTPWorker implements Runnable {
           instrumenter.acceptedRequest();
         }
 
-        int maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
-        httpInputStream = new HTTPInputStream(configuration, request, inputStream, maximumContentLength);
-        request.setInputStream(httpInputStream);
+        long maximumContentLength = HTTPTools.getMaxRequestBodySize(request.getContentType(), configuration.getMaxRequestBodySize());
+        if (request.hasBody()) {
+          httpInputStream = new HTTPInputStream(configuration, request, inputStream, maximumContentLength);
+          request.setInputStream(httpInputStream);
+        } else {
+          // Bodyless requests (the GET/HEAD common case): give the handler a zero-allocation empty stream so
+          // readAllBytes() returns a shared empty byte[] instead of the JDK default's 16 KB-allocate-then-discard pattern.
+          // The drain step below is a no-op for these requests (HTTPInputStream.drain already short-circuits when hasBody()
+          // is false), so skipping the wrapper here is behaviour-preserving.
+          httpInputStream = null;
+          request.setInputStream(EmptyHTTPInputStream.INSTANCE);
+        }
 
         // Set the Connection response header as soon as possible
         // - This needs to occur after we have parsed the pre-amble so we can read the request headers
@@ -136,6 +167,52 @@ public class HTTPWorker implements Runnable {
           return;
         }
 
+        // h2c via Upgrade/101 (RFC 7540 §3.2 — back-compat path; RFC 9113 deprecates this in favor of prior-knowledge).
+        boolean upgradeRequested = false;
+        if (listener.isH2cUpgradeEnabled()) {
+          String upgrade = request.getHeader("Upgrade");
+          if (upgrade != null && upgrade.equalsIgnoreCase("h2c")) {
+            // RFC 9113 §3.2 — h2c Upgrade does NOT permit a request body to carry over. The original HTTP/1.1 body bytes
+            // would remain on the socket after the 101, and the new HTTP/2 reader would mis-interpret them as frames
+            // (request smuggling / protocol confusion). Until Plan E maps the original request into stream 1, refuse any
+            // h2c-Upgrade that declares a body.
+            if (request.hasBody()) {
+              closeSocketOnError(response, Status.BadRequest);
+              return;
+            }
+            // RFC 9113 §3.2 requires HTTP2-Settings to be present. The preamble parser drops headers with empty values, so
+            // a null here may mean "present but empty" rather than truly absent. Treat both null and empty as an empty
+            // settings payload — the practical effect is identical (no peer settings overrides), and rejecting empty
+            // values would break the most common h2c upgrade pattern used by curl and other tooling.
+            String h2settings = request.getHeader("HTTP2-Settings");
+            byte[] settingsPayload;
+            if (h2settings == null || h2settings.isBlank()) {
+              settingsPayload = new byte[0];
+            } else {
+              try {
+                settingsPayload = Base64.getUrlDecoder().decode(h2settings.strip());
+              } catch (IllegalArgumentException e) {
+                closeSocketOnError(response, Status.BadRequest);
+                return;
+              }
+            }
+            HTTP2Settings peerSettings = HTTP2Settings.defaults();
+            peerSettings.applyPayload(settingsPayload);
+            // TODO Plan E: the h2c spec says the original HTTP/1.1 request becomes implicit stream 1 in the new HTTP/2
+            //   connection. We punt on that here — the simpler implementation drops the original request and lets the
+            //   client re-send it as a proper HTTP/2 stream after the 101. Most h2c-Upgrade clients (curl --http2) do
+            //   not send a request body in the upgrade request and re-send after receiving the 101.
+            response.switchProtocols("h2c", Map.of(), s -> {
+              try {
+                new HTTP2Connection(s, configuration, context, instrumenter, listener, throughput, /*prefaceConsumed=*/false, /*serverSendsFirst=*/true).run();
+              } catch (Exception e) {
+                logger.debug("h2c upgrade handler ended", e);
+              }
+            });
+            upgradeRequested = true;
+          }
+        }
+
         // Automatic HEAD handling: dispatch through GET logic but suppress body output. The HTTPRequest captured HEAD as the originalMethod on
         // the first setMethod call during preamble parsing, so isHeadRequest() remains true even after this rewrite.
         if (request.getMethod().is(HTTPMethod.HEAD)) {
@@ -143,20 +220,25 @@ public class HTTPWorker implements Runnable {
           request.setMethod(HTTPMethod.GET);
         }
 
-        // Handle the Expect: 100-continue request header.
+        // Handle the Expect request header. RFC 9110 §10.1.1 — server MUST respond 417 to any expectation it does not support; we only support 100-continue.
         String expect = request.getHeader(HTTPValues.Headers.Expect);
-        if (expect != null && expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
-          state = State.Write;
+        if (expect != null) {
+          if (expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
+            workerState = WorkerState.Write;
 
-          boolean doContinue = handleExpectContinue(request);
-          if (!doContinue) {
-            // Note that the expectContinue code already wrote to the OutputStream, all we need to do is close the socket.
-            closeSocketOnly(CloseSocketReason.Expected);
+            boolean doContinue = handleExpectContinue(request);
+            if (!doContinue) {
+              // Note that the expectContinue code already wrote to the OutputStream, all we need to do is close the socket.
+              closeSocketOnly(CloseSocketReason.Expected);
+              return;
+            }
+
+            // Otherwise, transition the state to Read
+            workerState = WorkerState.Read;
+          } else {
+            closeSocketOnError(response, HTTPValues.Status.ExpectationFailed);
             return;
           }
-
-          // Otherwise, transition the state to Read
-          state = State.Read;
         }
 
         // RFC 9110 §6.6.1 — origin servers with a clock MUST emit a Date header. We populate it before invoking the handler so
@@ -166,10 +248,12 @@ public class HTTPWorker implements Runnable {
         }
 
         // Transition to processing
-        state = State.Process;
-        logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), state);
+        workerState = WorkerState.Process;
+        logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), workerState);
         try {
-          configuration.getHandler().handle(request, response);
+          if (!upgradeRequested) {
+            configuration.getHandler().handle(request, response);
+          }
           logger.trace("[{}] Handler completed successfully", Thread.currentThread().threadId());
         } finally {
           // Clean up temporary files if instructed to do so.
@@ -189,6 +273,24 @@ public class HTTPWorker implements Runnable {
           }
         }
 
+        // If the handler requested a protocol switch, emit the 101 preamble and hand off the socket.
+        // Normal response writing is bypassed — the new protocol owns the socket from this point.
+        if (response.isProtocolSwitchPending()) {
+          String target = response.getSwitchProtocolsTarget();
+          StringBuilder sb = new StringBuilder();
+          sb.append("HTTP/1.1 101 Switching Protocols\r\n");
+          sb.append("Connection: Upgrade\r\n");
+          sb.append("Upgrade: ").append(target).append("\r\n");
+          for (var entry : response.getSwitchProtocolsHeaders().entrySet()) {
+            sb.append(entry.getKey()).append(": ").append(entry.getValue()).append("\r\n");
+          }
+          sb.append("\r\n");
+          socket.getOutputStream().write(sb.toString().getBytes(StandardCharsets.US_ASCII));
+          socket.getOutputStream().flush();
+          response.getSwitchProtocolsHandler().handle(socket);
+          return;
+        }
+
         // Do this before we write the response preamble. The normal Keep-Alive check below will handle closing the socket.
         if (handledRequests >= configuration.getMaxRequestsPerConnection()) {
           logger.trace("[{}] Maximum requests per connection has been reached. Turn off Keep-Alive.", Thread.currentThread().threadId());
@@ -206,17 +308,20 @@ public class HTTPWorker implements Runnable {
         }
 
         // Transition to Keep-Alive state and reset the SO timeout
-        state = State.KeepAlive;
+        workerState = WorkerState.KeepAlive;
         int soTimeout = (int) configuration.getKeepAliveTimeoutDuration().toMillis();
-        logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), state, soTimeout);
+        logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), workerState, soTimeout);
         socket.setSoTimeout(soTimeout);
 
-        // Drain the InputStream so we can complete this request
-        long startDrain = System.currentTimeMillis();
-        int drained = httpInputStream.drain();
-        if (drained > 0 && logger.isTraceEnabled()) {
-          long drainDuration = System.currentTimeMillis() - startDrain;
-          logger.trace("[{}] Drained [{}] bytes from the InputStream. Duration [{}] ms.", Thread.currentThread().threadId(), drained, drainDuration);
+        // Drain the InputStream so we can complete this request. Null when the request was bodyless and the
+        // EmptyHTTPInputStream singleton was installed above — nothing to drain in that case.
+        if (httpInputStream != null) {
+          long startDrain = System.currentTimeMillis();
+          int drained = httpInputStream.drain();
+          if (drained > 0 && logger.isTraceEnabled()) {
+            long drainDuration = System.currentTimeMillis() - startDrain;
+            logger.trace("[{}] Drained [{}] bytes from the InputStream. Duration [{}] ms.", Thread.currentThread().threadId(), drained, drainDuration);
+          }
         }
       }
     } catch (ConnectionClosedException e) {
@@ -232,16 +337,16 @@ public class HTTPWorker implements Runnable {
       // - Close the connection, unless we drain it, the connection cannot be re-used.
       // - Treating this as an expected case because if we are in a keep-alive state, no big deal, the client can just re-open the request. If we
       //   are not ina keep alive state, the request does not need to be re-used anyway.
-      logger.debug("[{}] Closing socket [{}]. Too many bytes remaining in the InputStream. Drained [{}] bytes. Configured maximum bytes [{}].", Thread.currentThread().threadId(), state, e.getDrainedBytes(), e.getMaximumDrainedBytes());
+      logger.debug("[{}] Closing socket [{}]. Too many bytes remaining in the InputStream. Drained [{}] bytes. Configured maximum bytes [{}].", Thread.currentThread().threadId(), workerState, e.getDrainedBytes(), e.getMaximumDrainedBytes());
       closeSocketOnly(CloseSocketReason.Expected);
     } catch (SocketTimeoutException e) {
       // This might be a read timeout or a Keep-Alive timeout. The reason is based on the worker state.
-      CloseSocketReason reason = state == State.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
-      String message = state == State.Read ? "Initial read timeout" : "Keep-Alive expired";
+      CloseSocketReason reason = workerState == WorkerState.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
+      String message = workerState == WorkerState.Read ? "Initial read timeout" : "Keep-Alive expired";
       if (reason == CloseSocketReason.Expected) {
-        logger.trace("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), state, message);
+        logger.trace("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), workerState, message);
       } else {
-        logger.debug("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), state, message);
+        logger.debug("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), workerState, message);
       }
       closeSocketOnly(reason);
     } catch (ParseException e) {
@@ -275,8 +380,14 @@ public class HTTPWorker implements Runnable {
     }
   }
 
-  public State state() {
-    return state;
+  @Override
+  public ClientConnection.State state() {
+    return switch (workerState) {
+      case KeepAlive -> ClientConnection.State.KeepAlive;
+      case Process -> ClientConnection.State.Process;
+      case Read -> ClientConnection.State.Read;
+      case Write -> ClientConnection.State.Write;
+    };
   }
 
   private void closeSocketOnError(HTTPResponse response, int status) {
@@ -484,11 +595,11 @@ public class HTTPWorker implements Runnable {
     Unexpected
   }
 
-  public enum State {
-    Read,
+  private enum WorkerState {
+    KeepAlive,
     Process,
-    Write,
-    KeepAlive
+    Read,
+    Write
   }
 
   private static class Status {

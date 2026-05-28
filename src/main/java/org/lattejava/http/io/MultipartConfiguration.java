@@ -26,19 +26,12 @@ import module java.base;
 @SuppressWarnings("UnusedReturnValue")
 public class MultipartConfiguration {
   private boolean deleteTemporaryFiles = true;
-
   private MultipartFileUploadPolicy fileUploadPolicy = MultipartFileUploadPolicy.Reject;
-
+  private int maxFileCount = 20;
   private long maxFileSize = 1024 * 1024; // 1 Megabyte
-
-  private long maxRequestSize = 10 * 1024 * 1024; // 10 Megabytes
-
   private int multipartBufferSize = 8 * 1024; // 8 Kilobytes
-
   private String temporaryFileLocation = System.getProperty("java.io.tmpdir");
-
   private String temporaryFilenamePrefix = "latte-http";
-
   private String temporaryFilenameSuffix = "file-upload";
 
   public MultipartConfiguration() {
@@ -47,8 +40,8 @@ public class MultipartConfiguration {
   public MultipartConfiguration(MultipartConfiguration other) {
     this.deleteTemporaryFiles = other.deleteTemporaryFiles;
     this.fileUploadPolicy = other.fileUploadPolicy;
+    this.maxFileCount = other.maxFileCount;
     this.maxFileSize = other.maxFileSize;
-    this.maxRequestSize = other.maxRequestSize;
     this.multipartBufferSize = other.multipartBufferSize;
     this.temporaryFileLocation = other.temporaryFileLocation;
     this.temporaryFilenamePrefix = other.temporaryFilenamePrefix;
@@ -66,8 +59,8 @@ public class MultipartConfiguration {
     }
     return deleteTemporaryFiles == that.deleteTemporaryFiles &&
         fileUploadPolicy == that.fileUploadPolicy &&
+        maxFileCount == that.maxFileCount &&
         maxFileSize == that.maxFileSize &&
-        maxRequestSize == that.maxRequestSize &&
         multipartBufferSize == that.multipartBufferSize &&
         Objects.equals(temporaryFileLocation, that.temporaryFileLocation) &&
         Objects.equals(temporaryFilenamePrefix, that.temporaryFilenamePrefix) &&
@@ -78,12 +71,12 @@ public class MultipartConfiguration {
     return fileUploadPolicy;
   }
 
-  public long getMaxFileSize() {
-    return maxFileSize;
+  public int getMaxFileCount() {
+    return maxFileCount;
   }
 
-  public long getMaxRequestSize() {
-    return maxRequestSize;
+  public long getMaxFileSize() {
+    return maxFileSize;
   }
 
   public int getMultipartBufferSize() {
@@ -107,8 +100,8 @@ public class MultipartConfiguration {
     return Objects.hash(
         deleteTemporaryFiles,
         fileUploadPolicy,
+        maxFileCount,
         maxFileSize,
-        maxRequestSize,
         multipartBufferSize,
         temporaryFileLocation,
         temporaryFilenamePrefix,
@@ -146,6 +139,21 @@ public class MultipartConfiguration {
   }
 
   /**
+   * The maximum number of files allowed in a single multipart request.
+   *
+   * @param maxFileCount the maximum file count. Must be greater than 0, or -1 to disable the limit.
+   * @return This.
+   */
+  public MultipartConfiguration withMaxFileCount(int maxFileCount) {
+    if (maxFileCount != -1 && maxFileCount <= 0) {
+      throw new IllegalArgumentException("The maximum file count must be greater than 0. Set to [-1] to disable this limitation.");
+    }
+
+    this.maxFileCount = maxFileCount;
+    return this;
+  }
+
+  /**
    * This is the maximum size for each file found within a multipart stream which may contain one to many files.
    *
    * @param maxFileSize the maximum file size in bytes
@@ -153,22 +161,6 @@ public class MultipartConfiguration {
    */
   public MultipartConfiguration withMaxFileSize(long maxFileSize) {
     this.maxFileSize = maxFileSize;
-    return this;
-  }
-
-  /**
-   * This is the maximum size of the request payload in bytes when reading a multipart stream.
-   *
-   * @param maxRequestSize the maximum request size in bytes
-   * @return This.
-   */
-  public MultipartConfiguration withMaxRequestSize(long maxRequestSize) {
-    if (maxRequestSize < maxFileSize) {
-      // In practice the maxRequestSize should be more than just one byte larger than maxFileSize, but I am not going to require any specific amount.
-      throw new IllegalArgumentException("The maximum request size must be greater than the maxFileSize");
-    }
-
-    this.maxRequestSize = maxRequestSize;
     return this;
   }
 

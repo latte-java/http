@@ -39,6 +39,11 @@ public class Main {
     var outputFile = setupOutput();
     var instrumenter = new ThreadSafeCountingInstrumenter();
 
+    // TLS listener on 8443: load the benchmark self-signed cert/key from benchmarks/certs/.
+    // start.sh runs from build/dist, so we walk up: dist → build → self → benchmarks → certs.
+    String certPem = Files.readString(Path.of("../../../certs/server.crt"));
+    String keyPem = Files.readString(Path.of("../../../certs/server.key"));
+
     try (HTTPServer ignore = new HTTPServer().withHandler(new LoadHandler())
                                              .withCompressByDefault(false)
                                              .withMaxRequestsPerConnection(100_000_000)
@@ -46,7 +51,8 @@ public class Main {
                                              .withMinimumReadThroughput(4 * 1024)
                                              .withMinimumWriteThroughput(4 * 1024)
                                              .withInstrumenter(instrumenter)
-                                             .withListener(new HTTPListenerConfiguration(8080))
+                                             .withListener(new HTTPListenerConfiguration(8080).withH2cPriorKnowledgeEnabled(true))
+                                             .withListener(new HTTPListenerConfiguration(8443, certPem, keyPem))
                                              .withLoggerFactory(SystemOutLoggerFactory.FACTORY)
                                              .start()) {
 

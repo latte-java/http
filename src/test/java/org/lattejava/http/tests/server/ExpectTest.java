@@ -20,6 +20,8 @@ import module java.net.http;
 import module org.lattejava.http;
 import module org.testng;
 
+import java.time.Duration;
+
 import static org.testng.Assert.*;
 
 /**
@@ -114,6 +116,28 @@ public class ExpectTest extends BaseTest {
 
       assertEquals(response.statusCode(), 417);
       assertEquals(response.body(), "");
+    }
+  }
+
+  // The JDK HttpClient treats "Expect" as a restricted header (only permits expectContinue(true) which sends "100-continue"), so we
+  // use a raw socket to send an arbitrary Expect value and verify the server rejects it with 417 per RFC 9110 §10.1.1.
+  @Test
+  public void expect_other_value_returns_417() throws Exception {
+    AtomicBoolean handlerCalled = new AtomicBoolean(false);
+    HTTPHandler handler = (req, res) -> {
+      handlerCalled.set(true);
+      res.setStatus(200);
+    };
+
+    try (HTTPServer ignored = makeServer("http", handler).withSendDateHeader(false).start();
+         Socket socket = makeClientSocket("http")) {
+      socket.setSoTimeout((int) Duration.ofSeconds(10).toMillis());
+
+      var request = "POST / HTTP/1.1\r\nHost: localhost\r\nExpect: 200-ok\r\nContent-Length: 4\r\n\r\nbody";
+      socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+
+      assertHTTPResponseEquals(socket, "HTTP/1.1 417 \r\nconnection: close\r\ncontent-length: 0\r\n\r\n");
+      assertFalse(handlerCalled.get(), "Handler should not run when Expect is unsupported");
     }
   }
 }

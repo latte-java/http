@@ -19,8 +19,10 @@ import module java.base;
 import module java.net.http;
 import module org.lattejava.http;
 import module org.testng;
+
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
 
 import sun.security.util.*;
 import sun.security.x509.*;
@@ -205,7 +207,9 @@ public abstract class BaseTest {
       builder.cookieHandler(cookieHandler);
     }
 
-    return builder.connectTimeout(ClientTimeout).build();
+    // Pin to HTTP/1.1 until Task 7 delivers real HTTP/2 support. Without this, the JDK client will negotiate h2 via
+    // ALPN when the server advertises it, and the stub HTTP2Connection closes the socket immediately.
+    return builder.connectTimeout(ClientTimeout).version(HttpClient.Version.HTTP_1_1).build();
   }
 
   public Socket makeClientSocket(String scheme) throws GeneralSecurityException, IOException {
@@ -225,7 +229,32 @@ public abstract class BaseTest {
   }
 
   public HTTPServer makeServer(String scheme, HTTPHandler handler) {
-    return makeServer(scheme, handler, null);
+    return makeServer(scheme, handler, (Instrumenter) null, null);
+  }
+
+  /**
+   * Builds an {@link HTTPServer} with a caller-supplied listener configuration. Useful when the test needs a custom
+   * port (e.g. port 0 for OS-assigned) or non-default h2c flags.
+   *
+   * @param scheme   {@code "http"} or {@code "https"}
+   * @param handler  the request handler
+   * @param listener the listener configuration to use
+   * @return an unstarted {@link HTTPServer}
+   */
+  @SuppressWarnings("resource")
+  public HTTPServer makeServer(String scheme, HTTPHandler handler, HTTPListenerConfiguration listener) {
+    LoggerFactory factory = FileLoggerFactory.FACTORY;
+    return new HTTPServer().withHandler(handler)
+                           .withKeepAliveTimeoutDuration(ServerTimeout)
+                           .withInitialReadTimeout(ServerTimeout)
+                           .withProcessingTimeoutDuration(ServerTimeout)
+                           .withExpectValidator(new AlwaysContinueExpectValidator())
+                           .withLoggerFactory(factory)
+                           .withMinimumReadThroughput(200 * 1024)
+                           .withMinimumWriteThroughput(200 * 1024)
+                           .withListener(listener)
+                           .withReadThroughputCalculationDelayDuration(Duration.ofSeconds(1))
+                           .withWriteThroughputCalculationDelayDuration(Duration.ofSeconds(1));
   }
 
   @SuppressWarnings("resource")

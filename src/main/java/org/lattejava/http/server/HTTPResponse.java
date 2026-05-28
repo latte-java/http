@@ -34,9 +34,17 @@ public class HTTPResponse {
 
   private HTTPOutputStream outputStream;
 
+  private OutputStream rawOutputStream;
+
   private int status = 200;
 
   private String statusMessage;
+
+  private ProtocolSwitchHandler switchProtocolsHandler;
+  private Map<String, String> switchProtocolsHeaders;
+  private String switchProtocolsTarget;
+
+  private Map<String, List<String>> trailers;
 
   private Writer writer;
 
@@ -92,6 +100,22 @@ public class HTTPResponse {
   }
 
   /**
+   * Adds a single trailer field to be emitted after the response body. Forbidden trailers (per RFC 9110 §6.5) are
+   * rejected with {@link IllegalArgumentException}. Trailers are emitted only if the client signaled support via
+   * {@code TE: trailers} ({@link HTTPRequest#acceptsTrailers()}).
+   *
+   * @param name  The trailer field name.
+   * @param value The trailer field value.
+   */
+  public void addTrailer(String name, String value) {
+    rejectIfForbiddenTrailer(name);
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    trailers.computeIfAbsent(name.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(value);
+  }
+
+  /**
    * Removes all response headers that have been added so far. This does not affect cookies, the status code, or any
    * bytes already written. Call this before the response is committed if you want the change to take effect.
    *
@@ -118,6 +142,8 @@ public class HTTPResponse {
   public void close() throws IOException {
     if (writer != null) {
       writer.close();
+    } else if (rawOutputStream != null) {
+      rawOutputStream.close();
     } else {
       outputStream.close();
     }
@@ -172,7 +198,11 @@ public class HTTPResponse {
    * @throws IOException If the socket throws.
    */
   public void flush() throws IOException {
-    outputStream.forceFlush();
+    if (rawOutputStream != null) {
+      rawOutputStream.flush();
+    } else {
+      outputStream.forceFlush();
+    }
   }
 
   /**
@@ -365,7 +395,19 @@ public class HTTPResponse {
    * @return The response body output stream.
    */
   public OutputStream getOutputStream() {
-    return outputStream;
+    return rawOutputStream != null ? rawOutputStream : outputStream;
+  }
+
+  /**
+   * Sets the raw output stream for protocols (e.g. HTTP/2) that bypass the HTTP/1.1 {@link HTTPOutputStream} wrapper.
+   * When a raw output stream is set, {@link #getOutputStream()} returns it instead of the {@link HTTPOutputStream}.
+   * Methods that delegate to {@link HTTPOutputStream} (compress, commit, etc.) are not available when using a raw
+   * stream.
+   *
+   * @param rawOutputStream the raw output stream to use for body emission.
+   */
+  public void setRawOutputStream(OutputStream rawOutputStream) {
+    this.rawOutputStream = rawOutputStream;
   }
 
   /**
@@ -439,6 +481,38 @@ public class HTTPResponse {
   }
 
   /**
+   * @return The protocol-switch handler registered via {@link #switchProtocols}, or {@code null} if no protocol switch
+   *     was requested for this response.
+   */
+  public ProtocolSwitchHandler getSwitchProtocolsHandler() {
+    return switchProtocolsHandler;
+  }
+
+  /**
+   * @return The additional response headers to emit alongside the 101 Switching Protocols status, or an empty map if
+   *     none were specified.
+   */
+  public Map<String, String> getSwitchProtocolsHeaders() {
+    return switchProtocolsHeaders == null ? Map.of() : switchProtocolsHeaders;
+  }
+
+  /**
+   * @return The target protocol token (e.g. {@code "h2c"}) for a 101 Switching Protocols response, or {@code null} if
+   *     no protocol switch was requested.
+   */
+  public String getSwitchProtocolsTarget() {
+    return switchProtocolsTarget;
+  }
+
+  /**
+   * @return An unmodifiable view of all response trailers added via {@link #addTrailer(String, String)}. Returns an
+   *     empty map if no trailers were added.
+   */
+  public Map<String, List<String>> getTrailers() {
+    return trailers == null ? Map.of() : trailers;
+  }
+
+  /**
    * Returns a {@link Writer} for writing the response body as text. The writer is created lazily on first call and
    * encodes characters using the charset from {@link #getCharset()} (derived from the {@code Content-Type} header), so
    * the {@code Content-Type} should be set before this is called. The same writer instance is returned on subsequent
@@ -462,6 +536,13 @@ public class HTTPResponse {
   }
 
   /**
+   * @return {@code true} if any response trailers have been added via {@link #addTrailer(String, String)}.
+   */
+  public boolean hasTrailers() {
+    return trailers != null && !trailers.isEmpty();
+  }
+
+  /**
    * Determines whether the response has been committed. Once committed, the status, headers, and cookies can no longer
    * be changed and {@link #reset()} will throw.
    *
@@ -473,10 +554,10 @@ public class HTTPResponse {
    * }</pre>
    *
    * @return True if the response has been committed, meaning at least one byte was written back to the client. False
-   *     otherwise.
+   *     otherwise. Always returns false when using a raw output stream (HTTP/2 path).
    */
   public boolean isCommitted() {
-    return outputStream.isCommitted();
+    return rawOutputStream == null && outputStream.isCommitted();
   }
 
   /**
@@ -484,10 +565,11 @@ public class HTTPResponse {
    * via {@link #setCompress(boolean)}; whether compression is actually applied also depends on the request's accepted
    * encodings, which {@link #willCompress()} accounts for.
    *
-   * @return {@code true} if compression will be utilized when writing the HTTP OutputStream.
+   * @return {@code true} if compression will be utilized when writing the HTTP OutputStream. Always false on the HTTP/2
+   *     path (compression is handled at the TLS layer or not at all for h2c).
    */
   public boolean isCompress() {
-    return outputStream.isCompress();
+    return rawOutputStream == null && outputStream.isCompress();
   }
 
   /**
@@ -495,6 +577,8 @@ public class HTTPResponse {
    * the first byte being written to the HTTP OutputStream.
    * <p>
    * An {@link IllegalStateException} will be thrown if you call this method after writing to the OutputStream.
+   * <p>
+   * This method is a no-op when using a raw output stream (HTTP/2 path).
    *
    * <pre>{@code
    * HTTPResponse response = ...;
@@ -506,7 +590,13 @@ public class HTTPResponse {
    * @param compress {@code true} to enable the response to be written back compressed.
    */
   public void setCompress(boolean compress) {
-    outputStream.setCompress(compress);
+    if (rawOutputStream == null) {
+      outputStream.setCompress(compress);
+    }
+  }
+
+  public boolean isProtocolSwitchPending() {
+    return switchProtocolsHandler != null;
   }
 
   /**
@@ -559,14 +649,16 @@ public class HTTPResponse {
    * @throws IllegalStateException If the response has already been committed.
    */
   public void reset() {
-    if (outputStream.isCommitted()) {
+    if (rawOutputStream == null && outputStream.isCommitted()) {
       throw new IllegalStateException("The HTTPResponse can't be reset after it has been committed, meaning at least one byte was written back to the client.");
     }
 
     cookies.clear();
     headers.clear();
     exception = null;
-    outputStream.reset();
+    if (rawOutputStream == null) {
+      outputStream.reset();
+    }
     status = 200;
     statusMessage = null;
     writer = null;
@@ -651,15 +743,60 @@ public class HTTPResponse {
     headers.put(name.toLowerCase(Locale.ROOT), new ArrayList<>(List.of(value)));
   }
 
+  public void setTrailer(String name, String value) {
+    rejectIfForbiddenTrailer(name);
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    List<String> list = new ArrayList<>(1);
+    list.add(value);
+    trailers.put(name.toLowerCase(Locale.ROOT), list);
+  }
+
+  /**
+   * Records the intent to perform a protocol switch. The worker will emit a {@code 101 Switching Protocols} response
+   * preamble and then hand the raw socket to the supplied handler. Normal response writing is bypassed — the handler
+   * owns the socket from that point on.
+   *
+   * @param protocol          the protocol token for the {@code Upgrade} response header.
+   * @param additionalHeaders extra headers to include in the 101 preamble, or {@code null} for none.
+   * @param handler           the handler that will take ownership of the socket after the 101 is flushed.
+   */
+  public void switchProtocols(String protocol, Map<String, String> additionalHeaders, ProtocolSwitchHandler handler) {
+    if (protocol == null || protocol.isEmpty()) {
+      throw new IllegalArgumentException("Protocol name must not be empty");
+    }
+    if (handler == null) {
+      throw new IllegalArgumentException("Handler must not be null");
+    }
+    if (additionalHeaders != null) {
+      for (String name : additionalHeaders.keySet()) {
+        if (name.equalsIgnoreCase("Connection") || name.equalsIgnoreCase("Upgrade")) {
+          throw new IllegalArgumentException("Header [" + name + "] is set automatically by switchProtocols and must not appear in additionalHeaders");
+        }
+      }
+    }
+    this.switchProtocolsTarget = protocol;
+    this.switchProtocolsHeaders = additionalHeaders;
+    this.switchProtocolsHandler = handler;
+  }
+
   /**
    * Indicates whether the response body will actually be compressed when written. Unlike {@link #isCompress()}, which
    * only reports the configured intent, this also factors in everything currently known about the request and stream
    * state (such as the client's accepted encodings) to decide whether compression will really be applied.
    *
-   * @return {@code true} if compression has been requested and, as far as we know, it will be applied.
+   * @return {@code true} if compression has been requested and, as far as we know, it will be applied. Always false on
+   *     the HTTP/2 path (compression is handled at the TLS layer or not at all for h2c).
    */
   public boolean willCompress() {
-    return outputStream.willCompress();
+    return rawOutputStream == null && outputStream.willCompress();
+  }
+
+  private void rejectIfForbiddenTrailer(String name) {
+    if (HTTPValues.ForbiddenTrailers.Names.contains(name.toLowerCase(Locale.ROOT))) {
+      throw new IllegalArgumentException("Header name [" + name + "] is forbidden as a trailer per RFC 9110 §6.5.2");
+    }
   }
 }
 

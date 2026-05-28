@@ -18,6 +18,8 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
+import org.lattejava.http.io.MultipartConfiguration;
+import org.lattejava.http.io.MultipartFileUploadPolicy;
 import org.lattejava.http.server.internal.*;
 
 /**
@@ -69,6 +71,17 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
   }
 
   /**
+   * @return The actual port the first listener is bound to. Useful when the listener was configured with port 0
+   *     (OS-assigned). Returns -1 if the server has not been started.
+   */
+  public int getActualPort() {
+    if (servers.isEmpty()) {
+      return -1;
+    }
+    return servers.get(0).getActualPort();
+  }
+
+  /**
    * @return The HTTP Context or null if the server hasn't been started yet.
    */
   public HTTPContext getContext() {
@@ -79,6 +92,8 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
     if (context != null) {
       return this;
     }
+
+    validateConfiguration();
 
     // Set up the server logger and the static loggers
     logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
@@ -119,5 +134,27 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
     this.configuration = configuration;
     this.logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
     return this;
+  }
+
+  private void validateConfiguration() {
+    MultipartConfiguration multipart = configuration.getMultipartConfiguration();
+
+    // No file uploads → maxFileSize is irrelevant.
+    if (multipart.getFileUploadPolicy() != MultipartFileUploadPolicy.Allow) {
+      return;
+    }
+
+    long maxFileSize = multipart.getMaxFileSize();
+    // getMaxRequestBodySize never returns null because HTTPServerConfiguration.withMaxRequestBodySize always seeds the "*" fallback key.
+    long effectiveCap = HTTPTools.getMaxRequestBodySize("multipart/form-data", configuration.getMaxRequestBodySize());
+
+    // -1 means unlimited.
+    if (effectiveCap == -1) {
+      return;
+    }
+
+    if (maxFileSize > effectiveCap) {
+      throw new IllegalStateException("The MultipartConfiguration maxFileSize [" + maxFileSize + "] must not exceed the maxRequestBodySize for [multipart/form-data], which resolves to [" + effectiveCap + "]. Either lower maxFileSize or raise maxRequestBodySize for [multipart/form-data] (or its wildcard parent).");
+    }
   }
 }

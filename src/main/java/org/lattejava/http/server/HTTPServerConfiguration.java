@@ -18,33 +18,35 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
+import org.lattejava.http.server.internal.HTTP2RateLimits;
+import org.lattejava.http.server.internal.HTTP2Settings;
+
 /**
  * The HTTP Server configuration.
  *
  * @author Brian Pontarelli
  */
 public class HTTPServerConfiguration implements Configurable<HTTPServerConfiguration> {
-  public static final Map<String, Integer> DefaultMaxRequestSizes = Map.of(
-      "*", 128 * 1024 * 1024,                                   // 128 Megabytes
-      "application/x-www-form-urlencoded", 10 * 1024 * 1024     // 10 Megabytes
+  public static final Map<String, Long> DefaultMaxRequestSizes = Map.of(
+      "*", 128L * 1024 * 1024,                                  // 128 Megabytes
+      "application/x-www-form-urlencoded", 10L * 1024 * 1024    // 10 Megabytes
   );
 
   private final List<HTTPListenerConfiguration> listeners = new ArrayList<>();
 
-  private final Map<String, Integer> maxRequestBodySize = new HashMap<>(DefaultMaxRequestSizes);
+  private final Map<String, Long> maxRequestBodySize = new HashMap<>(DefaultMaxRequestSizes);
 
   private Path baseDir = Path.of("");
-
   private int chunkedBufferSize = 4 * 1024; // 4 Kilobytes
-
   private boolean compressByDefault = true;
-
   private String contextPath = "";
-
   private ExpectValidator expectValidator = new AlwaysContinueExpectValidator();
-
   private HTTPHandler handler;
-
+  private Duration http2HandlerReadTimeout = Duration.ofSeconds(10);
+  private Duration http2KeepAlivePingInterval;
+  private HTTP2RateLimits http2RateLimits = HTTP2RateLimits.defaults();
+  private HTTP2Settings http2Settings = HTTP2Settings.defaults();
+  private Duration http2SettingsAckTimeout = Duration.ofSeconds(10);
   private Duration initialReadTimeoutDuration = Duration.ofSeconds(2);
 
   private Instrumenter instrumenter;
@@ -55,7 +57,7 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   private int maxBytesToDrain = 256 * 1024; // 256 Kilobytes
 
-  private int maxPendingSocketConnections = 250;
+  private int maxPendingSocketConnections = 4096;
 
   private int maxRequestChunkSize = 1024 * 1024; // 1 Megabyte
 
@@ -130,6 +132,46 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public HTTPHandler getHandler() {
     return handler;
+  }
+
+  /**
+   * @return The duration the connection reader will wait for an HTTP/2 handler to consume a DATA frame from its
+   *     per-stream input pipe before cancelling the offending stream with RST_STREAM(CANCEL). Defaults to 10 seconds.
+   *     Flow control is the intended back-pressure mechanism — this is a safety net so a stuck or buggy handler cannot
+   *     freeze every other stream sharing the connection by blocking the reader thread on a full pipe.
+   */
+  public Duration getHTTP2HandlerReadTimeout() {
+    return http2HandlerReadTimeout;
+  }
+
+  /**
+   * @return The interval at which the server sends HTTP/2 PING frames to keep connections alive, or null if keep-alive
+   *     pings are disabled.
+   */
+  public Duration getHTTP2KeepAlivePingInterval() {
+    return http2KeepAlivePingInterval;
+  }
+
+  /**
+   * @return The HTTP/2 rate limits configuration.
+   */
+  public HTTP2RateLimits getHTTP2RateLimits() {
+    return http2RateLimits;
+  }
+
+  /**
+   * @return The HTTP/2 settings for this server.
+   */
+  public HTTP2Settings getHTTP2Settings() {
+    return http2Settings;
+  }
+
+  /**
+   * @return The duration the server waits for a SETTINGS ACK from the client before treating the connection as failed.
+   *     Defaults to 10 seconds.
+   */
+  public Duration getHTTP2SettingsAckTimeout() {
+    return http2SettingsAckTimeout;
   }
 
   /**
@@ -213,7 +255,7 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * @return the map keyed by Content-Type indicating the maximum size in bytes of the HTTP request body.  Defaults to
    *     128 Megabytes as a default, and 10 Megabytes for application/x-www-form-urlencoded.
    */
-  public Map<String, Integer> getMaxRequestBodySize() {
+  public Map<String, Long> getMaxRequestBodySize() {
     return maxRequestBodySize;
   }
 
@@ -421,6 +463,103 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
+   * Sets the duration the connection reader will wait for an HTTP/2 handler to consume a DATA frame from its per-stream
+   * input pipe. When the timeout elapses the offending stream is cancelled with RST_STREAM(CANCEL) and the reader
+   * proceeds to serve other streams on the same connection. Defaults to 10 seconds. Cannot be null.
+   *
+   * @param d The handler read timeout duration.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2HandlerReadTimeout(Duration d) {
+    Objects.requireNonNull(d, "You cannot set the HTTP/2 handler read timeout to null");
+    this.http2HandlerReadTimeout = d;
+    return this;
+  }
+
+  /**
+   * Sets the HPACK header table size advertised to the client in the initial SETTINGS frame. Defaults to 4096 (RFC 9113
+   * §6.5.2).
+   *
+   * @param size The header table size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2HeaderTableSize(int size) {
+    http2Settings = http2Settings.withHeaderTableSize(size);
+    return this;
+  }
+
+  /**
+   * Sets the initial stream-level flow-control window size advertised to the client. Defaults to 65535 (RFC 9113
+   * §6.9.2).
+   *
+   * @param size The initial window size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2InitialWindowSize(int size) {
+    http2Settings = http2Settings.withInitialWindowSize(size);
+    return this;
+  }
+
+  /**
+   * Sets the interval at which the server sends HTTP/2 PING frames to keep idle connections alive. Set to null to
+   * disable.
+   *
+   * @param d The ping interval duration, or null to disable keep-alive pings.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2KeepAlivePingInterval(Duration d) {
+    this.http2KeepAlivePingInterval = d;
+    return this;
+  }
+
+  /**
+   * Sets the maximum number of concurrent streams the server allows per connection. Defaults to unlimited.
+   *
+   * @param n The maximum number of concurrent streams.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2MaxConcurrentStreams(int n) {
+    http2Settings = http2Settings.withMaxConcurrentStreams(n);
+    return this;
+  }
+
+  /**
+   * Sets the maximum HTTP/2 frame size the server is willing to receive. Must be in the range [16384, 16777215] per RFC
+   * 9113 §6.5.2. Defaults to 16384.
+   *
+   * @param size The maximum frame size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2MaxFrameSize(int size) {
+    http2Settings = http2Settings.withMaxFrameSize(size);
+    return this;
+  }
+
+  /**
+   * Sets the maximum size of the header list the server is willing to accept. Defaults to unlimited.
+   *
+   * @param size The maximum header list size in bytes.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2MaxHeaderListSize(int size) {
+    http2Settings = http2Settings.withMaxHeaderListSize(size);
+    return this;
+  }
+
+  /**
+   * Sets the duration the server waits for a SETTINGS ACK from the client before treating the connection as failed.
+   * Defaults to 10 seconds.
+   *
+   * @param d The timeout duration. Cannot be null.
+   * @return This.
+   */
+  public HTTPServerConfiguration withHTTP2SettingsAckTimeout(Duration d) {
+    Objects.requireNonNull(d, "You cannot set the HTTP/2 settings ACK timeout to null");
+    this.http2SettingsAckTimeout = d;
+    return this;
+  }
+
+  /**
    * {@inheritDoc}
    */
   @Override
@@ -494,11 +633,11 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withMaxRequestBodySize(Map<String, Integer> maxRequestBodySize) {
+  public HTTPServerConfiguration withMaxRequestBodySize(Map<String, Long> maxRequestBodySize) {
     Objects.requireNonNull(maxRequestBodySize, "You cannot set the maximum request body size map to null");
     for (String contentType : maxRequestBodySize.keySet()) {
       Objects.requireNonNull(contentType, "You cannot specify a null value for content type");
-      Integer maxSize = maxRequestBodySize.get(contentType);
+      Long maxSize = maxRequestBodySize.get(contentType);
       Objects.requireNonNull(maxSize, "You may not specify a null value for the maximum request body size");
       if (maxSize != -1 && maxSize <= 0) {
         throw new IllegalArgumentException("The maximum request body size must be greater than 0 for [" + contentType + "]. Set to -1 to disable this limitation.");

@@ -54,10 +54,16 @@ public class ChunkedInputStream extends InputStream {
 
   private ChunkedBodyState state = ChunkedBodyState.ChunkSize;
 
+  private Map<String, List<String>> trailers;
+
   public ChunkedInputStream(PushbackInputStream delegate, int bufferSize, int maxChunkSize) {
     this.delegate = delegate;
     this.buffer = new byte[bufferSize];
     this.maxChunkSize = maxChunkSize;
+  }
+
+  public Map<String, List<String>> getTrailers() {
+    return trailers == null ? Map.of() : trailers;
   }
 
   @Override
@@ -123,11 +129,16 @@ public class ChunkedInputStream extends InputStream {
           chunkBytesRemaining = chunkSize;
           headerSizeHex.delete(0, headerSizeHex.length());
 
-          // A chunk size of 0 indicates this is the terminating chunk. Continue and we will expect the state machine
-          // to process the final CRLF and hit the Complete state.
+          // A chunk size of 0 indicates this is the terminating chunk. Push back any over-read bytes so parseTrailers
+          // sees the full byte stream from the start of the trailer section (or the bare CRLF if there are none).
           if (chunkSize == 0) {
-            state = nextState;
-            continue;
+            if (bufferIndex < bufferLength) {
+              delegate.push(buffer, bufferIndex, bufferLength - bufferIndex);
+              bufferIndex = bufferLength;
+            }
+            parseTrailers(delegate);
+            state = ChunkedBodyState.Complete;
+            break;
           }
         }
 
@@ -177,6 +188,52 @@ public class ChunkedInputStream extends InputStream {
     }
 
     return b1[0] & 0xFF;
+  }
+
+  private void addTrailerLine(String raw) {
+    int colon = raw.indexOf(':');
+    if (colon < 0) {
+      return; // malformed; skip rather than crash
+    }
+
+    String name = raw.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+    if (name.isEmpty() || HTTPValues.ForbiddenTrailers.Names.contains(name)) {
+      // RFC 9110 §6.5.2 forbidden trailers are silently dropped.
+      return;
+    }
+
+    String value = raw.substring(colon + 1).trim();
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+
+    trailers.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
+  }
+
+  private void parseTrailers(PushbackInputStream in) throws IOException {
+    // RFC 9112 §7.1.2: trailer-fields use the same syntax as header-fields. After the 0-chunk we have either:
+    //   "\r\n"                            (no trailers — bare terminator)
+    //   "Name: Value\r\n...\r\n\r\n"      (one or more trailers, ending in bare \r\n)
+    // Read line-by-line until a bare CRLF.
+    ByteArrayOutputStream line = new ByteArrayOutputStream(64);
+    int b;
+    while ((b = in.read()) != -1) {
+      if (b == '\r') {
+        int next = in.read();
+        if (next != '\n') {
+          throw new ParseException("Expected LF after CR in trailer section; got [" + next + "]");
+        }
+
+        if (line.size() == 0) {
+          return; // bare CRLF — end of trailer section
+        }
+
+        addTrailerLine(line.toString(StandardCharsets.US_ASCII));
+        line.reset();
+      } else {
+        line.write(b);
+      }
+    }
   }
 
   private void pushBackOverReadBytes() {

@@ -88,6 +88,9 @@ public class HTTPServerThread extends Thread {
         //   the server socket and fire up an HTTP worker, then we could consider seeing if we can improve performance here.
         Socket clientSocket = socket.accept();
         clientSocket.setSoTimeout((int) configuration.getInitialReadTimeoutDuration().toMillis());
+        if (clientSocket instanceof SSLSocket sslSocket) {
+          SecurityTools.configureALPN(sslSocket, listener);
+        }
         if (logger.isTraceEnabled()) {
           String listenerAddress = listener.getBindAddress().toString() + ":" + listener.getPort();
           logger.trace("[{}] Accepted inbound connection. [{}] existing connections.", listenerAddress, clients.size());
@@ -98,12 +101,24 @@ public class HTTPServerThread extends Thread {
         }
 
         Throughput throughput = new Throughput(configuration.getReadThroughputCalculationDelay().toMillis(), configuration.getWriteThroughputCalculationDelay().toMillis());
-        HTTPWorker runnable = new HTTPWorker(clientSocket, configuration, context, instrumenter, listener, throughput);
+        ClientConnection conn;
+        try {
+          conn = ProtocolSelector.select(clientSocket, configuration, context, instrumenter, listener, throughput);
+        } catch (IOException e) {
+          // Protocol selection failed (TLS handshake error, h2c-preface peek error, etc.). Close the accepted
+          // socket so the file descriptor does not leak; the outer accept loop continues.
+          logger.debug("Protocol selection failed; closing socket", e);
+          try {
+            clientSocket.close();
+          } catch (IOException ignore) {
+          }
+          continue;
+        }
         Thread client = Thread.ofVirtual()
                               .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
-                              .start(runnable);
+                              .start((Runnable) conn);
 
-        clients.add(new ClientInfo(client, runnable, throughput));
+        clients.add(new ClientInfo(client, conn, throughput));
       } catch (SocketTimeoutException ignore) {
         // Completely smother since this is expected with the SO_TIMEOUT setting in the constructor
         logger.debug("Nothing accepted. Cleaning up existing connections.");
@@ -124,10 +139,24 @@ public class HTTPServerThread extends Thread {
       }
     }
 
-    // Close all the client connections as cleanly as possible
+    // Close all the client connections as cleanly as possible.
+    // HTTP/2 connections get a GOAWAY(NO_ERROR) so the peer knows the server is shutting down gracefully.
+    for (ClientInfo client : clients) {
+      if (client.runnable() instanceof HTTP2Connection h2) {
+        h2.shutdown();
+      }
+    }
     for (ClientInfo client : clients) {
       client.thread().interrupt();
     }
+  }
+
+  /**
+   * @return The actual port the server socket is bound to. Useful when the listener was configured with port 0
+   *     (OS-assigned).
+   */
+  public int getActualPort() {
+    return socket.getLocalPort();
   }
 
   public void shutdown() {
@@ -141,7 +170,7 @@ public class HTTPServerThread extends Thread {
   }
 
   // - In theory we could hold onto some meta-data here that keeps track of how many requests we have processed on this thread and then exit.
-  record ClientInfo(Thread thread, HTTPWorker runnable, Throughput throughput) {
+  record ClientInfo(Thread thread, ClientConnection runnable, Throughput throughput) {
 
     public long getAge() {
       return System.currentTimeMillis() - runnable().getStartInstant();
@@ -182,8 +211,8 @@ public class HTTPServerThread extends Thread {
 
           long now = System.currentTimeMillis();
           Throughput throughput = client.throughput();
-          HTTPWorker worker = client.runnable();
-          HTTPWorker.State state = worker.state();
+          ClientConnection worker = client.runnable();
+          ClientConnection.State state = worker.state();
           long workerLastUsed = throughput.lastUsed();
           boolean readingSlow = false;
           boolean writingSlow = false;
@@ -195,20 +224,20 @@ public class HTTPServerThread extends Thread {
           long writeThroughput = -1;
 
           String badClientReason = "[" + threadId + "] Check worker in state [" + state + "]";
-          if (state == HTTPWorker.State.Read) {
-            // Here the SO_TIMEOUT set above or the Keep-Alive timeout in HTTPWorker will dictate if the socket has timed out. This prevents slow readers
+          if (state == ClientConnection.State.Read) {
+            // Here the SO_TIMEOUT set above or the Keep-Alive timeout in HTTP1Worker will dictate if the socket has timed out. This prevents slow readers
             // or network issues where the client reads 1 byte per timeout value (i.e. 1 byte per 2 seconds or something like that)
             readThroughput = throughput.readThroughput(now);
             badClient = readThroughput < minimumReadThroughput;
             readingSlow = badClient;
             badClientReason += " readingSlow=[" + readingSlow + "] readThroughput=[" + readThroughput + "] minimumReadThroughput=[" + minimumReadThroughput + "]";
-          } else if (state == HTTPWorker.State.Write) {
+          } else if (state == ClientConnection.State.Write) {
             // Check for slow clients when writing (or network issues)
             writeThroughput = throughput.writeThroughput(now);
             badClient = writeThroughput < minimumWriteThroughput;
             writingSlow = badClient;
             badClientReason += " writingSlow=[" + writingSlow + "] writeThroughput=[" + writeThroughput + "] minimumWriteThroughput=[" + minimumWriteThroughput + "]";
-          } else if (state == HTTPWorker.State.Process) {
+          } else if (state == ClientConnection.State.Process) {
             // Here lastUsed was the instant the last byte was read, so we calculate distance between that and now to see if it is beyond the timeout
             long waited = (now - workerLastUsed);
             badClient = waited > configuration.getProcessingTimeoutDuration().toMillis();

@@ -19,7 +19,9 @@ import module java.base;
 import module java.net.http;
 import module org.lattejava.http;
 import module org.testng;
+
 import java.nio.file.Files;
+import java.time.Duration;
 
 import static org.testng.Assert.*;
 
@@ -99,9 +101,7 @@ public class MultipartTest extends BaseTest {
         .withConfiguration(config -> config.withMultipartConfiguration(
             new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
                                         // Max file size is 2Mb
-                                        .withMaxFileSize(2 * 1024 * 1024)
-                                        // Max request size is 15 Mb
-                                        .withMaxRequestSize(15 * 1024 * 1024))
+                                        .withMaxFileSize(2 * 1024 * 1024))
         )
         .expectResponse("""
             HTTP/1.1 413 \r
@@ -179,11 +179,9 @@ public class MultipartTest extends BaseTest {
         .withFileSize(1024 * 1024)   // 1 Mb
         .withFileCount(15)           // 15 files
         .withConfiguration(config -> config.withMultipartConfiguration(
-            new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
-                                        // Max file size is 2 Megabytes
-                                        .withMaxFileSize(2 * 1024 * 1024)
-                                        // Max request size is 3 Mb
-                                        .withMaxRequestSize(3 * 1024 * 1024))
+                                               new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
+                                                                           .withMaxFileSize(2 * 1024 * 1024))
+                                           .withMaxRequestBodySize(Map.of("*", 3L * 1024 * 1024))
         )
         .expectResponse("""
             HTTP/1.1 413 \r
@@ -199,19 +197,14 @@ public class MultipartTest extends BaseTest {
   @Test(dataProvider = "schemes")
   public void post_server_configuration_requestTooBig_maxBodySize(String scheme) throws Exception {
     // Request too big, file size is ok, overall request size too big.
-    // - Not using the MultipartConfiguration, instead use the default max body size.
+    // - Total body size is bounded by maxRequestBodySize; 15 files × 1 MB = 15 MB exceeds the 3 MB cap.
     withScheme(scheme)
         .withFileSize(1024 * 1024)   // 1 Megabyte
         .withFileCount(15)           // 15 files
         .withConfiguration(config -> config.withMultipartConfiguration(
-                                               // Set the multipart configuration to something very large.
-                                               new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow)
-                                                                           // Max file size is 2 GB bytes
-                                                                           .withMaxFileSize(2L * 1024 * 1024 * 1024)
-                                                                           // Max request size is 5 GB
-                                                                           .withMaxRequestSize(5L * 1024 * 1024 * 1024))
+                                               new MultipartConfiguration().withFileUploadPolicy(MultipartFileUploadPolicy.Allow))
                                            // Max request size is 3 Megabytes
-                                           .withMaxRequestBodySize(Map.of("*", 3 * 1024 * 1024))
+                                           .withMaxRequestBodySize(Map.of("*", 3L * 1024 * 1024))
         )
         .expectResponse("""
             HTTP/1.1 413 \r
@@ -293,7 +286,7 @@ public class MultipartTest extends BaseTest {
         }
       };
 
-      HTTPServer server = makeServer(scheme, handler, null)
+      HTTPServer server = makeServer(scheme, handler, (Instrumenter) null)
           .withInitialReadTimeout(Duration.ofSeconds(30))
           .withKeepAliveTimeoutDuration(Duration.ofSeconds(30))
           .withMinimumWriteThroughput(1024)

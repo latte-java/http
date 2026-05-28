@@ -92,6 +92,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   private String queryString;
 
   private String scheme;
+  private Map<String, List<String>> trailers;
 
   /**
    * Constructs an empty request with an empty context path. All other fields are left at their defaults and are
@@ -259,6 +260,25 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
+   * @return true if the client signaled {@code TE: trailers} per RFC 9110 §10.1.4 — trailer fields will be honored on
+   *     the response.
+   */
+  public boolean acceptsTrailers() {
+    String te = getHeader(HTTPValues.Headers.TE);
+    if (te == null) {
+      return false;
+    }
+
+    for (String token : te.split(",")) {
+      if (token.trim().equalsIgnoreCase("trailers")) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Adds a single accept-encoding to the list of encodings the client will accept in the response body. These are
    * normally populated automatically from the {@code Accept-Encoding} request header.
    *
@@ -344,7 +364,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @param value The header value.
    */
   public void addHeader(String name, String value) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).add(value);
     decodeHeader(name, value);
   }
@@ -357,7 +377,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @param values The header values to add.
    */
   public void addHeaders(String name, String... values) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).addAll(List.of(values));
 
     for (String value : values) {
@@ -373,7 +393,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @param values The header values to add.
    */
   public void addHeaders(String name, Collection<String> values) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).addAll(values);
 
     for (String value : values) {
@@ -409,6 +429,20 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    */
   public void addLocales(Collection<Locale> locales) {
     this.locales.addAll(locales);
+  }
+
+  /**
+   * Adds a single trailer field received from the client after the request body. Trailers are valid only on chunked
+   * HTTP/1.1 requests and on HTTP/2 streams where the client signaled them via {@code TE: trailers}.
+   *
+   * @param name  The trailer field name (case-insensitive).
+   * @param value The trailer field value.
+   */
+  public void addTrailer(String name, String value) {
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    trailers.computeIfAbsent(name.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(value);
   }
 
   /**
@@ -1238,6 +1272,42 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
+   * Returns the first value of the named trailer field, or {@code null} if absent. Trailer fields are populated by the
+   * server after the request body has been fully read on chunked HTTP/1.1 and on HTTP/2 streams.
+   *
+   * @param name The trailer field name (case-insensitive).
+   * @return The first trailer value, or {@code null} if no such trailer was received.
+   */
+  public String getTrailer(String name) {
+    if (trailers == null) {
+      return null;
+    }
+    List<String> values = trailers.get(name.toLowerCase(Locale.ROOT));
+    return (values == null || values.isEmpty()) ? null : values.getFirst();
+  }
+
+  /**
+   * @return An unmodifiable view of all trailer fields received with this request, keyed by lowercased name. Returns an
+   *     empty map if no trailers were received.
+   */
+  public Map<String, List<String>> getTrailerMap() {
+    return trailers == null ? Map.of() : trailers;
+  }
+
+  /**
+   * Returns all values for the named trailer field.
+   *
+   * @param name The trailer field name (case-insensitive).
+   * @return The list of values for this trailer, or an empty list if no such trailer was received.
+   */
+  public List<String> getTrailers(String name) {
+    if (trailers == null) {
+      return List.of();
+    }
+    return trailers.getOrDefault(name.toLowerCase(Locale.ROOT), List.of());
+  }
+
+  /**
    * Returns the value of the {@code Transfer-Encoding} header, or {@code null} if it is absent.
    *
    * @return The transfer encoding, or {@code null}.
@@ -1309,6 +1379,13 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
+   * @return {@code true} if any trailer fields were received with this request.
+   */
+  public boolean hasTrailers() {
+    return trailers != null && !trailers.isEmpty();
+  }
+
+  /**
    * Returns whether the request body uses chunked transfer encoding, based on the {@code Transfer-Encoding} header.
    *
    * @return {@code true} if the request is chunked.
@@ -1327,6 +1404,13 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
+   * @return True if this request was received over HTTP/2 (protocol set to {@code HTTP/2.0}).
+   */
+  public boolean isHTTP2() {
+    return "HTTP/2.0".equals(protocol);
+  }
+
+  /**
    * Determines if the request is asking for the server to keep the connection alive. This is based on the Connection
    * header.
    * <p>
@@ -1337,6 +1421,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @return True if the Connection header is missing or not `Close`.
    */
   public boolean isKeepAlive() {
+    if (isHTTP2()) {
+      return true;
+    }
+
     // Connection is a comma-separated token list per RFC 9110 §7.6.1, e.g. "close, upgrade". Exact equality misclassifies any
     // multi-token value, so split into tokens and check membership.
     var tokens = connectionTokens();

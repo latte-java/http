@@ -40,8 +40,6 @@ public class MultipartStream {
 
   private int boundaryStart;
 
-  private long bytesRead;
-
   private int current;
 
   private int end;
@@ -326,6 +324,10 @@ public class MultipartStream {
       if (isFile) {
         if (multipartConfiguration.getFileUploadPolicy() == MultipartFileUploadPolicy.Allow) {
           files.add(processor.toFileInfo());
+          int maxFileCount = multipartConfiguration.getMaxFileCount();
+          if (maxFileCount != -1 && files.size() > maxFileCount) {
+            throw new ContentTooLargeException(maxFileCount, "The maximum number of files in a multipart stream has been exceeded. The maximum file count is [" + maxFileCount + "].");
+          }
         }
       } else {
         parameters.computeIfAbsent(name, _ -> new LinkedList<>()).add(processor.toValue());
@@ -358,18 +360,6 @@ public class MultipartStream {
 
       end += read;
       start += read;
-
-      // Keep track of all bytes read for this multipart stream. Fail if the length has been exceeded. With the previous `start += end`
-      // arithmetic, `start` grew quadratically across iterations whenever `input.read` returned fewer bytes than requested — a routine
-      // condition under TCP segmentation or TLS record boundaries — so `start` would overshoot the real write offset, leaving gaps and
-      // misattributed bytes in the buffer and eventually throwing IndexOutOfBoundsException on an overrun. See
-      // docs/security/audit-2026-04-20.md Vuln 5.
-      bytesRead += read;
-      long maximumRequestSize = multipartConfiguration.getMaxRequestSize();
-      if (bytesRead > maximumRequestSize) {
-        String detailedMessage = "The maximum request size of multipart stream has been exceeded. The maximum request size is [" + maximumRequestSize + "] bytes.";
-        throw new ContentTooLargeException(maximumRequestSize, detailedMessage);
-      }
     }
 
     return true;
