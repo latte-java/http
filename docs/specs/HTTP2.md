@@ -636,6 +636,20 @@ The likely productive next investigation is on flow control, not writer-thread a
 
 **Verification.** `latte test --excludePerformance --excludeTimeouts` → 2920/2920 pass. h2spec — see updated baseline in the Bug ledger below.
 
+### Open follow-ups (post-2026-05-27)
+
+Consolidated list of work deferred out of the writer-thread coalescing branch. Each links to the detailed analysis elsewhere in this document.
+
+1. **Streaming-scenario throughput investigation (`h2-stream` / `h2-large-response`).** Both pinned at 4.1k, ~9× behind Helidon; writer-thread coalescing produced zero movement, falsifying the writer-thread-architecture hypothesis for these scenarios (see "Performance findings (2026-05-27)" above). Likely root cause is flow control. Next steps: bump the default per-stream send window (currently 65535), JFR-profile `h2-stream` post-bump, and resolve follow-up #2. This is the highest-value perf follow-up.
+
+2. **Connection-level send-window flow-control enforcement (RFC 9113 §6.9.1).** `HTTP2Connection.connectionSendWindow` is tracked and notified on inbound connection-level `WINDOW_UPDATE`, but nothing on the send side ever consumes it or waits on `connectionSendWindowLock` — connection-level credit is not enforced (see the 2026-05-26 audit note above). Correctness issue; not perf-critical at the default 65535 window, but related to follow-up #1.
+
+3. **SETTINGS_INITIAL_WINDOW_SIZE flow-control failures (h2spec §6.5.3/1, §6.9.1/1, §6.9.2/1, §6.9.2/2).** Four deterministic h2spec failures where the server does not honor peer-imposed window constraints or detect a window-driven flow-control violation (see Bug ledger below). Same flow-control subsystem as follow-ups #1 and #2 — worth tackling together.
+
+4. **Handler-vs-reader race (h2spec flaky failures).** Eight tests share a "got DATA, expected error frame" race where the handler produces a 200 before the reader detects a protocol violation (see "Flaky failures" in the Bug ledger). Architectural fix: defer handler dispatch until the read loop has a stable protocol-error verdict, or run validators synchronously before handler scheduling.
+
+5. **Plan F writer-thread options 2 and 3 — likely not worth pursuing as written.** Option 2 (MPSC ring buffer) and option 3 (per-stream local buffering) target the same writer-thread layer that the 2026-05-27 results showed is *not* the `h2-stream` bottleneck. They may yield further small-response gains (on top of the +84% `h2-hello` win) but will not close the streaming gap to Helidon. If pursued, the success criterion must not be `h2-stream`. Detailed design in "writer-thread architecture for h2 DATA emission" above (options 1–3).
+
 ---
 
 ## Bug ledger
