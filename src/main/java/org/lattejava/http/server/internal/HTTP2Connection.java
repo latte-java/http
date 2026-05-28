@@ -670,6 +670,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       // RFC 9113 §5.1 — DATA on a recently-closed stream is a STREAM_CLOSED connection error.
       if (isRecentlyClosed(f.streamId())) {
         goAway(HTTP2ErrorCode.STREAM_CLOSED);
+        return;
+      }
+      // RFC 9113 §5.1 — DATA on an idle (never-opened) client-initiated stream is a connection-level PROTOCOL_ERROR.
+      // Client-initiated streams are odd-numbered; stream IDs beyond highestSeenStreamId have never been opened.
+      if (f.streamId() > highestSeenStreamId && (f.streamId() & 1) == 1) {
+        goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+        return;
       }
       // Truly unknown stream ID: ignore per §6.1.
       return;
