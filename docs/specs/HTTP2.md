@@ -2,7 +2,7 @@
 
 Tracking document for RFC 9113 (HTTP/2) and RFC 7541 (HPACK) conformance. This is the always-current reference for HTTP/2 in this codebase. The dated implementation history lives in `docs/superpowers/specs/2026-05-05-http2-design.md`.
 
-Conformance: h2spec sanity passes (generic/1); full suite run pending. gRPC interop verified for unary + server-streaming RPC patterns.
+Conformance: the full h2spec v2.6.0 suite (147 tests) has been run repeatedly — see the Bug ledger below for the current pass/fail breakdown and the remaining flow-control and handler-vs-reader-race failures. gRPC interop verified for unary, server-streaming, client-streaming, and bidi-streaming RPC patterns.
 
 ## Legend
 
@@ -642,7 +642,7 @@ Consolidated list of work deferred out of the writer-thread coalescing branch. E
 
 1. **Streaming-scenario throughput investigation (`h2-stream` / `h2-large-response`).** Both pinned at 4.1k, ~9× behind Helidon; writer-thread coalescing produced zero movement, falsifying the writer-thread-architecture hypothesis for these scenarios (see "Performance findings (2026-05-27)" above). Likely root cause is flow control. Next steps: bump the default per-stream send window (currently 65535), JFR-profile `h2-stream` post-bump, and resolve follow-up #2. This is the highest-value perf follow-up.
 
-2. **Connection-level send-window flow-control enforcement (RFC 9113 §6.9.1).** `HTTP2Connection.connectionSendWindow` is tracked and notified on inbound connection-level `WINDOW_UPDATE`, but nothing on the send side ever consumes it or waits on `connectionSendWindowLock` — connection-level credit is not enforced (see the 2026-05-26 audit note above). Correctness issue; not perf-critical at the default 65535 window, but related to follow-up #1.
+2. **Connection-level send-window flow-control enforcement (RFC 9113 §6.9.1) — resolved on this branch.** Outbound DATA now consumes connection-level credit via `HTTP2ConnectionWindow`, acquired in `HTTP2OutputStream` alongside the per-stream window (stream credit acquired first; surplus stream credit returned when the connection window is the tighter bound). The reader replenishes it on a stream-0 `WINDOW_UPDATE`. The same change made the per-stream check+consume atomic (`HTTP2Stream.acquireSendWindow` / `tryAcquireSendWindow`), closing a TOCTOU against a concurrent `SETTINGS_INITIAL_WINDOW_SIZE` decrease. Because this reworks the flow-control subsystem, the §6.9.x deterministic failures in follow-up #3 should be re-measured with h2spec.
 
 3. **SETTINGS_INITIAL_WINDOW_SIZE flow-control failures (h2spec §6.5.3/1, §6.9.1/1, §6.9.2/1, §6.9.2/2).** Four deterministic h2spec failures where the server does not honor peer-imposed window constraints or detect a window-driven flow-control violation (see Bug ledger below). Same flow-control subsystem as follow-ups #1 and #2 — worth tackling together.
 
@@ -664,6 +664,8 @@ Full h2spec v2.6.0: 147 tests total. The suite is **flaky on a real developer ma
 - 2026-05-27 pre-existing bug fixes landed (`39d0a1b`, `92d774d`, `fe691cf`) — three deterministic failures resolved.
 
 ### Remaining deterministic failures
+
+> **Note (post-flow-control rework):** the failures recorded below predate the connection-level flow-control enforcement and atomic stream-window acquire landed on this branch (see Open follow-up #2). The §6.5.3/1, §6.9.1/1, and §6.9.2/1 results should be re-measured against the new code. §6.9.2/2 is **not** addressed — the server still applies a window-shrinking SETTINGS without raising GOAWAY(FLOW_CONTROL_ERROR), so that violation-detection gap remains open.
 
 **Root cause: SETTINGS_INITIAL_WINDOW_SIZE flow-control (3 failures).**
 The server does not honor per-stream or connection-level flow-control window limits when `SETTINGS_INITIAL_WINDOW_SIZE` is used to constrain send windows. Tests that depend on the server respecting a window size of 1, or a mid-connection `SETTINGS_INITIAL_WINDOW_SIZE` change, time out waiting for a DATA frame that never arrives. (Prior documentation listed the symptom as "unexpected EOF"; current symptom is "Timeout" — the connection now hangs rather than aborting, presumably because of an unrelated 2026-05-09 cleanup change to error-path teardown.)
@@ -700,6 +702,8 @@ These manifest 1–4 times out of every 6 runs at fixed commit. The architectura
 ---
 
 ## Roadmap
+
+**Status:** Phases 1–3 are complete (frame codec, HPACK, stream state machine, flow control, `HTTP2Connection` runtime, `ProtocolSelector`, ALPN, DoS limits, and all three transport modes — h2-over-TLS, h2c prior-knowledge, and h2c via Upgrade/101 — are live). Phase 4 is substantially complete: the h2spec suite has been run extensively (remaining failures tracked in the Bug ledger above — not yet a fully clean run), and gRPC interop plus JDK HttpClient round-trips are verified. Phase 5 benchmarks are published (see Performance summary). The one outstanding conformance item is a fully clean h2spec run.
 
 **Phase 1 — Foundations:**
 - 101 Switching Protocols hook on `HTTPResponse` (h2c-Upgrade prerequisite; reusable for future WebSockets).
