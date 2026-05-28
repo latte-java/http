@@ -47,8 +47,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   private final HTTPBuffers buffers;
   private final HTTPServerConfiguration configuration;
-  // Lock object used to notify handler threads waiting on connection-level send-window credit.
-  private final Object connectionSendWindowLock = new Object();
+  // Connection-level send window (RFC 9113 §6.9). Shared by every per-stream writer; replenished by the reader thread
+  // on a stream-0 WINDOW_UPDATE. Starts at the HTTP/2 default of 65535 octets.
+  private final HTTP2ConnectionWindow connectionSendWindow = new HTTP2ConnectionWindow(65535);
   private final HTTPContext context;
   private final Instrumenter instrumenter;
   private final HTTPListenerConfiguration listener;
@@ -73,9 +74,6 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final Map<Integer, BlockingQueue<byte[]>> streamPipes = new ConcurrentHashMap<>();
   private final Throughput throughput;
   private final BlockingQueue<HTTP2Frame> writerQueue = new LinkedBlockingQueue<>(128);
-  // Connection-level send window (RFC 9113 §6.9). Initial value is the HTTP/2 default (65535).
-  // Tracked only for overflow detection; not yet used to throttle outbound DATA frames.
-  private int connectionSendWindow = 65535;
   private volatile boolean goawaySent;
   private long handledRequests;
   private volatile int highestSeenStreamId = 0;
@@ -846,14 +844,11 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         return;
       }
       // RFC 9113 §6.9.1: connection send-window overflow is a FLOW_CONTROL_ERROR.
-      if ((long) connectionSendWindow + f.windowSizeIncrement() > Integer.MAX_VALUE) {
+      if (connectionSendWindow.available() + f.windowSizeIncrement() > Integer.MAX_VALUE) {
         goAway(HTTP2ErrorCode.FLOW_CONTROL_ERROR);
         return;
       }
-      connectionSendWindow += f.windowSizeIncrement();
-      synchronized (connectionSendWindowLock) {
-        connectionSendWindowLock.notifyAll();
-      }
+      connectionSendWindow.increment(f.windowSizeIncrement());
       return;
     }
     // RFC 9113 §6.9: zero increment on a stream window is a stream error PROTOCOL_ERROR.
@@ -1175,7 +1170,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
           return;
         }
       }
-      delegate = new HTTP2OutputStream(stream, writerQueue, peerSettings.maxFrameSize());
+      delegate = new HTTP2OutputStream(stream, writerQueue, connectionSendWindow, peerSettings.maxFrameSize());
     }
 
     private void emitTrailers() {
@@ -1189,12 +1184,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       synchronized (encoder) {
         trailerBlock = encoder.encode(trailerFields);
       }
-      try {
-        writerQueue.put(new HTTP2Frame.HeadersFrame(stream.streamId(),
-            HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
-      } catch (InterruptedException ignore) {
-        Thread.currentThread().interrupt();
-      }
+      // Route through enqueueForWriter (not a raw writerQueue.put) so a dead writer is detected and the offer is
+      // bounded, matching every other handler-side enqueue rather than parking until interrupt on a full queue.
+      enqueueForWriter(new HTTP2Frame.HeadersFrame(stream.streamId(),
+          HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
     }
   }
 

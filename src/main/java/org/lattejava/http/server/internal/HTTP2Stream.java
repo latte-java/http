@@ -61,6 +61,21 @@ public class HTTP2Stream {
     return declaredContentLength == -1 || receivedDataBytes == declaredContentLength;
   }
 
+  /**
+   * Atomically waits until the send window is positive, then consumes {@code min(want, available)} octets and returns
+   * the amount consumed. Used by the per-stream writer so the window check and the consume are a single synchronized
+   * step: a concurrent SETTINGS-induced INITIAL_WINDOW_SIZE change cannot wedge between them and force a spurious
+   * underflow. {@code timeoutMillis} bounds each wait so the caller stays responsive to interruption and teardown.
+   */
+  public synchronized int acquireSendWindow(int want, long timeoutMillis) throws InterruptedException {
+    while (sendWindow <= 0) {
+      wait(timeoutMillis);
+    }
+    int grant = (int) Math.min(want, sendWindow);
+    sendWindow -= grant;
+    return grant;
+  }
+
   public synchronized void consumeReceiveWindow(int bytes) {
     if (bytes > receiveWindow) {
       throw new IllegalStateException("Stream [" + streamId + "] receive-window underflow: needed [" + bytes + "], have [" + receiveWindow + "]");
@@ -91,6 +106,14 @@ public class HTTP2Stream {
     return receiveWindow;
   }
 
+  /**
+   * Returns send-window credit that was acquired but not used — for example when the connection-level window was the
+   * tighter constraint and granted fewer octets than this stream's window did.
+   */
+  public synchronized void releaseSendWindow(int bytes) {
+    sendWindow += bytes;
+  }
+
   public synchronized long sendWindow() {
     return sendWindow;
   }
@@ -105,6 +128,19 @@ public class HTTP2Stream {
 
   public int streamId() {
     return streamId;
+  }
+
+  /**
+   * Non-blocking, all-or-nothing send-window acquire: consumes {@code want} octets and returns {@code true} only if
+   * the full amount is available; otherwise consumes nothing and returns {@code false}. Backs the single-frame fast
+   * path in {@link HTTP2OutputStream}.
+   */
+  public synchronized boolean tryAcquireSendWindow(int want) {
+    if (sendWindow < want) {
+      return false;
+    }
+    sendWindow -= want;
+    return true;
   }
 
   private static State transition(State s, Event e) {

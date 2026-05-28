@@ -19,6 +19,7 @@ import module java.base;
  */
 public class HTTP2OutputStream extends OutputStream {
   private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+  private final HTTP2ConnectionWindow connectionWindow;
   private final int peerMaxFrameSize;
   private final HTTP2Stream stream;
   private final BlockingQueue<HTTP2Frame> writerQueue;
@@ -26,9 +27,19 @@ public class HTTP2OutputStream extends OutputStream {
   private boolean closed;
   private boolean trailersFollow;
 
+  /**
+   * Test/standalone constructor with no connection-level flow control. Uses an effectively unbounded connection
+   * window, so only the per-stream window throttles output. Production code must use the
+   * {@link #HTTP2OutputStream(HTTP2Stream, BlockingQueue, HTTP2ConnectionWindow, int)} overload.
+   */
   public HTTP2OutputStream(HTTP2Stream stream, BlockingQueue<HTTP2Frame> writerQueue, int peerMaxFrameSize) {
+    this(stream, writerQueue, new HTTP2ConnectionWindow(Integer.MAX_VALUE), peerMaxFrameSize);
+  }
+
+  public HTTP2OutputStream(HTTP2Stream stream, BlockingQueue<HTTP2Frame> writerQueue, HTTP2ConnectionWindow connectionWindow, int peerMaxFrameSize) {
     this.stream = stream;
     this.writerQueue = writerQueue;
+    this.connectionWindow = connectionWindow;
     this.peerMaxFrameSize = peerMaxFrameSize;
   }
 
@@ -69,66 +80,69 @@ public class HTTP2OutputStream extends OutputStream {
 
   private void flushAndFragment(boolean endStream) throws IOException {
     int size = buffer.size();
-    // Fast path: the buffered payload fits in a single DATA frame AND we have enough send-window credit
-    // right now. Avoids the byte[]-per-chunk copy in the loop below. Hot for streaming handlers that
+    // Fast path: the buffered payload fits in a single DATA frame AND the full credit is available right now in BOTH
+    // the stream and connection windows. The all-or-nothing tryAcquire calls make each check+consume one atomic step,
+    // so a concurrent SETTINGS-induced window decrease (RFC 9113 §6.9.2) cannot wedge between them and force a
+    // spurious underflow. Avoids the byte[]-per-chunk copy in the loop below; hot for streaming handlers that
     // write+flush in chunks already sized to a single frame.
-    if (size > 0 && size <= peerMaxFrameSize && stream.sendWindow() >= size) {
-      byte[] piece = buffer.toByteArray();
-      buffer.reset();
-      stream.consumeSendWindow(size);
-      try {
-        writerQueue.put(new HTTP2Frame.DataFrame(stream.streamId(), endStream ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new InterruptedIOException();
+    if (size > 0 && size <= peerMaxFrameSize && stream.tryAcquireSendWindow(size)) {
+      if (connectionWindow.tryAcquire(size)) {
+        byte[] piece = buffer.toByteArray();
+        buffer.reset();
+        enqueue(new HTTP2Frame.DataFrame(stream.streamId(), endStream ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
+        return;
       }
-      return;
+      // Connection window can't cover the whole frame right now; return the stream credit and fall to the slow path.
+      stream.releaseSendWindow(size);
     }
 
     byte[] all = buffer.toByteArray();
     buffer.reset();
     int off = 0;
     while (off < all.length) {
-      // Block on flow-control if the send window is exhausted. The predicate MUST stay inside this
-      // synchronized block: a previous shape with the while-condition outside the monitor caused a
-      // classic lost-wakeup — a WINDOW_UPDATE-driven notifyAll arriving between the unlocked
-      // sendWindow() read and the wait() acquire would be lost, stalling the producer for the full
-      // 100 ms wait timeout per credit-starved chunk. Fixed in commit 2829cc4. Signed comparison —
-      // the window may be negative after a SETTINGS-induced INITIAL_WINDOW_SIZE decrease (RFC 9113 §6.9.2).
-      synchronized (stream) {
-        while (stream.sendWindow() <= 0) {
-          try {
-            stream.wait(100);
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new InterruptedIOException();
-          }
-        }
+      // RFC 9113 §6.9.1: outbound DATA must fit within BOTH the stream and connection send windows, so each frame is
+      // capped at min(streamWindow, connectionWindow, maxFrameSize, remaining). Acquire stream credit first (waiting
+      // on the per-stream monitor blocks no other stream), then connection credit for that grant. Each acquire is an
+      // atomic wait+consume, closing the lost-wakeup (WINDOW_UPDATE notify racing an unlocked read+wait; fixed in
+      // commit 2829cc4) and the consume-underflow race. If the connection window is the tighter bound, return the
+      // surplus stream credit so accounting stays exact.
+      int want = Math.min(peerMaxFrameSize, all.length - off);
+      int streamGrant;
+      try {
+        streamGrant = stream.acquireSendWindow(want, 100);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new InterruptedIOException();
       }
-      // Cap the chunk to the current send window so we never wait when we have any credit.
-      // This is the RFC 9113 §6.9.1 flow: send up to min(window, maxFrameSize, remaining) bytes at a time.
-      int remaining = all.length - off;
-      int chunk = Math.min(Math.min(peerMaxFrameSize, remaining), (int) Math.min(stream.sendWindow(), Integer.MAX_VALUE));
-      stream.consumeSendWindow(chunk);
+      int chunk;
+      try {
+        chunk = connectionWindow.acquire(streamGrant, 100);
+      } catch (InterruptedException e) {
+        stream.releaseSendWindow(streamGrant);
+        Thread.currentThread().interrupt();
+        throw new InterruptedIOException();
+      }
+      if (chunk < streamGrant) {
+        stream.releaseSendWindow(streamGrant - chunk);
+      }
       byte[] piece = new byte[chunk];
       System.arraycopy(all, off, piece, 0, chunk);
       off += chunk;
       boolean last = (off >= all.length) && endStream;
-      try {
-        writerQueue.put(new HTTP2Frame.DataFrame(stream.streamId(), last ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new InterruptedIOException();
-      }
+      enqueue(new HTTP2Frame.DataFrame(stream.streamId(), last ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
     }
     // If endStream and the buffer was empty, still emit a zero-length DATA frame with END_STREAM.
     if (endStream && all.length == 0) {
-      try {
-        writerQueue.put(new HTTP2Frame.DataFrame(stream.streamId(), HTTP2Frame.FLAG_END_STREAM, new byte[0]));
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new InterruptedIOException();
-      }
+      enqueue(new HTTP2Frame.DataFrame(stream.streamId(), HTTP2Frame.FLAG_END_STREAM, new byte[0]));
+    }
+  }
+
+  private void enqueue(HTTP2Frame.DataFrame frame) throws InterruptedIOException {
+    try {
+      writerQueue.put(frame);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new InterruptedIOException();
     }
   }
 }

@@ -8,6 +8,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
+import org.lattejava.http.server.internal.HTTP2ConnectionWindow;
 import org.lattejava.http.server.internal.HTTP2Frame;
 import org.lattejava.http.server.internal.HTTP2OutputStream;
 import org.lattejava.http.server.internal.HTTP2Stream;
@@ -15,6 +16,46 @@ import org.lattejava.http.server.internal.HTTP2Stream;
 import static org.testng.Assert.*;
 
 public class HTTP2OutputStreamFragmentationTest {
+  /**
+   * RFC 9113 §6.9.1 — outbound DATA must respect BOTH the stream and connection send windows. With the stream window
+   * wide open but the connection window at 10 octets, the first frame must be capped at 10 (not maxFrameSize=16), then
+   * the writer blocks until a stream-0 WINDOW_UPDATE replenishes the connection window, after which the rest flows
+   * fragmented by maxFrameSize.
+   */
+  @Test
+  public void connection_window_caps_chunk_and_blocks_when_exhausted() throws Exception {
+    var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
+    var stream = new HTTP2Stream(1, 65535, 65535);
+    var connectionWindow = new HTTP2ConnectionWindow(10);
+    var os = new HTTP2OutputStream(stream, queue, connectionWindow, 16);
+
+    Thread.ofVirtual().start(() -> {
+      try {
+        Thread.sleep(50);
+        connectionWindow.increment(100);
+      } catch (InterruptedException ignore) {
+        Thread.currentThread().interrupt();
+      }
+    });
+
+    os.write(new byte[30]);
+    os.close();
+
+    var f1 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
+    assertNotNull(f1, "First DATA frame should arrive within 2 seconds");
+    assertEquals(f1.payload().length, 10, "First frame capped by the 10-octet connection window");
+    assertEquals(f1.flags(), 0);
+
+    var f2 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
+    assertNotNull(f2, "Second DATA frame should arrive after the connection WINDOW_UPDATE");
+    assertEquals(f2.payload().length, 16, "Remaining bytes fragmented by maxFrameSize");
+
+    var f3 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
+    assertNotNull(f3);
+    assertEquals(f3.payload().length, 4);
+    assertEquals(f3.flags(), HTTP2Frame.FLAG_END_STREAM);
+  }
+
   @Test
   public void empty_close_emits_zero_length_end_stream() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>();
