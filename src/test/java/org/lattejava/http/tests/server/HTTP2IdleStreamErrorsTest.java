@@ -92,9 +92,12 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * RFC 9113 §3.5 — when the client sends the correct connection preface but then sends a frame that is not a SETTINGS
-   * frame, the server must respond with {@code GOAWAY(PROTOCOL_ERROR)} and then close the connection cleanly with a TCP
-   * FIN, not a RST.
+   * Smoke test for the invalid-preface response path. Verifies the server delivers a GOAWAY frame and closes the
+   * connection cleanly (no SocketException on read).
+   *
+   * <p>RFC 9113 §3.5 — when the client sends the correct connection preface but then sends a frame that is not a
+   * SETTINGS frame, the server must respond with {@code GOAWAY(PROTOCOL_ERROR)} and then close the connection cleanly
+   * with a TCP FIN, not a RST.
    *
    * <p>h2spec §3.5/2: the server must emit GOAWAY and the client must be able to read it before the connection closes.
    * A TCP RST prevents the client from reading the GOAWAY frame. In Java, RST manifests as a
@@ -104,6 +107,13 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
    * <p>The h2c prior-knowledge path is used: {@code ProtocolSelector} validates and consumes the preface, then
    * {@code HTTP2Connection} reads the peer's first frame. RFC 9113 §3.5 requires that first frame to be a SETTINGS
    * frame. Sending anything else triggers the {@code GOAWAY(PROTOCOL_ERROR)} path.
+   *
+   * <p>NOTE: this test does NOT deterministically detect the RST-vs-FIN regression that motivated the
+   * {@code socket.shutdownOutput()} fix in commit fe691cf. On loopback the kernel-side race window is too narrow to
+   * reliably trigger RST during a Java {@code Socket.read()}. The test passes with or without the fix in this
+   * environment. The {@code shutdownOutput()} fix is mechanically correct (RFC 9113 expects GOAWAY+FIN, not RST, and
+   * {@code shutdownOutput()} sends FIN immediately); the regression manifestation requires a slow link or specific
+   * kernel tuning to reproduce.
    */
   @Test
   public void invalid_preface_response_completes_cleanly_with_goaway_not_rst() throws Exception {
@@ -170,7 +180,9 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Opens an h2c prior-knowledge connection and drains the server's initial SETTINGS + SETTINGS ACK.
+   * Opens an h2c prior-knowledge connection and drains the server's initial handshake frames until SETTINGS ACK is
+   * observed. The loop is robust to additional connection-level frames the server may interleave (e.g.
+   * WINDOW_UPDATE).
    */
   private Socket openH2cConnection(int port) throws Exception {
     var sock = new Socket("127.0.0.1", port);
@@ -179,11 +191,24 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
     out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0}); // empty SETTINGS
     out.flush();
 
+    // Drain server frames until we have observed the server's SETTINGS ACK.
+    // Robust to additional connection-level frames the server may interleave (e.g. WINDOW_UPDATE).
     var in = sock.getInputStream();
-    byte[] header = in.readNBytes(9);
-    int length = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
-    in.readNBytes(length);
-    in.readNBytes(9); // SETTINGS ACK
+    while (true) {
+      byte[] header = in.readNBytes(9);
+      if (header.length != 9) {
+        throw new IOException("Unexpected EOF while draining server handshake frames");
+      }
+      int length = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
+      int type = header[3] & 0xFF;
+      int flags = header[4] & 0xFF;
+      if (length > 0) {
+        in.readNBytes(length);
+      }
+      if (type == 0x4 && (flags & 0x1) != 0) {
+        break; // saw SETTINGS ACK — handshake complete
+      }
+    }
     return sock;
   }
 
