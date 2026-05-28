@@ -130,6 +130,63 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
+   * RFC 9113 §6.9.1 — after the peer sets SETTINGS_INITIAL_WINDOW_SIZE=1, a stream opened afterward must not send a
+   * DATA frame larger than the 1-octet send window. Frames on one connection are processed in order, so sending
+   * SETTINGS(IWS=1) immediately before HEADERS deterministically opens the stream with a 1-octet send window.
+   */
+  @Test
+  public void initial_window_size_one_caps_first_data_frame() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      var os = res.getOutputStream();
+      os.write(new byte[10]);
+      os.close();
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // SETTINGS with SETTINGS_INITIAL_WINDOW_SIZE (0x4) = 1.
+        writeFrameHeader(out, 6, 0x4, 0, 0);
+        out.write(new byte[]{0, 0x4, 0, 0, 0, 1});
+        // HEADERS: GET /, END_HEADERS | END_STREAM.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int dataLen = readFirstDataFrameLength(sock.getInputStream());
+        assertTrue(dataLen >= 0, "Expected a DATA frame, got EOF");
+        assertTrue(dataLen <= 1, "First DATA frame must respect the 1-octet send window; got [" + dataLen + "]");
+      }
+    }
+  }
+
+  /**
+   * Read and discard frames until a DATA frame (type {@code 0x0}) arrives. Returns its payload length, or {@code -1}
+   * on EOF.
+   */
+  private int readFirstDataFrameLength(InputStream in) throws Exception {
+    while (true) {
+      int b0 = in.read();
+      if (b0 == -1) {
+        return -1;
+      }
+      byte[] rest = new byte[8];
+      int read = in.readNBytes(rest, 0, 8);
+      if (read != 8) {
+        return -1;
+      }
+      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
+      int type = rest[2] & 0xFF;
+      in.readNBytes(length);
+      if (type == 0x0) {  // DATA
+        return length;
+      }
+    }
+  }
+
+  /**
    * RFC 9113 §8.4 — clients MUST NOT send PUSH_PROMISE frames. The server must respond with
    * {@code GOAWAY(PROTOCOL_ERROR)} (error code {@code 0x1}).
    */
