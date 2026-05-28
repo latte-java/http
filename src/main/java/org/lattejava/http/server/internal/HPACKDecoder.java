@@ -14,9 +14,14 @@ import module java.base;
  */
 public class HPACKDecoder {
   private final HPACKDynamicTable dynamicTable;
+  // RFC 7541 §6.3 — the largest dynamic table size a peer size-update may request, equal to the
+  // SETTINGS_HEADER_TABLE_SIZE we advertised (captured here as the table's initial maximum). A size update above
+  // this is a COMPRESSION_ERROR.
+  private final int maxDynamicTableSize;
 
   public HPACKDecoder(HPACKDynamicTable dynamicTable) {
     this.dynamicTable = dynamicTable;
+    this.maxDynamicTableSize = dynamicTable.maxSize();
   }
 
   public List<HPACKDynamicTable.HeaderField> decode(byte[] block) throws IOException {
@@ -39,7 +44,11 @@ public class HPACKDecoder {
       } else if ((b & 0x20) != 0) {
         // Dynamic table size update — §6.3; first three bits 001
         long r = decodeInt(block, i, 5);
-        dynamicTable.setMaxSize((int) (r >>> 32));
+        int newMax = (int) (r >>> 32);
+        if (newMax > maxDynamicTableSize) {
+          throw new IOException("HPACK dynamic table size update [" + newMax + "] exceeds advertised SETTINGS_HEADER_TABLE_SIZE [" + maxDynamicTableSize + "]");
+        }
+        dynamicTable.setMaxSize(newMax);
         i = (int) r;
       } else {
         // Literal without indexing (§6.2.2) — first four bits 0000
@@ -58,17 +67,19 @@ public class HPACKDecoder {
   // Returns a packed long: high 32 bits = decoded value, low 32 bits = nextIndex.
   //
   // RFC 7541 §3.3 requires malformed inputs to surface as COMPRESSION_ERROR rather than a runtime crash.
-  // Two attacker-controlled failure modes are bounded here:
+  // Three attacker-controlled failure modes are bounded here:
   //   1) Truncated continuation: the input ends with the continuation bit set on the last byte.
-  //   2) Overlong continuation: enough continuation bytes to overflow the int accumulator. We cap the
-  //      shift at 28 bits (≤ 4 continuation bytes), which lets HPACK express values up to ~268M — well
-  //      beyond any realistic header table index or string length.
+  //   2) Overlong continuation: more continuation bytes than a 32-bit value can use. The shift is capped at 28
+  //      (at most five continuation bytes).
+  //   3) Value overflow: the running total is accumulated in a long and rejected once it passes Integer.MAX_VALUE,
+  //      so a value near the 28-bit shift boundary can never wrap into a negative int that would escape as a bogus
+  //      table index or string length.
   static long decodeInt(byte[] block, int i, int prefixBits) throws IOException {
     int max = (1 << prefixBits) - 1;
-    int v = block[i] & max;
+    long v = block[i] & max;
     i++;
     if (v < max) {
-      return ((long) v << 32) | (i & 0xFFFFFFFFL);
+      return (v << 32) | (i & 0xFFFFFFFFL);
     }
     int m = 0;
     int b;
@@ -77,13 +88,16 @@ public class HPACKDecoder {
         throw new IOException("HPACK integer truncated: continuation bit set at end of header block");
       }
       if (m > 28) {
-        throw new IOException("HPACK integer overflow: more than 4 continuation bytes");
+        throw new IOException("HPACK integer overflow: more than 5 continuation bytes");
       }
       b = block[i++] & 0xFF;
-      v += (b & 0x7F) << m;
+      v += (long) (b & 0x7F) << m;
+      if (v > Integer.MAX_VALUE) {
+        throw new IOException("HPACK integer overflow: value exceeds [" + Integer.MAX_VALUE + "]");
+      }
       m += 7;
     } while ((b & 0x80) != 0);
-    return ((long) v << 32) | (i & 0xFFFFFFFFL);
+    return (v << 32) | (i & 0xFFFFFFFFL);
   }
 
   private HPACKDynamicTable.HeaderField lookup(int index) throws IOException {

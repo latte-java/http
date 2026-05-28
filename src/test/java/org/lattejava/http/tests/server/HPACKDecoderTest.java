@@ -108,6 +108,38 @@ public class HPACKDecoderTest {
     assertThrows(IOException.class, () -> decoder.decode(block));
   }
 
+  // RFC 7541 §5.1 — an integer whose decoded value exceeds Integer.MAX_VALUE must surface as a COMPRESSION_ERROR
+  // (IOException), not silently overflow the accumulator into a negative value that escapes as a bogus index or
+  // string length. This sequence fits within the 5-continuation-byte cap, so the byte-count guard does not catch
+  // it; only a value-bound check does. Prefix 0xFF saturates the 7-bit prefix; the byte at shift 28 pushes the
+  // value past 2^31-1.
+  @Test
+  public void decode_integer_exceeding_int_max_throws_ioexception() {
+    byte[] block = {(byte) 0xFF, (byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x7F};
+    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    assertThrows(IOException.class, () -> decoder.decode(block));
+  }
+
+  // RFC 7541 §6.3 — a dynamic table size update MUST NOT exceed the limit set by the protocol
+  // (SETTINGS_HEADER_TABLE_SIZE, which is the decoder table's initial maximum). An over-limit update is a
+  // COMPRESSION_ERROR. 0x3F,0xA1,0x3E encodes a 5-bit-prefix size update of 8000, above the advertised 4096.
+  @Test
+  public void dynamic_table_size_update_above_advertised_limit_throws() {
+    byte[] block = {(byte) 0x3F, (byte) 0xA1, (byte) 0x3E};
+    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    assertThrows(IOException.class, () -> decoder.decode(block));
+  }
+
+  // A dynamic table size update at or below the advertised limit is accepted. 0x3F,0xB1,0x0F encodes 2000 (≤ 4096).
+  @Test
+  public void dynamic_table_size_update_within_advertised_limit_succeeds() throws Exception {
+    byte[] block = {(byte) 0x3F, (byte) 0xB1, (byte) 0x0F};
+    var table = new HPACKDynamicTable(4096);
+    var decoder = new HPACKDecoder(table);
+    decoder.decode(block);
+    assertEquals(table.maxSize(), 2000);
+  }
+
   // Literal string with length running past the end of the header block must throw, not crash with
   // ArrayIndexOutOfBoundsException.
   @Test
