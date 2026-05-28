@@ -602,32 +602,86 @@ A 2026-05-26 audit of every `wait`/`notify` site in the h2 path (`HTTP2Connectio
 
 **Verification of the new vendors.** Both Helidon and Undertow pass smoke tests for h1.1, h2c, and TLS+ALPN h2 on the standard `/` `/hello` `/load` `/compute` endpoints. Errors columns across the matrix are 0 for both vendors on every scenario except `baseline` (1 error for self, 1 for helidon, 25 for undertow — typical transient connect-error trial variance, not a server defect). Helidon and Undertow's `project.latte` setup added ~13 `.Final → semver` mappings each to satisfy Latte's SemVer validator on Helidon's umbrella BOM hierarchy and Undertow's jboss-* chain; this is documented as a one-time cost in the per-vendor `project.latte` files.
 
+### Performance findings (2026-05-27): writer-thread BufferedOutputStream wrap + drainTo coalescing
+
+**Context.** Plan F option 1 (writer-thread architecture work) landed in two stacked changes per `docs/superpowers/plans/2026-05-26-h2-writer-thread-coalescing.md`. **Lever A** (`ab87ef8`): 64 KiB `BufferedOutputStream` between `HTTP2FrameWriter` and the socket — eliminates the per-frame raw-write syscall by coalescing each frame's header + payload writes and accumulating across frames until a `flush()`. **Lever B** (`d20a1d4`): replaced the writer-thread's `take() → writeFrame → flush` loop with `take() → drainTo(WRITER_BATCH_SIZE - 1) → writeFrame×N → flush`, batching up to 32 frames per flush. Both targets cited in the 2026-05-19 JFR analysis (write0 ~13% CPU, queue-AQS ~18%) directly.
+
+**Run config.** Self-only matrix, best-of-3, 30 s × 3 trials. Machine: Apple M4 (10 cores), 24 GB RAM, macOS 15.7.3, JDK 25.0.2. 30 s cooldowns between scenarios. Pre-baseline column is the 2026-05-21 best-of-3 self numbers from the table above.
+
+**Throughput delta (best-of-3):**
+
+| Scenario | Pre (2026-05-21) | Post (2026-05-27) | Delta | Notes |
+|---|---:|---:|---:|---|
+| `h2-hello` (1c × 100s) | 154k | **283k** | **+84%** | Largest single win; small-response workloads pack many HEADERS+DATA frames per writer-iteration, exactly the pattern Lever A+B target |
+| `h2-io` (Thread.sleep 10 ms) | 69k | 76k | +10% | Fewer writer-thread syscalls leave more CPU for handler virtual-threads |
+| `h2-compute` | 27k | 29k | +8% | CPU-bound; protocol stack is <20% of cost so the lift is small but consistent |
+| `h2-stream` (force flush) | 4.1k | **4.1k** | **0%** | Unchanged. Falsifies the assumption that writer-thread architecture was the bottleneck for this scenario — see analysis below |
+| `h2-large-response` (one-shot) | 4.1k | **4.1k** | **0%** | Same |
+| `h2-high-stream-concurrency` (10c × 100s) | 454k | 442k | -3% | Within noise |
+| `h2-high-connection-concurrency` (500c × 2s) | 223k | 211k | -5% | Within noise |
+| `h2-tls-hello` | 328k | 310k | -6% | Within noise; Latte still 3× ahead of Helidon/Undertow on this scenario |
+| `h2-tls-high-stream-concurrency` | 394k | 346k | -12% | Trial-to-trial spread on this scenario was 15% (346k / 336k / 300k); -12% is most likely machine-state variance, not a code regression |
+
+**Headline.** Lever A + Lever B together deliver a real +84% throughput win on `h2-hello` and modest 8–10% lifts on `h2-io` and `h2-compute`. No regression that survives a sanity check against today's trial-to-trial variance. **They produce zero improvement on `h2-stream` and `h2-large-response`** — the two scenarios that originally motivated this work as 9× behind Helidon.
+
+**What this falsifies.** The 2026-05-19 hypothesis was that the writer-thread architecture (per-frame syscalls + queue contention) was the dominant cost on `h2-stream` / `h2-large-response`. The data refutes that: removing 80%+ of the per-frame syscalls and amortizing the queue lock across batches did not move either scenario by a single percent. Whatever pins those scenarios at 4.1k is *not* the writer thread. Plan F option 2 (MPSC ring buffer) and option 3 (per-stream local buffering) target the same writer-thread layer and are now expected to have similarly null effect on `h2-stream` / `h2-large-response`. They would likely deliver further small gains on small-response scenarios where Lever A+B already helped, but they will not close the gap to Helidon on streaming.
+
+**Where the streaming-scenario bottleneck most likely lives.** With Lever A+B in place and writer-thread overhead substantially reduced, the remaining 4.1k ceiling on `h2-stream` / `h2-large-response` (10 conn × 100 streams × 128 KB) is consistent with flow-control limitation rather than I/O cost:
+
+- Default per-stream send window is 65535 bytes. A 128 KB response per stream means **at least one round-trip on `WINDOW_UPDATE`** per stream before the second half can be sent.
+- 1000 concurrent streams blocking on flow-control credit, plus the connection-level send window (also 65535 default) shared across all of them, suggests the round-trip latency on `WINDOW_UPDATE` is the dominant cost.
+- The connection-level send-window flow-control gap surfaced in the 2026-05-26 audit (`HTTP2Connection.connectionSendWindow` is tracked + notified on inbound `WINDOW_UPDATE` but never consumed or waited on by the send side) is a related correctness issue — the server isn't enforcing connection-level credit at all, but the peer is still gating us on its own credit accounting.
+
+The likely productive next investigation is on flow control, not writer-thread architecture. Concretely: bump the default per-stream send window, profile `h2-stream` post-bump with JFR, and resolve the connection-level send-window enforcement gap. This is a separate plan, not on the critical path of this branch.
+
+**Verification.** `latte test --excludePerformance --excludeTimeouts` → 2920/2920 pass. h2spec — see updated baseline in the Bug ledger below.
+
 ---
 
 ## Bug ledger
 
-Full h2spec v2.6.0 run on 2026-05-05: 147 tests, 143 passed, 1 skipped, 3 failed.
+Full h2spec v2.6.0: 147 tests total. The suite is **flaky on a real developer machine** — running the same commit twice produces failure counts that drift by 1–2 tests. The numbers below are typical for a cool-machine run; CI on a quieter host may produce a tighter range.
 
-Improvement over campaign: 77 → 3 failures (-74).
+**Campaign history:**
+- Pre-campaign (early 2026-05): 77 failures.
+- Post-cleanup campaign 2026-05-09 (commits `b316db7`, `cad7b5f`, `82b60b5`, `f54282e`, `2850597`, `a5a0de6`, `2829cc4`): documented as 3 failures, but the documentation was both stale and incomplete — see correction below.
+- 2026-05-26 audit of actual baseline at `44e46ed`: ~9–11 failures across multiple runs.
+- 2026-05-27 writer-thread coalescing work landed (`ab87ef8`, `8d78e7d`, `d20a1d4`) — no change to h2spec results.
+- 2026-05-27 pre-existing bug fixes landed (`39d0a1b`, `92d774d`, `fe691cf`) — three deterministic failures resolved.
 
-Closed by 2026-05-09 cleanup campaign (commits b316db7, cad7b5f, 82b60b5, f54282e, 2850597, a5a0de6, 2829cc4): 77 failures → 3.
-
-### Remaining failures
+### Remaining deterministic failures
 
 **Root cause: SETTINGS_INITIAL_WINDOW_SIZE flow-control (3 failures).**
-The server does not honor per-stream or connection-level flow-control window limits when
-`SETTINGS_INITIAL_WINDOW_SIZE` is used to constrain send windows. Tests that depend on the
-server respecting a window size of 1 or a mid-connection `SETTINGS_INITIAL_WINDOW_SIZE`
-change see "unexpected EOF" instead of a DATA frame.
+The server does not honor per-stream or connection-level flow-control window limits when `SETTINGS_INITIAL_WINDOW_SIZE` is used to constrain send windows. Tests that depend on the server respecting a window size of 1, or a mid-connection `SETTINGS_INITIAL_WINDOW_SIZE` change, time out waiting for a DATA frame that never arrives. (Prior documentation listed the symptom as "unexpected EOF"; current symptom is "Timeout" — the connection now hangs rather than aborting, presumably because of an unrelated 2026-05-09 cleanup change to error-path teardown.)
 
-#### §6.5.3: Settings Synchronization
-- **[http2 6.5.3/1]** Sends multiple SETTINGS_INITIAL_WINDOW_SIZE values. **Expected:** DATA (flow-controlled). **Actual:** unexpected EOF.
+- **[http2 6.5.3/1]** Sends multiple SETTINGS_INITIAL_WINDOW_SIZE values. **Expected:** DATA (flow-controlled). **Actual:** Timeout.
+- **[http2 6.9.1/1]** Sends SETTINGS with initial window size 1 then HEADERS. **Expected:** DATA (flow-controlled). **Actual:** Timeout.
+- **[http2 6.9.2/1]** Changes SETTINGS_INITIAL_WINDOW_SIZE after sending HEADERS frame. **Expected:** DATA. **Actual:** Timeout.
 
-#### §6.9.1: Flow-Control Window
-- **[http2 6.9.1/1]** Sends SETTINGS with initial window size 1 then HEADERS. **Expected:** DATA (flow-controlled). **Actual:** unexpected EOF.
+**Root cause: missing flow-control violation detection (1 failure).**
 
-#### §6.9.2: Initial Flow-Control Window Size
-- **[http2 6.9.2/1]** Changes SETTINGS_INITIAL_WINDOW_SIZE after sending HEADERS frame. **Expected:** DATA. **Actual:** unexpected EOF.
+- **[http2 6.9.2/2]** Sends SETTINGS that would make a stream's send window negative. **Expected:** GOAWAY(FLOW_CONTROL_ERROR). **Actual:** Timeout — server applies the SETTINGS but never detects the resulting flow-control violation.
+
+### Flaky failures (race between handler completion and protocol-error detection)
+
+Tests in this group all share the symptom **"got DATA frame, expected error frame"** — when h2spec sends an invalid frame on an active stream, the application handler is sometimes scheduled to produce a 200 response *before* the reader detects the protocol violation. The existing `HTTP2H2SpecBatch3Test.second_headers_after_end_stream_triggers_rst_stream` works around the same race with `Thread.sleep(100)` in the handler. h2spec has no such delay, so the outcome varies run-to-run.
+
+These manifest 1–4 times out of every 6 runs at fixed commit. The architectural fix is to delay handler dispatch until the read loop has consumed enough subsequent frames that the protocol-error verdict is stable (or to run protocol-error validators synchronously before handler scheduling). Out of scope for the writer-thread coalescing branch.
+
+- **[http2 5.1/5]** half-closed remote DATA
+- **[http2 5.3.1/1]** HEADERS self-dependency
+- **[http2 5.3.1/2]** PRIORITY self-dependency
+- **[http2 6.1/2]** DATA on stream not in open state
+- **[http2 8.1/1]** Second HEADERS without END_STREAM
+- **[http2 8.1.2.1/3]** Pseudo-header in trailer
+- **[hpack 4.2/1]** Dynamic-table size update
+- **[hpack 6.3/1]** Large table-size update
+
+### Closed on this branch
+
+- **[http2 5.1/1]** DATA on idle stream — Fixed in `39d0a1b` (handleData now emits GOAWAY(PROTOCOL_ERROR) when `streamId > highestSeenStreamId && (streamId & 1) == 1`).
+- **[http2 5.1/3]** WINDOW_UPDATE on idle stream — Fixed in `92d774d` (same check in handleWindowUpdate).
+- **[http2 3.5/2]** Invalid connection preface produced RST instead of GOAWAY — Fixed in `fe691cf` (`socket.shutdownOutput()` immediately after `sendGoAwayDirect` so the kernel sends FIN before the peer's trailing bytes race the close).
 
 ---
 
