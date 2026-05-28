@@ -14,6 +14,7 @@ import static org.testng.Assert.*;
  * Regression tests for idle-stream and invalid-preface protocol violations:
  * <ul>
  *   <li>§5.1/1 — DATA on an idle stream must produce {@code GOAWAY(PROTOCOL_ERROR)}</li>
+ *   <li>§5.1/3 — WINDOW_UPDATE on an idle stream must produce {@code GOAWAY(PROTOCOL_ERROR)}</li>
  * </ul>
  *
  * <p>These were deterministic h2spec failures pre-existing the writer-thread coalescing branch;
@@ -49,6 +50,37 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
 
         int errorCode = readUntilGoaway(sock.getInputStream());
         assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for DATA on idle stream [5]; got: " + errorCode);
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // §5.1/3 — WINDOW_UPDATE on idle stream
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * RFC 9113 §5.1 — WINDOW_UPDATE on an idle (never-opened) client-initiated stream is a connection-level
+   * {@code PROTOCOL_ERROR}.
+   *
+   * <p>h2spec §5.1/3: server must emit {@code GOAWAY(PROTOCOL_ERROR)} when it receives WINDOW_UPDATE on a stream that
+   * has never been opened.
+   */
+  @Test
+  public void window_update_on_idle_stream_emits_goaway_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        sock.setSoTimeout(5000);
+
+        // Send a WINDOW_UPDATE frame (type 0x8, length 4, increment 1) on stream 7 — idle, never opened.
+        writeFrameHeader(out, 4, 0x8, 0, 7);
+        out.write(new byte[]{0, 0, 0, 1}); // window size increment = 1
+        out.flush();
+
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for WINDOW_UPDATE on idle stream [7]; got: " + errorCode);
       }
     }
   }

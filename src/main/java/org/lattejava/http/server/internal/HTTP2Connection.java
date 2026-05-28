@@ -852,6 +852,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       rstStream(f.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
       return;
     }
+    // RFC 9113 §5.1 — WINDOW_UPDATE on an idle (never-opened) client-initiated stream is a connection-level
+    // PROTOCOL_ERROR. Client-initiated streams are odd-numbered; stream IDs beyond highestSeenStreamId have never
+    // been opened.
+    if (f.streamId() > highestSeenStreamId && (f.streamId() & 1) == 1) {
+      goAway(HTTP2ErrorCode.PROTOCOL_ERROR);
+      return;
+    }
     HTTP2Stream stream = streams.get(f.streamId());
     if (stream != null) {
       // RFC 9113 §6.9.1: per-stream send-window overflow is a stream error FLOW_CONTROL_ERROR.
