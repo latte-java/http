@@ -208,6 +208,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
           logger.debug("Invalid HTTP/2 connection preface after h2c upgrade");
           // RFC 9113 §3.5: server has already sent SETTINGS; emit GOAWAY(PROTOCOL_ERROR) before closing.
           sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
+          // Half-close immediately so the kernel sends FIN — h2spec keeps writing preface bytes;
+          // bytes arriving after the 50 ms finally-drain race the close and cause OS RST instead of FIN.
+          try { socket.shutdownOutput(); } catch (IOException ignore) { /* best effort */ }
           return;
         }
       } else {
@@ -220,6 +223,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
             // RFC 9113 §3.5: emit SETTINGS + GOAWAY(PROTOCOL_ERROR) so peer can observe the error before TCP close.
             writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
             sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
+            // Half-close immediately so the kernel sends FIN — h2spec keeps writing preface bytes;
+            // bytes arriving after the 50 ms finally-drain race the close and cause OS RST instead of FIN.
+            try { socket.shutdownOutput(); } catch (IOException ignore) { /* best effort */ }
             return;
           }
         }
@@ -235,6 +241,9 @@ public class HTTP2Connection implements ClientConnection, Runnable {
         logger.debug("Expected client SETTINGS frame after preface");
         // RFC 9113 §3.5 / §5.4.1: emit GOAWAY(PROTOCOL_ERROR) before closing.
         sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
+        // Half-close immediately so the kernel sends FIN — h2spec keeps writing preface bytes;
+        // bytes arriving after the 50 ms finally-drain race the close and cause OS RST instead of FIN.
+        try { socket.shutdownOutput(); } catch (IOException ignore) { /* best effort */ }
         return;
       }
       peerSettings.applyPayload(settings.payload());
