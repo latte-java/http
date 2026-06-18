@@ -21,9 +21,9 @@ import static org.testng.Assert.*;
 public class H2SpecHarnessTest extends BaseTest {
   private static final Path H2SPEC_BIN = Path.of("build/h2spec");
 
-  // Known failures as of 2026-05-21 — see docs/specs/HTTP2.md §"Bug ledger". Pinning the exact set so that:
+  // Known failures as of 2026-05-21 — see docs/design/2026-05-05-HTTP2.md §"Bug ledger". Pinning the exact set so that:
   //   - Any drift (a new failure or a fixed test that newly passes) breaks this assertion and forces an
-  //     intentional update to both this set AND HTTP2.md's bug ledger.
+  //     intentional update to both this set AND 2026-05-05-HTTP2.md's bug ledger.
   //   - Adversarial regressions on tests we currently pass also fail loudly.
   // Each entry is the section name as it appears in h2spec's JUnit report. Pattern is "<section> / <description>".
   // Specific descriptions can be found in build/h2spec-report.xml after a real run.
@@ -68,7 +68,7 @@ public class H2SpecHarnessTest extends BaseTest {
       // Extract the section identifiers (e.g. "6.5.3") for every failing test from the JUnit report.
       Set<String> actualFailingSections = parseFailingSections(reportPath);
       assertEquals(actualFailingSections, KNOWN_FAILING_SECTIONS,
-          "h2spec known-failure set drifted. Update KNOWN_FAILING_SECTIONS in this test AND the bug ledger in docs/specs/HTTP2.md. " +
+          "h2spec known-failure set drifted. Update KNOWN_FAILING_SECTIONS in this test AND the bug ledger in docs/design/2026-05-05-HTTP2.md. " +
               "Expected [" + KNOWN_FAILING_SECTIONS + "], actual [" + actualFailingSections + "]. " +
               "Full report at [" + reportPath + "].");
     }

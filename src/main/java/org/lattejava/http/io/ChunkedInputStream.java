@@ -29,7 +29,7 @@ public class ChunkedInputStream extends InputStream {
   // RFC 9112 §7.1 chunk-size is a hex number. Integer.MAX_VALUE is "7FFFFFFF" (8 hex chars); any 8-char value starting with 8..F would
   // wrap to a negative int after parseInt, and 0x100000000 would truncate to 0 and collide with the terminator chunk. Capping the hex
   // string at 7 chars keeps the parsed value in [0, 0x0FFFFFFF] and eliminates every overflow path without needing to parse as long.
-  // See docs/security/audit-2026-04-20.md Vuln 2.
+  // See docs/design/2026-04-20-audit.md Vuln 2.
   private static final int MaxHeaderSizeHexLength = 7;
 
   private final byte[] b1 = new byte[1];

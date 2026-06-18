@@ -513,7 +513,7 @@ public class HTTP1Worker implements ClientConnection, Runnable {
       return Status.BadRequest;
     }
 
-    // Validate Transfer-Encoding and Content-Length per RFC 9112 §6.1 (see docs/security/audit-2026-04-20.md Vuln 1). This server only
+    // Validate Transfer-Encoding and Content-Length per RFC 9112 §6.1 (see docs/design/2026-04-20-audit.md Vuln 1). This server only
     // supports the "chunked" transfer coding, so anything else must be rejected rather than silently discarded — mishandling TE is the
     // classic request-smuggling primitive. Specifically we reject: multiple Transfer-Encoding headers, TE values that aren't exactly
     // "chunked" after trimming (e.g. "identity", "chunked, identity", "xchunked", "chunked " with trailing whitespace), and the CL+TE

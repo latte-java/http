@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Zero-dependency HTTP server library for Java 21+ using virtual threads and blocking I/O (not NIO). Forked from FusionAuth's java-http. The HTTP client is not yet implemented.
 
+## Documentation
+
+- `docs/design/` — all design documents and specs (filenames prefixed with `YYYY-MM-DD-` creation date)
+- `docs/implementation/` — all implementation plans (filenames prefixed with `YYYY-MM-DD-` creation date)
+
 ## Build System
 
 This project uses the **Latte** build tool, not Maven or Gradle. The build file is `project.latte`.

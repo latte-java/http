@@ -12,7 +12,7 @@ The latte-java HTTP server is HTTP/1.1 only. To be a serious choice in the Java 
 
 The architectural opportunity is that our virtual-thread + blocking-I/O model maps cleanly onto HTTP/2's per-stream concurrency. Where Jetty and Netty ship complex async/event-loop machinery to multiplex streams onto a fixed thread pool, we get to spend a virtual thread per stream and write code that reads top-to-bottom. Helidon Níma is the closest peer in this regard.
 
-This document is the implementation blueprint for the work. It is dated and scoped to delivering HTTP/2 support; once shipped, the always-current reference will be `docs/specs/HTTP2.md`.
+This document is the implementation blueprint for the work. It is dated and scoped to delivering HTTP/2 support; once shipped, the always-current reference will be `docs/design/2026-05-05-HTTP2.md`.
 
 ---
 
@@ -30,7 +30,7 @@ This document is the implementation blueprint for the work. It is dated and scop
 | Default for `enableH2cUpgrade` (cleartext) | `true` |
 | Default for `enableH2cPriorKnowledge` (cleartext) | `false` (opt-in) |
 | Architectural approach | Sibling workers (`HTTP1Worker`, `HTTP2Connection`) with extracted shared utilities. No common abstract class. |
-| Doc shape | Two: this dated blueprint + long-lived `docs/specs/HTTP2.md` |
+| Doc shape | Two: this dated blueprint + long-lived `docs/design/2026-05-05-HTTP2.md` |
 
 ---
 
@@ -442,7 +442,7 @@ Each named DoS mitigation gets a test that drives the attack and asserts `GOAWAY
 - TLS cipher blocklist: configure server with a blocklisted cipher (TLS 1.2), connect, expect `GOAWAY(INADEQUATE_SECURITY)`.
 
 ### Performance baseline
-Add an h2 row to `docs/plans/benchmark-spec.md`: same workload as h1.1, plus a high-concurrency stream variant. Directional target: parity with h1.1 on unary; significantly above on high-concurrency.
+Add an h2 row to `docs/design/2026-04-03-benchmark-spec.md`: same workload as h1.1, plus a high-concurrency stream variant. Directional target: parity with h1.1 on unary; significantly above on high-concurrency.
 
 ---
 
@@ -463,7 +463,7 @@ We promised to review HTTP1.1.md for drift. Verification against current code (r
 | §3 "TE: trailers request signaling" | ❌ | ❌ | **Closes here** (h1.1 emission honors TE) |
 | §4 "Upgrade / 101 Switching Protocols" | ❌ | ❌ | **Closes here** (101 hook prerequisite) |
 
-The first seven items (drift / verification / one open) are scoped to a parallel sibling spec: `docs/superpowers/specs/2026-05-05-http11-conformance-cleanup-design.md`. That work runs independently of HTTP/2 — nothing about HTTP/2 forces it to ship first or together.
+The first seven items (drift / verification / one open) are scoped to a parallel sibling spec: `docs/design/2026-05-05-http11-conformance-cleanup-design.md`. That work runs independently of HTTP/2 — nothing about HTTP/2 forces it to ship first or together.
 
 The last three items flip *because of* HTTP/2 work (trailers API, 101 hook). They're delivered as part of this design.
 
@@ -531,9 +531,9 @@ src/main/java/org/lattejava/http/security/SecurityTools.java             // SSLC
 src/main/java/module-info.java                                            // export ProtocolSwitchHandler if it's in a public package
 
 project.latte                                                             // grpc-java test dep, h2spec int target
-docs/specs/HTTP1.1.md                                                     // flip ⚠️ items where verified ✅; flip closed ❌ items to ✅
-docs/specs/HTTP2.md                                                       // new long-lived spec
-docs/plans/benchmark-spec.md                                              // h2 entries
+docs/design/2026-04-27-HTTP1.1.md                                                     // flip ⚠️ items where verified ✅; flip closed ❌ items to ✅
+docs/design/2026-05-05-HTTP2.md                                                       // new long-lived spec
+docs/design/2026-04-03-benchmark-spec.md                                              // h2 entries
 ```
 
 ---

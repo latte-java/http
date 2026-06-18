@@ -301,4 +301,4 @@ cd benchmarks
 
 ## Architectural context
 
-See [`docs/specs/HTTP2.md`](specs/HTTP2.md) for the dated performance-findings sections, including JFR-profile-driven CPU hotspot analysis and the current Plan F item proposing writer-thread batching for h2 DATA emission.
+See [`docs/design/2026-05-05-HTTP2.md`](design/2026-05-05-HTTP2.md) for the dated performance-findings sections, including JFR-profile-driven CPU hotspot analysis and the current Plan F item proposing writer-thread batching for h2 DATA emission.

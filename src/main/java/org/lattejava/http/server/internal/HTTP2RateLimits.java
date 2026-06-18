@@ -20,7 +20,7 @@ public record HTTP2RateLimits(
     int windowUpdateMax, long windowUpdateWindowMs) {
 
   public static HTTP2RateLimits defaults() {
-    // Defaults from docs/specs/HTTP2.md §10.
+    // Defaults from docs/design/2026-05-05-HTTP2.md §10.
     return new HTTP2RateLimits(100, 30_000L, 10, 1_000L, 100, 30_000L, 10, 1_000L, 100, 1_000L);
   }
 

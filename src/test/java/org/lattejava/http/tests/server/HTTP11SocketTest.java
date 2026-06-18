@@ -931,7 +931,7 @@ public class HTTP11SocketTest extends BaseSocketTest {
   /**
    * A request that carries both Content-Length and Transfer-Encoding is rejected as 400. Per RFC 9112 §6.1, such a
    * message is ambiguous — different intermediaries resolve the precedence differently — and is a classic
-   * request-smuggling primitive (see docs/security/audit-2026-04-20.md Vuln 1). Silently stripping Content-Length (RFC
+   * request-smuggling primitive (see docs/design/2026-04-20-audit.md Vuln 1). Silently stripping Content-Length (RFC
    * 7230's older guidance) is unsafe because a front-end proxy that honored Content-Length would desync from this
    * server.
    */

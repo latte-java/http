@@ -8,7 +8,7 @@ import module org.testng;
 
 /**
  * Socket-level tests covering HTTP request smuggling defenses around Transfer-Encoding (see
- * docs/security/audit-2026-04-20.md Vuln 1). The server accepts only a single, exactly-{@code chunked}
+ * docs/design/2026-04-20-audit.md Vuln 1). The server accepts only a single, exactly-{@code chunked}
  * Transfer-Encoding; every other shape (unsupported codings, mixed codings, duplicate headers, or TE + Content-Length
  * coexistence) is rejected as 400 so a front-end proxy that resolves the ambiguity differently cannot desync a
  * pipelined request onto the next keep-alive turn.

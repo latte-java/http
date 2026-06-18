@@ -6,7 +6,7 @@
 
 ## Motivation
 
-While reviewing `docs/specs/HTTP1.1.md` during the HTTP/2 design pass, several ⚠️ ("Partial — needs test") items were verified against current code and found to be already correct in implementation but lacking explicit tests, plus one item that is genuinely open. This doc collects those into a small focused cleanup that runs in parallel to the HTTP/2 work — nothing about HTTP/2 forces this to ship first or together.
+While reviewing `docs/design/2026-04-27-HTTP1.1.md` during the HTTP/2 design pass, several ⚠️ ("Partial — needs test") items were verified against current code and found to be already correct in implementation but lacking explicit tests, plus one item that is genuinely open. This doc collects those into a small focused cleanup that runs in parallel to the HTTP/2 work — nothing about HTTP/2 forces this to ship first or together.
 
 The HTTP/2 design (`2026-05-05-http2-design.md`) handles the three ❌ items in HTTP1.1.md that flip *because of* HTTP/2 work (response trailers, `TE: trailers` signaling, 101 Switching Protocols hook). This doc handles everything else.
 
@@ -48,7 +48,7 @@ The state machine in `RequestPreambleState.java` was tightened during the securi
 src/main/java/org/lattejava/http/server/internal/HTTPWorker.java          // Expect ≠ 100-continue → 417
 src/test/java/org/lattejava/http/tests/server/ExpectTest.java              // 417 cases
 src/test/java/org/lattejava/http/tests/server/CoreTest.java (or new)       // bare CR / ws-before-colon / obs-fold / empty-Host / chunk-ext / OPTIONS *
-docs/specs/HTTP1.1.md                                                      // flip ⚠️ entries to ✅; close §9 open item
+docs/design/2026-04-27-HTTP1.1.md                                                      // flip ⚠️ entries to ✅; close §9 open item
 ```
 
 ## Test plan

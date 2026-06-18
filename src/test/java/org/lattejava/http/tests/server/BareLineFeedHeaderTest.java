@@ -8,7 +8,7 @@ import org.testng.annotations.*;
 
 /**
  * Socket-level tests verifying that bare CR or LF bytes embedded in a header value are rejected as 400 rather than
- * absorbed into the stored value (see docs/security/audit-2026-04-20.md Vuln 3). Accepting a bare LF would let an
+ * absorbed into the stored value (see docs/design/2026-04-20-audit.md Vuln 3). Accepting a bare LF would let an
  * attacker splice a second header into a field value — and a front-end proxy that splits on LF would then disagree with
  * this server about header boundaries, a smuggling primitive even when Transfer-Encoding handling is strict.
  *

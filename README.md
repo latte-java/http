@@ -206,9 +206,9 @@ See [benchmarks/README.md](benchmarks/README.md) for full usage and options.
 
 Detailed conformance status lives in the per-version spec docs:
 
-- [HTTP/1.1](docs/specs/HTTP1.1.md) — implemented
-- [HTTP/2](docs/specs/HTTP2.md) — implemented (RFC 9113, HPACK, h2c, ALPN, gRPC)
-- [HTTP/3](docs/specs/HTTP3.md) — out of scope until JDK QUIC API
+- [HTTP/1.1](docs/design/2026-04-27-HTTP1.1.md) — implemented
+- [HTTP/2](docs/design/2026-05-05-HTTP2.md) — implemented (RFC 9113, HPACK, h2c, ALPN, gRPC)
+- [HTTP/3](docs/design/2026-05-09-HTTP3.md) — out of scope until JDK QUIC API
 
 The HTTP client is not yet implemented.
 

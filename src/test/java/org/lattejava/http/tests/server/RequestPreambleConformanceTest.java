@@ -7,7 +7,7 @@ package org.lattejava.http.tests.server;
 import module org.testng;
 
 /**
- * Raw-socket conformance tests for {@code RequestPreambleState}. Covers items that HTTP1.1.md §6 lists as ⚠️ "needs
+ * Raw-socket conformance tests for {@code RequestPreambleState}. Covers items that 2026-04-27-HTTP1.1.md §6 lists as ⚠️ "needs
  * test" — the parser already rejects these per the security audit (Vuln 3 et al.); this file locks that behavior in.
  *
  * @author Daniel DeGroff

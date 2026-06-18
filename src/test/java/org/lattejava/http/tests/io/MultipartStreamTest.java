@@ -207,7 +207,7 @@ public class MultipartStreamTest {
   }
 
   /**
-   * Regression for docs/security/audit-2026-04-20.md Vuln 5. The previous {@code start += end} arithmetic in
+   * Regression for docs/design/2026-04-20-audit.md Vuln 5. The previous {@code start += end} arithmetic in
    * {@code MultipartStream.reload} overshot the real write offset whenever {@code InputStream.read} returned fewer
    * bytes than requested — a routine condition under TCP segmentation or slow/TLS clients. The loop then wrote
    * subsequent chunks into the wrong buffer positions, leaving uninitialized gaps that {@code findBoundary} would scan
