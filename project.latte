@@ -2,10 +2,6 @@
  * Copyright (c) 2026 The Latte Project
  * SPDX-License-Identifier: MIT
  */
-jackson5Version = "3.0.1"
-restifyVersion = "4.2.1"
-slf4jVersion = "2.0.17"
-testngVersion = "7.11.0"
 
 project(group: "org.lattejava", name: "http", version: "0.1.5", licenses: ["MIT"]) {
   workflow {
@@ -22,14 +18,10 @@ project(group: "org.lattejava", name: "http", version: "0.1.5", licenses: ["MIT"
       // Ha! Just kidding. This is pure Java - no deps!
     }
     group(name: "test-compile", export: false) {
-      dependency(id: "com.inversoft:jackson5:${jackson5Version}")
-      dependency(id: "com.inversoft:restify:${restifyVersion}")
-      dependency(id: "org.testng:testng:${testngVersion}")
-      // Gets rid of SLF warnings on test run
-      //   SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
-      //   SLF4J: Defaulting to no-operation (NOP) logger implementation
-      //   SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
-      dependency(id: "org.slf4j:slf4j-nop:${slf4jVersion}")
+      dependency(id: "com.inversoft:jackson5:3.0.1")
+      dependency(id: "com.inversoft:restify:4.2.1")
+      dependency(id: "org.testng:testng:7.12.0")
+      dependency(id: "org.slf4j:slf4j-nop:2.0.17") // To silence warnings
     }
   }
 
@@ -39,11 +31,12 @@ project(group: "org.lattejava", name: "http", version: "0.1.5", licenses: ["MIT"
 }
 
 // Plugins
-dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.2.0")
-java = loadPlugin(id: "org.lattejava.plugin:java:0.2.0")
-javaTestNG = loadPlugin(id: "org.lattejava.plugin:java-testng:0.2.0")
-idea = loadPlugin(id: "org.lattejava.plugin:idea:0.2.0")
-release = loadPlugin(id: "org.lattejava.plugin:release-git:0.2.0")
+dependency = loadPlugin(id: "org.lattejava.plugin:dependency:0.4.0")
+file = loadPlugin(id: "org.lattejava.plugin:file:0.4.3")
+java = loadPlugin(id: "org.lattejava.plugin:java:0.4.4")
+javaTestNG = loadPlugin(id: "org.lattejava.plugin:java-testng:0.4.0")
+idea = loadPlugin(id: "org.lattejava.plugin:idea:0.4.1")
+release = loadPlugin(id: "org.lattejava.plugin:release-git:0.4.0")
 
 java.settings.javaVersion = "25"
 javaTestNG.settings.javaVersion = "25"
@@ -55,6 +48,8 @@ target(name: "clean", description: "Cleans the build directory") {
 }
 
 target(name: "build", description: "Compiles the Java source files and creates a JAR") {
+  file.execute(cmd: "git config core.hooksPath .githooks")
+
   // The main code uses module-info.java for everything, so the args should be empty
   java.settings.compilerArguments = ""
   java.compileMain()
@@ -91,18 +86,10 @@ target(name: "idea", description: "Updates the IntelliJ IDEA module file") {
 }
 
 target(name: "format", description: "Formats the source code using IntelliJ's CLI") {
-  exec(["${SYS["user.home"]}/Applications/IntelliJ IDEA.app/Contents/bin/format.sh", "-r", "-s", ".idea/codeStyles/Project.xml", "src/main/java/"])
-  exec(["${SYS["user.home"]}/Applications/IntelliJ IDEA.app/Contents/bin/format.sh", "-r", "-s", ".idea/codeStyles/Project.xml", "src/test/java/"])
+  file.execute(cmd: ["${SYS["user.home"]}/Applications/IntelliJ IDEA.app/Contents/bin/format.sh", "-r", "-s", ".idea/codeStyles/Project.xml", "src/main/java/"])
+  file.execute(cmd: ["${SYS["user.home"]}/Applications/IntelliJ IDEA.app/Contents/bin/format.sh", "-r", "-s", ".idea/codeStyles/Project.xml", "src/test/java/"])
 }
 
 target(name: "print-dependency-tree", description: "Prints the dependency tree") {
   dependency.printFull()
-}
-
-private void exec(cmd, boolean ignoreFailure = false) {
-  def proc = cmd.execute()
-  proc.waitForProcessOutput(System.out, System.err)
-  if (!ignoreFailure && proc.exitValue() != 0) {
-    fail("Command failed [exit=${proc.exitValue()}]: ${cmd}")
-  }
 }
