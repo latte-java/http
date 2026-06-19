@@ -93,8 +93,8 @@ public final class HPACKStaticTable {
       full.putIfAbsent(e, i);
       name.putIfAbsent(e.name(), i);
     }
-    FULL_INDEX = full;
-    NAME_INDEX = name;
+    FULL_INDEX = Collections.unmodifiableMap(full);
+    NAME_INDEX = Collections.unmodifiableMap(name);
   }
 
   private HPACKStaticTable() {

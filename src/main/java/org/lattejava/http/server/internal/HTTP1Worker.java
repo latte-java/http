@@ -54,18 +54,7 @@ public class HTTP1Worker implements ClientConnection, Runnable {
 
   public HTTP1Worker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                      HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
-    this.socket = socket;
-    this.configuration = configuration;
-    this.context = context;
-    this.instrumenter = instrumenter;
-    this.listener = listener;
-    this.throughput = throughput;
-    this.buffers = new HTTPBuffers(configuration);
-    this.logger = configuration.getLoggerFactory().getLogger(HTTP1Worker.class);
-    this.inputStream = new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter);
-    this.workerState = WorkerState.Read;
-    this.startInstant = System.currentTimeMillis();
-    logger.trace("[{}] Starting HTTP worker.", Thread.currentThread().threadId());
+    this(socket, configuration, context, instrumenter, listener, throughput, new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter));
   }
 
   /**

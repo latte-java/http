@@ -86,13 +86,15 @@ public final class HTTPValues {
   public static final class ControlBytes {
     public static final byte CR = '\r';
 
+    public static final byte[] ColonSpace = {':', ' '};
+
     public static final byte Dash = '-';
 
     public static final byte LF = '\n';
 
-    public static final byte[] ColonSpace = {':', ' '};
-
     public static final byte[] CRLF = {CR, LF};
+
+    public static final byte[] EmptyChunk = {'0', CR, LF};
 
     public static final byte[] ChunkedTerminator = {'0', CR, LF, CR, LF};
 

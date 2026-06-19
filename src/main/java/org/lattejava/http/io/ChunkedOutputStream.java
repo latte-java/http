@@ -25,13 +25,9 @@ import module org.lattejava.http;
  */
 public class ChunkedOutputStream extends OutputStream {
   private final byte[] buffer;
-
   private final FastByteArrayOutputStream chunkOutputStream;
-
   private final OutputStream delegate;
-
   private int bufferIndex;
-
   private boolean closed;
   private Map<String, List<String>> trailers;
 
@@ -48,11 +44,13 @@ public class ChunkedOutputStream extends OutputStream {
       if (trailers == null || trailers.isEmpty()) {
         delegate.write(HTTPValues.ControlBytes.ChunkedTerminator);
       } else {
-        delegate.write(new byte[]{'0', '\r', '\n'});
+        delegate.write(HTTPValues.ControlBytes.EmptyChunk);
         for (var entry : trailers.entrySet()) {
           for (String value : entry.getValue()) {
-            String line = entry.getKey() + ": " + value + "\r\n";
-            delegate.write(line.getBytes(StandardCharsets.US_ASCII));
+            delegate.write(entry.getKey().getBytes(StandardCharsets.US_ASCII));
+            delegate.write(HTTPValues.ControlBytes.ColonSpace);
+            delegate.write(value.getBytes(StandardCharsets.US_ASCII));
+            delegate.write(HTTPValues.ControlBytes.CRLF);
           }
         }
         delegate.write(HTTPValues.ControlBytes.CRLF);
@@ -71,8 +69,8 @@ public class ChunkedOutputStream extends OutputStream {
     }
 
     if (bufferIndex > 0) {
-      String header = Integer.toHexString(bufferIndex) + "\r\n";
-      chunkOutputStream.write(header.getBytes());
+      chunkOutputStream.write(Integer.toHexString(bufferIndex).getBytes(StandardCharsets.US_ASCII));
+      chunkOutputStream.write(HTTPValues.ControlBytes.CRLF);
       chunkOutputStream.write(buffer, 0, bufferIndex);
       chunkOutputStream.write(HTTPValues.ControlBytes.CRLF);
       delegate.write(chunkOutputStream.bytes(), 0, chunkOutputStream.size());
