@@ -18,6 +18,7 @@ module org.lattejava.http.tests {
   requires restify;
   opens org.lattejava.http.tests.grpc to org.testng;
   opens org.lattejava.http.tests.io to org.testng;
+  opens org.lattejava.http.tests.perf to org.testng;
   opens org.lattejava.http.tests.security to org.testng;
   opens org.lattejava.http.tests.server to org.testng;
   opens org.lattejava.http.tests.util to org.testng;

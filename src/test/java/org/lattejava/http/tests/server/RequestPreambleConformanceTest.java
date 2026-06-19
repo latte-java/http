@@ -15,7 +15,7 @@ import module org.testng;
 public class RequestPreambleConformanceTest extends BaseSocketTest {
   @Test
   public void bare_cr_in_header_value_rejected() throws Exception {
-    // RFC 9112 §5: bare CR (CR not followed by LF) inside a header value MUST be rejected. HeaderValue → HeaderCR; HeaderCR only accepts \n.
+    // RFC 9112 §5: bare CR (CR not followed by LF) inside a header value MUST be rejected. The field-value state only accepts \r as a transition to FieldCR, and FieldCR only accepts \n.
     withRequest("GET / HTTP/1.1\r\n" +
         "Host: cyberdyne-systems.com\r\n" +
         "X: bad\rmore\r\n" +
@@ -65,7 +65,7 @@ public class RequestPreambleConformanceTest extends BaseSocketTest {
 
   @Test
   public void obs_fold_rejected() throws Exception {
-    // RFC 9112 §5.2: obs-fold (line continuation via leading SP/HTAB) is forbidden. HeaderLF requires CR or token char at line start.
+    // RFC 9112 §5.2: obs-fold (line continuation via leading SP/HTAB) is forbidden. The Start state of HTTPFieldParser only accepts CR (empty block) or a token character (new field name) — a leading SP or HTAB is rejected.
     withRequest("""
         GET / HTTP/1.1\r
         Host: cyberdyne-systems.com\r

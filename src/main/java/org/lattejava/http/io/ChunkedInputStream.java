@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2022-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -129,14 +129,10 @@ public class ChunkedInputStream extends InputStream {
           chunkBytesRemaining = chunkSize;
           headerSizeHex.delete(0, headerSizeHex.length());
 
-          // A chunk size of 0 indicates this is the terminating chunk. Push back any over-read bytes so parseTrailers
-          // sees the full byte stream from the start of the trailer section (or the bare CRLF if there are none).
+          // A chunk size of 0 indicates this is the terminating chunk. Parse the trailer section directly from our own
+          // buffer (feeding the shared field parser and reloading from the delegate as needed).
           if (chunkSize == 0) {
-            if (bufferIndex < bufferLength) {
-              delegate.push(buffer, bufferIndex, bufferLength - bufferIndex);
-              bufferIndex = bufferLength;
-            }
-            parseTrailers(delegate);
+            parseTrailers();
             state = ChunkedBodyState.Complete;
             break;
           }
@@ -190,50 +186,41 @@ public class ChunkedInputStream extends InputStream {
     return b1[0] & 0xFF;
   }
 
-  private void addTrailerLine(String raw) {
-    int colon = raw.indexOf(':');
-    if (colon < 0) {
-      return; // malformed; skip rather than crash
-    }
-
-    String name = raw.substring(0, colon).trim().toLowerCase(Locale.ROOT);
-    if (name.isEmpty() || HTTPValues.ForbiddenTrailers.Names.contains(name)) {
+  private void addTrailer(String name, String value) {
+    // The FSM guarantees a non-empty token name; case-fold for lookup and storage.
+    String lower = HTTPTools.asciiLowerCase(name);
+    if (HTTPValues.ForbiddenTrailers.Names.contains(lower)) {
       // RFC 9110 §6.5.2 forbidden trailers are silently dropped.
       return;
     }
 
-    String value = raw.substring(colon + 1).trim();
     if (trailers == null) {
       trailers = new HashMap<>();
     }
 
-    trailers.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
+    trailers.computeIfAbsent(lower, k -> new ArrayList<>()).add(value.trim());
   }
 
-  private void parseTrailers(PushbackInputStream in) throws IOException {
-    // RFC 9112 §7.1.2: trailer-fields use the same syntax as header-fields. After the 0-chunk we have either:
-    //   "\r\n"                            (no trailers — bare terminator)
-    //   "Name: Value\r\n...\r\n\r\n"      (one or more trailers, ending in bare \r\n)
-    // Read line-by-line until a bare CRLF.
-    ByteArrayOutputStream line = new ByteArrayOutputStream(64);
-    int b;
-    while ((b = in.read()) != -1) {
-      if (b == '\r') {
-        int next = in.read();
-        if (next != '\n') {
-          throw new ParseException("Expected LF after CR in trailer section; got [" + next + "]");
-        }
+  private void parseTrailers() throws IOException {
+    // RFC 9112 §7.1.2: trailer-fields use the same syntax as header-fields. Feed the shared parser from our own buffer,
+    // reloading from the delegate when it drains, until the bare CRLF that ends the trailer section.
+    HTTPFieldParser parser = new HTTPFieldParser();
+    FieldConsumer consumer = this::addTrailer;
 
-        if (line.size() == 0) {
-          return; // bare CRLF — end of trailer section
+    while (!parser.isComplete()) {
+      if (bufferIndex >= bufferLength) {
+        bufferIndex = 0;
+        bufferLength = delegate.read(buffer);
+        if (bufferLength < 0) {
+          throw new ParseException("Unexpected end of stream while reading chunked trailers.");
         }
-
-        addTrailerLine(line.toString(StandardCharsets.US_ASCII));
-        line.reset();
-      } else {
-        line.write(b);
       }
+
+      bufferIndex += parser.feed(buffer, bufferIndex, bufferLength - bufferIndex, consumer);
     }
+
+    // Anything past the trailer section's terminating CRLF belongs to the next message; push it back to the delegate.
+    pushBackOverReadBytes();
   }
 
   private void pushBackOverReadBytes() {

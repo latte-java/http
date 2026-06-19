@@ -8,6 +8,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
+import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
 
 import static org.testng.Assert.*;
@@ -54,5 +55,31 @@ public class ChunkedInputStreamTrailersTest {
     assertNull(trailers.get("content-length"), "Forbidden trailer Content-Length must be dropped");
     assertNull(trailers.get("authorization"), "Forbidden trailer Authorization must be dropped");
     assertEquals(trailers.get("x-allowed"), List.of("kept"), "Allowed trailer X-Allowed must be kept");
+  }
+
+  @Test(expectedExceptions = ParseException.class)
+  public void strict_rejects_non_token_trailer_name() throws Exception {
+    // A space in the trailer name is not a tchar; the strict FSM rejects it.
+    String wire = "5\r\nhello\r\n0\r\nBad Name: x\r\n\r\n";
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(wire.getBytes()), null);
+    new ChunkedInputStream(pushback, 1024, 1_000_000).readAllBytes();
+  }
+
+  @Test(expectedExceptions = ParseException.class)
+  public void strict_rejects_control_byte_in_trailer_value() throws Exception {
+    String wire = "5\r\nhello\r\n0\r\nX-A: a\u0007b\r\n\r\n";
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(wire.getBytes()), null);
+    new ChunkedInputStream(pushback, 1024, 1_000_000).readAllBytes();
+  }
+
+  @Test
+  public void trailers_split_across_buffer_reloads() throws Exception {
+    // A 1-byte buffer forces the trailer block to be fed in many tiny slices; resumability must still work.
+    String wire = "5\r\nhello\r\n0\r\nX-Checksum: abc123\r\nX-Other: 42\r\n\r\n";
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(wire.getBytes()), null);
+    var chunked = new ChunkedInputStream(pushback, 1, 1_000_000);
+    assertEquals(new String(chunked.readAllBytes()), "hello");
+    assertEquals(chunked.getTrailers().get("x-checksum"), List.of("abc123"));
+    assertEquals(chunked.getTrailers().get("x-other"), List.of("42"));
   }
 }

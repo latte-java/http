@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2022-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -330,18 +330,19 @@ public final class HTTPTools {
                                           byte[] requestBuffer, Runnable readObserver)
       throws IOException {
     RequestPreambleState state = RequestPreambleState.RequestMethod;
-    // Local byte[]+int instead of ByteArrayOutputStream. Same per-request allocation pattern (one byte[] backing the value buffer) but
-    // without the wrapper object's synchronized write(int) and method-dispatch overhead. JFR profiling showed BAOS.write(int) at ~12% of
-    // parseRequestPreamble's CPU time. Capacity grows by doubling on overflow, mirroring BAOS behavior.
+    // Local byte[]+int for the request-line tokens (method, path, protocol). The header block is accumulated separately
+    // by the HTTPFieldParser below.
     byte[] valueBuffer = new byte[512];
     int valueLen = 0;
-    String headerName = null;
+
+    HTTPFieldParser fieldParser = null;
+    FieldConsumer consumer = request::addHeader;
 
     int read = 0;
     int index = 0;
-    int premableLength = 0;
+    int preambleLength = 0;
 
-    while (state != RequestPreambleState.Complete) {
+    while (fieldParser == null || !fieldParser.isComplete()) {
       long start = System.currentTimeMillis();
       read = inputStream.read(requestBuffer);
 
@@ -354,48 +355,61 @@ public final class HTTPTools {
       logger.trace("Read [{}] from client for preamble.", read);
 
       // Tell the callback that we've read at least one byte
-      if (premableLength == 0) {
+      if (preambleLength == 0) {
         readObserver.run();
       }
 
-      for (index = 0; index < read && state != RequestPreambleState.Complete; index++) {
-        // If there is a state transition, store the value properly and reset the buffer (if needed)
-        byte ch = requestBuffer[index];
-        RequestPreambleState nextState = state.next(ch);
-        if (nextState != state) {
-          switch (state) {
-            case RequestMethod ->
-                request.setMethod(HTTPMethod.of(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8)));
-            case RequestPath -> request.setPath(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
-            case RequestProtocol -> request.setProtocol(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
-            case HeaderName -> headerName = new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8);
-            case HeaderValue ->
-                request.addHeader(headerName, new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
-          }
+      index = 0;
 
-          // If the next state is storing, reset the buffer and seed it with the transition byte.
-          if (nextState.store()) {
-            valueLen = 0;
+      // Phase 1: the request line. Drive RequestPreambleState until the request-line CRLF has been consumed
+      // (state == RequestLF), storing the method, path, and protocol as each token ends.
+      if (fieldParser == null) {
+        for (; index < read && state != RequestPreambleState.RequestLF; index++) {
+          byte ch = requestBuffer[index];
+          RequestPreambleState nextState = state.next(ch);
+          if (nextState != state) {
+            switch (state) {
+              case RequestMethod -> request.setMethod(HTTPMethod.of(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8)));
+              case RequestPath -> request.setPath(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
+              case RequestProtocol -> request.setProtocol(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
+              default -> {
+                // Non-storing request-line states (the SP and CR states) have nothing to flush.
+              }
+            }
+
+            if (nextState.store()) {
+              valueLen = 0;
+              valueBuffer[valueLen++] = ch;
+            }
+          } else if (state.store()) {
+            if (valueLen == valueBuffer.length) {
+              valueBuffer = Arrays.copyOf(valueBuffer, valueBuffer.length * 2);
+            }
             valueBuffer[valueLen++] = ch;
           }
-        } else if (state.store()) {
-          if (valueLen == valueBuffer.length) {
-            valueBuffer = Arrays.copyOf(valueBuffer, valueBuffer.length * 2);
-          }
-          valueBuffer[valueLen++] = ch;
+
+          state = nextState;
         }
 
-        state = nextState;
+        // The request line is done once we reach RequestLF; hand the header block to the shared field parser.
+        if (state == RequestPreambleState.RequestLF) {
+          fieldParser = new HTTPFieldParser();
+        }
       }
 
-      // index is the number of bytes we processed as part of the preamble
-      premableLength += index;
-      if (maxRequestHeaderSize != -1 && premableLength > maxRequestHeaderSize) {
+      // Phase 2: the header field block.
+      if (fieldParser != null) {
+        index += fieldParser.feed(requestBuffer, index, read - index, consumer);
+      }
+
+      // index is the number of bytes we processed as part of the preamble this iteration.
+      preambleLength += index;
+      if (maxRequestHeaderSize != -1 && preambleLength > maxRequestHeaderSize) {
         throw new RequestHeadersTooLargeException(maxRequestHeaderSize, "The maximum size of the request header has been exceeded. The maximum size is [" + maxRequestHeaderSize + "] bytes.");
       }
     }
 
-    // Push back the leftover bytes
+    // Push back the leftover bytes (the start of the body, or the next pipelined request).
     if (index < read) {
       inputStream.push(requestBuffer, index, read - index);
     }
@@ -562,10 +576,10 @@ public final class HTTPTools {
     for (int i = start; i < end; i++) {
       if (name == null && chars[i] == '*') {
         encoded = true;
-        name = new String(chars, start, i - start).toLowerCase(Locale.ROOT);
+        name = HTTPTools.asciiLowerCase(new String(chars, start, i - start));
         start = i + 2;
       } else if (name == null && chars[i] == '=') {
-        name = new String(chars, start, i - start).toLowerCase(Locale.ROOT);
+        name = HTTPTools.asciiLowerCase(new String(chars, start, i - start));
         start = i + 1;
       } else if (name != null && encoded && charset == null && chars[i] == '\'') {
         String charsetName = new String(chars, start, i - start);
