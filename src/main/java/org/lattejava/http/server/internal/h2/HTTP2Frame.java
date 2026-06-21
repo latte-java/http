@@ -2,7 +2,7 @@
  * Copyright (c) 2026 The Latte Project
  * SPDX-License-Identifier: MIT
  */
-package org.lattejava.http.server.internal;
+package org.lattejava.http.server.internal.h2;
 
 /**
  * RFC 9113 §6 frame types. Each variant carries the fields specific to that frame type plus the common stream-id and

@@ -2,7 +2,7 @@
  * Copyright (c) 2026 The Latte Project
  * SPDX-License-Identifier: MIT
  */
-package org.lattejava.http.server.internal;
+package org.lattejava.http.server.internal.h2;
 
 /**
  * Per-connection HTTP/2 settings (RFC 9113 §6.5.2). Mutable so a single instance can be reused as the peer changes its

@@ -8,7 +8,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HPACKDynamicTable;
+import org.lattejava.http.server.internal.h2.HPACKDynamicTable;
 
 import static org.testng.Assert.*;
 

@@ -2,11 +2,11 @@
  * Copyright (c) 2026 The Latte Project
  * SPDX-License-Identifier: MIT
  */
-package org.lattejava.http.server.internal;
+package org.lattejava.http.server.internal.h2;
 
 import module java.base;
 
-import static org.lattejava.http.server.internal.HTTP2Frame.*;
+import static org.lattejava.http.server.internal.h2.HTTP2Frame.*;
 
 /**
  * Reads HTTP/2 frames from an InputStream. Owns the frame-read buffer (passed in by the caller, sized to

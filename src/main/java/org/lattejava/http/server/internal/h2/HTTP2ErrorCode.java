@@ -2,7 +2,7 @@
  * Copyright (c) 2026 The Latte Project
  * SPDX-License-Identifier: MIT
  */
-package org.lattejava.http.server.internal;
+package org.lattejava.http.server.internal.h2;
 
 /**
  * RFC 9113 §7 error codes.

@@ -2,7 +2,7 @@
  * Copyright (c) 2026 The Latte Project
  * SPDX-License-Identifier: MIT
  */
-package org.lattejava.http.server.internal;
+package org.lattejava.http.server.internal.h2;
 
 /**
  * Connection-level send flow-control window (RFC 9113 §6.9). Shared by every per-stream writer on a connection:

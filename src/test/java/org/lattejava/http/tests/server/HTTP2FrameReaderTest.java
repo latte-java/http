@@ -8,9 +8,9 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2Frame;
-import org.lattejava.http.server.internal.HTTP2FrameReader;
-import org.lattejava.http.server.internal.HTTP2FrameWriter;
+import org.lattejava.http.server.internal.h2.HTTP2Frame;
+import org.lattejava.http.server.internal.h2.HTTP2FrameReader;
+import org.lattejava.http.server.internal.h2.HTTP2FrameWriter;
 
 import static org.testng.Assert.*;
 

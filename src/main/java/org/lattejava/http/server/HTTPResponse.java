@@ -41,7 +41,9 @@ public class HTTPResponse {
   private String statusMessage;
 
   private ProtocolSwitchHandler switchProtocolsHandler;
+
   private Map<String, String> switchProtocolsHeaders;
+
   private String switchProtocolsTarget;
 
   private Map<String, List<String>> trailers;

@@ -18,6 +18,8 @@ package org.lattejava.http.server.internal;
 import module java.base;
 import module org.lattejava.http;
 
+import org.lattejava.http.server.internal.h2.*;
+
 /**
  * A thread that manages the accept process for a single server socket. Once a connection is accepted, the socket is
  * passed to a virtual thread for processing.

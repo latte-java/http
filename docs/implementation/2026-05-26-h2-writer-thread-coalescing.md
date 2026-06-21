@@ -305,9 +305,9 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2Connection;
-import org.lattejava.http.server.internal.HTTP2Frame;
-import org.lattejava.http.server.internal.HTTP2FrameWriter;
+import org.lattejava.http.server.internal.h2.HTTP2Connection;
+import org.lattejava.http.server.internal.h2.HTTP2Frame;
+import org.lattejava.http.server.internal.h2.HTTP2FrameWriter;
 
 import static org.testng.Assert.*;
 
@@ -324,6 +324,7 @@ public class HTTP2WriterCoalescingTest {
    */
   static final class CountingOutputStream extends OutputStream {
     final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
     int flushes;
 
     @Override
@@ -347,6 +348,7 @@ public class HTTP2WriterCoalescingTest {
    */
   static final class ThrowingOutputStream extends OutputStream {
     final int throwAfterBytes;
+
     int written;
 
     ThrowingOutputStream(int throwAfterBytes) {
@@ -354,7 +356,8 @@ public class HTTP2WriterCoalescingTest {
     }
 
     @Override
-    public void flush() {}
+    public void flush() {
+    }
 
     @Override
     public void write(int b) throws IOException {

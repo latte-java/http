@@ -8,7 +8,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HPACKHuffman;
+import org.lattejava.http.server.internal.h2.HPACKHuffman;
 
 import static org.testng.Assert.*;
 

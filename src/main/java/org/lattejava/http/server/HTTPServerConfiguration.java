@@ -18,8 +18,8 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
-import org.lattejava.http.server.internal.HTTP2RateLimits;
-import org.lattejava.http.server.internal.HTTP2Settings;
+import org.lattejava.http.server.internal.h2.HTTP2RateLimits;
+import org.lattejava.http.server.internal.h2.HTTP2Settings;
 
 /**
  * The HTTP Server configuration.

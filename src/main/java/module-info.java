@@ -11,4 +11,6 @@ module org.lattejava.http {
   exports org.lattejava.http.server.internal to org.lattejava.http.tests;
   exports org.lattejava.http.server.io;
   exports org.lattejava.http.util;
+  exports org.lattejava.http.server.internal.h1 to org.lattejava.http.tests;
+  exports org.lattejava.http.server.internal.h2 to org.lattejava.http.tests;
 }

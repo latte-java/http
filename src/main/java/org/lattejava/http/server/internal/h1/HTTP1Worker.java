@@ -13,13 +13,15 @@
  * either express or implied. See the License for the specific
  * language governing permissions and limitations under the License.
  */
-package org.lattejava.http.server.internal;
+package org.lattejava.http.server.internal.h1;
 
 import module java.base;
 import module org.lattejava.http;
 
 import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.server.internal.*;
+import org.lattejava.http.server.internal.h2.*;
 import org.lattejava.http.server.io.EmptyHTTPInputStream;
 
 /**
@@ -169,6 +171,7 @@ public class HTTP1Worker implements ClientConnection, Runnable {
               closeSocketOnError(response, Status.BadRequest);
               return;
             }
+
             // RFC 9113 §3.2 requires HTTP2-Settings to be present. The preamble parser drops headers with empty values, so
             // a null here may mean "present but empty" rather than truly absent. Treat both null and empty as an empty
             // settings payload — the practical effect is identical (no peer settings overrides), and rejecting empty
@@ -185,6 +188,7 @@ public class HTTP1Worker implements ClientConnection, Runnable {
                 return;
               }
             }
+
             HTTP2Settings peerSettings = HTTP2Settings.defaults();
             peerSettings.applyPayload(settingsPayload);
             // TODO Plan E: the h2c spec says the original HTTP/1.1 request becomes implicit stream 1 in the new HTTP/2

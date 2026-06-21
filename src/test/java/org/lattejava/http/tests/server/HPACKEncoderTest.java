@@ -8,9 +8,9 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HPACKDecoder;
-import org.lattejava.http.server.internal.HPACKDynamicTable;
-import org.lattejava.http.server.internal.HPACKEncoder;
+import org.lattejava.http.server.internal.h2.HPACKDecoder;
+import org.lattejava.http.server.internal.h2.HPACKDynamicTable;
+import org.lattejava.http.server.internal.h2.HPACKEncoder;
 
 import static org.testng.Assert.*;
 

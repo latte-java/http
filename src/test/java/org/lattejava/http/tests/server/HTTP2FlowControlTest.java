@@ -8,8 +8,8 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2ConnectionWindow;
-import org.lattejava.http.server.internal.HTTP2Stream;
+import org.lattejava.http.server.internal.h2.HTTP2ConnectionWindow;
+import org.lattejava.http.server.internal.h2.HTTP2Stream;
 
 import static org.testng.Assert.*;
 

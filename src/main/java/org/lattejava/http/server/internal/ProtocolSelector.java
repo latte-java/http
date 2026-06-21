@@ -10,6 +10,8 @@ import module org.lattejava.http;
 import javax.net.ssl.SSLSocket;
 
 import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.server.internal.h1.*;
+import org.lattejava.http.server.internal.h2.*;
 
 /**
  * Dispatches an accepted connection to either {@link HTTP1Worker} or {@link HTTP2Connection} based on TLS-ALPN
@@ -38,10 +40,12 @@ public class ProtocolSelector {
     if (socket instanceof SSLSocket sslSocket) {
       // Force handshake so ALPN selection has happened.
       sslSocket.startHandshake();
+
       String proto = sslSocket.getApplicationProtocol();
       if ("h2".equals(proto)) {
         return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, null);
       }
+
       // null, "", or "http/1.1" all → HTTP/1.1
       return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput);
     }
@@ -60,9 +64,11 @@ public class ProtocolSelector {
         // point so it is safe to pass directly to the worker.
         return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput, pushback);
       }
+
       if (n == HTTP2_PREFACE.length && Arrays.equals(peek, HTTP2_PREFACE)) {
         return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, /*prefaceConsumed=*/true);
       }
+
       // Preface did not match — this is an HTTP/1.1 (or other) client on an h2c prior-knowledge listener.
       // Push the peeked bytes back so the HTTP/1.1 worker sees a complete, unmodified request stream.
       pushback.push(peek, 0, n);

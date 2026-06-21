@@ -122,14 +122,14 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2Settings;
+import org.lattejava.http.server.internal.h2.HTTP2Settings;
 
 import static org.testng.Assert.*;
 
 public class HTTP2SettingsTest {
   @Test
   public void defaults_match_rfc() {
-    HTTP2Settings s = HTTP2Settings.defaults();
+    org.lattejava.http.server.internal.h2.HTTP2Settings s = org.lattejava.http.server.internal.h2.HTTP2Settings.defaults();
     assertEquals(s.headerTableSize(), 4096);
     assertEquals(s.enablePush(), 0);
     assertEquals(s.maxConcurrentStreams(), Integer.MAX_VALUE); // RFC default = unlimited
@@ -145,7 +145,7 @@ public class HTTP2SettingsTest {
         0, 1, 0, 0, 0x20, 0,          // id=1, value=8192
         0, 4, 0, 0x10, 0, 0           // id=4, value=1048576
     };
-    HTTP2Settings s = HTTP2Settings.defaults();
+    org.lattejava.http.server.internal.h2.HTTP2Settings s = org.lattejava.http.server.internal.h2.HTTP2Settings.defaults();
     s.applyPayload(payload);
     assertEquals(s.headerTableSize(), 8192);
     assertEquals(s.initialWindowSize(), 1048576);
@@ -154,7 +154,7 @@ public class HTTP2SettingsTest {
   @Test
   public void apply_payload_unknown_id_ignored() {
     byte[] payload = {0, 99, 0, 0, 0, 0}; // unknown setting id 99
-    HTTP2Settings s = HTTP2Settings.defaults();
+    org.lattejava.http.server.internal.h2.HTTP2Settings s = HTTP2Settings.defaults();
     s.applyPayload(payload); // should not throw
   }
 
@@ -162,7 +162,7 @@ public class HTTP2SettingsTest {
   public void apply_payload_invalid_initial_window_size() {
     // INITIAL_WINDOW_SIZE > 2^31 - 1 → FLOW_CONTROL_ERROR per RFC §6.5.2
     byte[] payload = {0, 4, (byte) 0x80, 0, 0, 0}; // value = 2^31
-    HTTP2Settings s = HTTP2Settings.defaults();
+    org.lattejava.http.server.internal.h2.HTTP2Settings s = org.lattejava.http.server.internal.h2.HTTP2Settings.defaults();
     expectThrows(HTTP2SettingsException.class, () -> s.applyPayload(payload));
   }
 }
@@ -443,17 +443,17 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2Frame;
-import org.lattejava.http.server.internal.HTTP2FrameReader;
+import org.lattejava.http.server.internal.h2.HTTP2Frame;
+import org.lattejava.http.server.internal.h2.HTTP2FrameReader;
 
 import static org.testng.Assert.*;
 
 public class HTTP2FrameReaderTest {
   private byte[] header(int length, int type, int flags, int streamId) {
     return new byte[]{
-        (byte)((length >> 16) & 0xFF), (byte)((length >> 8) & 0xFF), (byte)(length & 0xFF),
+        (byte) ((length >> 16) & 0xFF), (byte) ((length >> 8) & 0xFF), (byte) (length & 0xFF),
         (byte) type, (byte) flags,
-        (byte)((streamId >> 24) & 0x7F), (byte)((streamId >> 16) & 0xFF), (byte)((streamId >> 8) & 0xFF), (byte)(streamId & 0xFF)
+        (byte) ((streamId >> 24) & 0x7F), (byte) ((streamId >> 16) & 0xFF), (byte) ((streamId >> 8) & 0xFF), (byte) (streamId & 0xFF)
     };
   }
 
@@ -464,10 +464,10 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(payload.length, 0x0, 0x1, 7));
     bytes.write(payload);
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
-    HTTP2Frame frame = reader.readFrame();
+    var reader = new org.lattejava.http.server.internal.h2.HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    org.lattejava.http.server.internal.h2.HTTP2Frame frame = reader.readFrame();
 
-    assertTrue(frame instanceof HTTP2Frame.DataFrame);
+    assertTrue(frame instanceof org.lattejava.http.server.internal.h2.HTTP2Frame.DataFrame);
     var data = (HTTP2Frame.DataFrame) frame;
     assertEquals(data.streamId(), 7);
     assertEquals(data.flags(), 0x1);
@@ -482,7 +482,7 @@ public class HTTP2FrameReaderTest {
     var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
     HTTP2Frame frame = reader.readFrame();
 
-    assertTrue(frame instanceof HTTP2Frame.SettingsFrame);
+    assertTrue(frame instanceof org.lattejava.http.server.internal.h2.HTTP2Frame.SettingsFrame);
     assertEquals(frame.flags(), 0x1);
   }
 
@@ -492,10 +492,10 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(4, 0x8, 0, 3));
     bytes.write(new byte[]{0, 0, 0, 100});
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
-    HTTP2Frame frame = reader.readFrame();
+    var reader = new org.lattejava.http.server.internal.h2.HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    org.lattejava.http.server.internal.h2.HTTP2Frame frame = reader.readFrame();
 
-    var wu = (HTTP2Frame.WindowUpdateFrame) frame;
+    var wu = (org.lattejava.http.server.internal.h2.HTTP2Frame.WindowUpdateFrame) frame;
     assertEquals(wu.streamId(), 3);
     assertEquals(wu.windowSizeIncrement(), 100);
   }
@@ -506,11 +506,11 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(2, 0xFE, 0, 5));
     bytes.write(new byte[]{1, 2});
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
-    HTTP2Frame frame = reader.readFrame();
+    var reader = new org.lattejava.http.server.internal.h2.HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    org.lattejava.http.server.internal.h2.HTTP2Frame frame = reader.readFrame();
 
-    assertTrue(frame instanceof HTTP2Frame.UnknownFrame);
-    var unk = (HTTP2Frame.UnknownFrame) frame;
+    assertTrue(frame instanceof org.lattejava.http.server.internal.h2.HTTP2Frame.UnknownFrame);
+    var unk = (org.lattejava.http.server.internal.h2.HTTP2Frame.UnknownFrame) frame;
     assertEquals(unk.type(), 0xFE);
   }
 
@@ -520,8 +520,8 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(3, 0x3, 0, 1)); // RST_STREAM payload must be exactly 4
     bytes.write(new byte[]{1, 2, 3});
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
-    expectThrows(HTTP2FrameReader.FrameSizeException.class, reader::readFrame);
+    var reader = new org.lattejava.http.server.internal.h2.HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    expectThrows(org.lattejava.http.server.internal.h2.HTTP2FrameReader.FrameSizeException.class, reader::readFrame);
   }
 }
 ```
@@ -542,7 +542,9 @@ package org.lattejava.http.server.internal;
 
 import module java.base;
 
-import static org.lattejava.http.server.internal.HTTP2Frame.*;
+import org.lattejava.http.server.internal.h2.*;
+
+import static org.lattejava.http.server.internal.h2.HTTP2Frame.*;
 
 /**
  * Reads HTTP/2 frames from an InputStream. Owns the frame-read buffer (passed in by the caller, sized to MAX_FRAME_SIZE). Single-threaded — instance must not be shared across threads.
@@ -591,7 +593,8 @@ public class HTTP2FrameReader {
         yield new RstStreamFrame(streamId, code);
       }
       case FRAME_TYPE_SETTINGS -> {
-        if ((flags & FLAG_ACK) != 0 && length != 0) throw new FrameSizeException("SETTINGS ACK must have empty payload");
+        if ((flags & FLAG_ACK) != 0 && length != 0)
+          throw new FrameSizeException("SETTINGS ACK must have empty payload");
         if (length % 6 != 0) throw new FrameSizeException("SETTINGS payload length [" + length + "] not multiple of 6");
         yield new SettingsFrame(flags, copyOf(buffer, length));
       }
@@ -633,7 +636,9 @@ public class HTTP2FrameReader {
   }
 
   public static class FrameSizeException extends IOException {
-    public FrameSizeException(String message) { super(message); }
+    public FrameSizeException(String message) {
+      super(message);
+    }
   }
 }
 ```
@@ -716,7 +721,9 @@ package org.lattejava.http.server.internal;
 
 import module java.base;
 
-import static org.lattejava.http.server.internal.HTTP2Frame.*;
+import org.lattejava.http.server.internal.h2.*;
+
+import static org.lattejava.http.server.internal.h2.HTTP2Frame.*;
 
 public class HTTP2FrameWriter {
   private final byte[] buffer;
@@ -749,8 +756,10 @@ public class HTTP2FrameWriter {
         System.arraycopy(f.debugData(), 0, payload, 8, f.debugData().length);
         writeWithPayload(FRAME_TYPE_GOAWAY, 0, 0, payload);
       }
-      case WindowUpdateFrame f -> writeWithPayload(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), int32(f.windowSizeIncrement() & 0x7FFFFFFF));
-      case ContinuationFrame f -> writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.headerBlockFragment());
+      case WindowUpdateFrame f ->
+          writeWithPayload(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), int32(f.windowSizeIncrement() & 0x7FFFFFFF));
+      case ContinuationFrame f ->
+          writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.headerBlockFragment());
       case UnknownFrame f -> writeWithPayload(f.type(), f.flags(), f.streamId(), f.payload());
     }
   }
@@ -818,7 +827,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HPACKHuffman;
+import org.lattejava.http.server.internal.h2.HPACKHuffman;
 
 import static org.testng.Assert.*;
 
@@ -827,7 +836,7 @@ public class HPACKHuffmanTest {
   @Test
   public void encode_decode_www_example_com() {
     String s = "www.example.com";
-    byte[] encoded = HPACKHuffman.encode(s.getBytes());
+    byte[] encoded = org.lattejava.http.server.internal.h2.HPACKHuffman.encode(s.getBytes());
     // Expected hex per RFC: f1e3 c2e5 f23a 6ba0 ab90 f4ff
     byte[] expected = hex("f1e3c2e5f23a6ba0ab90f4ff");
     assertEquals(encoded, expected);
@@ -839,17 +848,17 @@ public class HPACKHuffmanTest {
   @Test
   public void encode_decode_custom_key() {
     String s = "custom-key";
-    byte[] encoded = HPACKHuffman.encode(s.getBytes());
+    byte[] encoded = org.lattejava.http.server.internal.h2.HPACKHuffman.encode(s.getBytes());
     byte[] expected = hex("25a849e95ba97d7f"); // per RFC
     assertEquals(encoded, expected);
-    assertEquals(new String(HPACKHuffman.decode(encoded)), s);
+    assertEquals(new String(org.lattejava.http.server.internal.h2.HPACKHuffman.decode(encoded)), s);
   }
 
   @Test
   public void empty_round_trip() {
-    byte[] encoded = HPACKHuffman.encode(new byte[0]);
+    byte[] encoded = org.lattejava.http.server.internal.h2.HPACKHuffman.encode(new byte[0]);
     assertEquals(encoded.length, 0);
-    assertEquals(HPACKHuffman.decode(encoded).length, 0);
+    assertEquals(org.lattejava.http.server.internal.h2.HPACKHuffman.decode(encoded).length, 0);
   }
 
   private static byte[] hex(String h) {
@@ -951,21 +960,21 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HPACKDynamicTable;
+import org.lattejava.http.server.internal.h2.HPACKDynamicTable;
 
 import static org.testng.Assert.*;
 
 public class HPACKDynamicTableTest {
   @Test
   public void empty_table_has_size_zero() {
-    var t = new HPACKDynamicTable(4096);
+    var t = new org.lattejava.http.server.internal.h2.HPACKDynamicTable(4096);
     assertEquals(t.size(), 0);
     assertEquals(t.entryCount(), 0);
   }
 
   @Test
   public void add_one_entry() {
-    var t = new HPACKDynamicTable(4096);
+    var t = new org.lattejava.http.server.internal.h2.HPACKDynamicTable(4096);
     t.add(":status", "200");
     assertEquals(t.entryCount(), 1);
     // size = name(7) + value(3) + 32 = 42
@@ -976,7 +985,7 @@ public class HPACKDynamicTableTest {
 
   @Test
   public void evicts_when_over_capacity() {
-    var t = new HPACKDynamicTable(80); // tight
+    var t = new org.lattejava.http.server.internal.h2.HPACKDynamicTable(80); // tight
     t.add("a", "1");  // 1+1+32 = 34
     t.add("b", "2");  // 1+1+32 = 34, total 68
     t.add("c", "3");  // 1+1+32 = 34, total 102 — must evict oldest entries
@@ -997,7 +1006,7 @@ public class HPACKDynamicTableTest {
   @Test
   public void max_size_zero_accepts_no_entries() {
     // RFC 7541 §6.3 — peer can advertise HEADER_TABLE_SIZE=0 to disable compression. Decoder must not NPE / div-by-zero.
-    var t = new HPACKDynamicTable(0);
+    var t = new org.lattejava.http.server.internal.h2.HPACKDynamicTable(0);
     t.add("a", "1");
     assertEquals(t.entryCount(), 0);
     assertEquals(t.size(), 0);
@@ -1096,8 +1105,8 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HPACKDecoder;
-import org.lattejava.http.server.internal.HPACKDynamicTable;
+import org.lattejava.http.server.internal.h2.HPACKDecoder;
+import org.lattejava.http.server.internal.h2.HPACKDynamicTable;
 
 import static org.testng.Assert.*;
 
@@ -1120,7 +1129,7 @@ public class HPACKDecoderTest {
   @Test
   public void indexed_static() throws Exception {
     byte[] block = {(byte) 0x82};
-    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    var decoder = new org.lattejava.http.server.internal.h2.HPACKDecoder(new HPACKDynamicTable(4096));
     var fields = decoder.decode(block);
     assertEquals(fields.size(), 1);
     assertEquals(fields.get(0).name(), ":method");
@@ -1131,20 +1140,24 @@ public class HPACKDecoderTest {
   @Test
   public void appendix_c3_1_request_no_huffman() throws Exception {
     byte[] block = hex("828684410f7777772e6578616d706c652e636f6d");
-    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    var decoder = new HPACKDecoder(new org.lattejava.http.server.internal.h2.HPACKDynamicTable(4096));
     var fields = decoder.decode(block);
     assertEquals(fields.size(), 4);
-    assertEquals(fields.get(0).name(), ":method");    assertEquals(fields.get(0).value(), "GET");
-    assertEquals(fields.get(1).name(), ":scheme");    assertEquals(fields.get(1).value(), "http");
-    assertEquals(fields.get(2).name(), ":path");      assertEquals(fields.get(2).value(), "/");
-    assertEquals(fields.get(3).name(), ":authority"); assertEquals(fields.get(3).value(), "www.example.com");
+    assertEquals(fields.get(0).name(), ":method");
+    assertEquals(fields.get(0).value(), "GET");
+    assertEquals(fields.get(1).name(), ":scheme");
+    assertEquals(fields.get(1).value(), "http");
+    assertEquals(fields.get(2).name(), ":path");
+    assertEquals(fields.get(2).value(), "/");
+    assertEquals(fields.get(3).name(), ":authority");
+    assertEquals(fields.get(3).value(), "www.example.com");
   }
 
   // RFC 7541 Appendix C.4.1: same request, Huffman-encoded
   @Test
   public void appendix_c4_1_request_with_huffman() throws Exception {
     byte[] block = hex("828684418cf1e3c2e5f23a6ba0ab90f4ff");
-    var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+    var decoder = new HPACKDecoder(new org.lattejava.http.server.internal.h2.HPACKDynamicTable(4096));
     var fields = decoder.decode(block);
     assertEquals(fields.size(), 4);
     assertEquals(fields.get(3).name(), ":authority");
@@ -1173,6 +1186,8 @@ Expected: COMPILATION FAILURE.
 package org.lattejava.http.server.internal;
 
 import module java.base;
+
+import org.lattejava.http.server.internal.h2.*;
 
 public class HPACKDecoder {
   // RFC 7541 Appendix A — 61 entries, indexed 1..61.
@@ -1255,7 +1270,8 @@ public class HPACKDecoder {
     return dynamicTable.get(index - 62);
   }
 
-  private record NameValuePair(HPACKDynamicTable.HeaderField field, int nextIndex) {}
+  private record NameValuePair(HPACKDynamicTable.HeaderField field, int nextIndex) {
+  }
 
   private NameValuePair readNameValue(byte[] block, int start, int nameIndex) throws IOException {
     String name;
@@ -1272,7 +1288,8 @@ public class HPACKDecoder {
     return new NameValuePair(new HPACKDynamicTable.HeaderField(name, v.value()), v.nextIndex());
   }
 
-  private record StringResult(String value, int nextIndex) {}
+  private record StringResult(String value, int nextIndex) {
+  }
 
   private StringResult readString(byte[] block, int i) throws IOException {
     boolean huffman = (block[i] & 0x80) != 0;
@@ -1323,25 +1340,25 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HPACKDecoder;
-import org.lattejava.http.server.internal.HPACKDynamicTable;
-import org.lattejava.http.server.internal.HPACKEncoder;
+import org.lattejava.http.server.internal.h2.HPACKDecoder;
+import org.lattejava.http.server.internal.h2.HPACKDynamicTable;
+import org.lattejava.http.server.internal.h2.HPACKEncoder;
 
 import static org.testng.Assert.*;
 
 public class HPACKEncoderTest {
   @Test
   public void round_trip_via_decoder() throws Exception {
-    var encTable = new HPACKDynamicTable(4096);
-    var decTable = new HPACKDynamicTable(4096);
+    var encTable = new org.lattejava.http.server.internal.h2.HPACKDynamicTable(4096);
+    var decTable = new org.lattejava.http.server.internal.h2.HPACKDynamicTable(4096);
     var encoder = new HPACKEncoder(encTable);
     var decoder = new HPACKDecoder(decTable);
 
-    List<HPACKDynamicTable.HeaderField> input = List.of(
-        new HPACKDynamicTable.HeaderField(":method", "GET"),
+    List<org.lattejava.http.server.internal.h2.HPACKDynamicTable.HeaderField> input = List.of(
+        new org.lattejava.http.server.internal.h2.HPACKDynamicTable.HeaderField(":method", "GET"),
         new HPACKDynamicTable.HeaderField(":scheme", "https"),
-        new HPACKDynamicTable.HeaderField(":path", "/"),
-        new HPACKDynamicTable.HeaderField(":authority", "example.com"),
+        new org.lattejava.http.server.internal.h2.HPACKDynamicTable.HeaderField(":path", "/"),
+        new org.lattejava.http.server.internal.h2.HPACKDynamicTable.HeaderField(":authority", "example.com"),
         new HPACKDynamicTable.HeaderField("custom", "value")
     );
 
@@ -1352,8 +1369,8 @@ public class HPACKEncoderTest {
 
   @Test
   public void uses_static_table_for_method_get() throws Exception {
-    var encoder = new HPACKEncoder(new HPACKDynamicTable(4096));
-    byte[] block = encoder.encode(List.of(new HPACKDynamicTable.HeaderField(":method", "GET")));
+    var encoder = new HPACKEncoder(new org.lattejava.http.server.internal.h2.HPACKDynamicTable(4096));
+    byte[] block = encoder.encode(List.of(new org.lattejava.http.server.internal.h2.HPACKDynamicTable.HeaderField(":method", "GET")));
     // RFC 7541 Appendix A index 2 → 0x82 (1-bit indexed prefix + 7-bit value=2)
     assertEquals(block, new byte[]{(byte) 0x82});
   }
@@ -1378,6 +1395,8 @@ Strategy:
 package org.lattejava.http.server.internal;
 
 import module java.base;
+
+import org.lattejava.http.server.internal.h2.*;
 
 public class HPACKEncoder {
   private static final Set<String> SENSITIVE = Set.of("set-cookie", "authorization");
@@ -1485,9 +1504,9 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2Stream;
-import org.lattejava.http.server.internal.HTTP2Stream.State;
-import org.lattejava.http.server.internal.HTTP2Stream.Event;
+import org.lattejava.http.server.internal.h2.HTTP2Stream;
+import org.lattejava.http.server.internal.h2.HTTP2Stream.State;
+import org.lattejava.http.server.internal.h2.HTTP2Stream.Event;
 
 import static org.testng.Assert.*;
 
@@ -1509,7 +1528,7 @@ public class HTTP2StreamStateMachineTest {
 
   @Test
   public void open_to_half_closed_remote_on_recv_data_with_end_stream() {
-    var s = new HTTP2Stream(1, 65535, 65535);
+    var s = new org.lattejava.http.server.internal.h2.HTTP2Stream(1, 65535, 65535);
     s.applyEvent(Event.RECV_HEADERS_NO_END_STREAM);
     s.applyEvent(Event.RECV_DATA_END_STREAM);
     assertEquals(s.state(), State.HALF_CLOSED_REMOTE);
@@ -1534,7 +1553,7 @@ public class HTTP2StreamStateMachineTest {
 
   @Test
   public void illegal_event_throws() {
-    var s = new HTTP2Stream(1, 65535, 65535);
+    var s = new org.lattejava.http.server.internal.h2.HTTP2Stream(1, 65535, 65535);
     expectThrows(IllegalStateException.class, () -> s.applyEvent(Event.RECV_DATA_END_STREAM));
   }
 }
@@ -1676,7 +1695,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2Stream;
+import org.lattejava.http.server.internal.h2.HTTP2Stream;
 
 import static org.testng.Assert.*;
 
@@ -1704,7 +1723,7 @@ public class HTTP2FlowControlTest {
 
   @Test
   public void receive_window_replenishes() {
-    var s = new HTTP2Stream(1, 1000, 65535);
+    var s = new org.lattejava.http.server.internal.h2.HTTP2Stream(1, 1000, 65535);
     s.consumeReceiveWindow(400);
     assertEquals(s.receiveWindow(), 600);
     s.incrementReceiveWindow(400);

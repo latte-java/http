@@ -8,7 +8,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2ErrorCode;
+import org.lattejava.http.server.internal.h2.*;
 
 import static org.testng.Assert.*;
 
@@ -22,7 +22,7 @@ import static org.testng.Assert.*;
  *
  * <p>Empty-DATA flood: intentionally omitted. A meaningful DATA flood test requires an open, half-open stream to
  * send DATA on, which substantially complicates test setup (requires a valid HEADERS frame with HPACK encoding first).
- * The empty-DATA rate-limit code path in {@link org.lattejava.http.server.internal.HTTP2Connection} is exercised by the
+ * The empty-DATA rate-limit code path in {@link HTTP2Connection} is exercised by the
  * unit tests in {@link HTTP2RateLimitsTest}. A future plan (Plan F) should add the integration-level coverage.
  *
  * @author Daniel DeGroff

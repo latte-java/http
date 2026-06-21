@@ -364,7 +364,10 @@ import module java.base;
 import module org.lattejava.http;
 
 import javax.net.ssl.SSLSocket;
+
 import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.server.internal.h1.*;
+import org.lattejava.http.server.internal.h2.*;
 
 public class ProtocolSelector {
   private static final byte[] HTTP2_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
@@ -404,7 +407,8 @@ public class ProtocolSelector {
     return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput);
   }
 
-  private ProtocolSelector() {}
+  private ProtocolSelector() {
+  }
 }
 ```
 
@@ -456,7 +460,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2RateLimits;
+import org.lattejava.http.server.internal.h2.HTTP2RateLimits;
 
 import static org.testng.Assert.*;
 
@@ -660,6 +664,8 @@ package org.lattejava.http.server.internal;
 import module java.base;
 import module org.lattejava.http;
 
+import org.lattejava.http.server.internal.h2.*;
+
 public class HTTP2Connection implements ClientConnection, Runnable {
   private static final byte[] PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
 
@@ -670,6 +676,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private final HTTPContext context;
 
   private final HTTP2Settings localSettings;
+
   private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
 
   private final HTTPListenerConfiguration listener;
@@ -707,16 +714,24 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   @Override
-  public long getHandledRequests() { return handledRequests; }
+  public long getHandledRequests() {
+    return handledRequests;
+  }
 
   @Override
-  public Socket getSocket() { return socket; }
+  public Socket getSocket() {
+    return socket;
+  }
 
   @Override
-  public long getStartInstant() { return startInstant; }
+  public long getStartInstant() {
+    return startInstant;
+  }
 
   @Override
-  public ClientConnection.State state() { return state; }
+  public ClientConnection.State state() {
+    return state;
+  }
 
   @Override
   public void run() {
@@ -753,7 +768,10 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     } catch (Exception e) {
       logger.debug("HTTP/2 connection ended", e);
     } finally {
-      try { socket.close(); } catch (IOException ignore) {}
+      try {
+        socket.close();
+      } catch (IOException ignore) {
+      }
     }
   }
 
@@ -774,13 +792,18 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   private static void writeSetting(java.io.ByteArrayOutputStream out, int id, int value) {
-    out.write((id >> 8) & 0xFF); out.write(id & 0xFF);
-    out.write((value >> 24) & 0xFF); out.write((value >> 16) & 0xFF);
-    out.write((value >> 8) & 0xFF); out.write(value & 0xFF);
+    out.write((id >> 8) & 0xFF);
+    out.write(id & 0xFF);
+    out.write((value >> 24) & 0xFF);
+    out.write((value >> 16) & 0xFF);
+    out.write((value >> 8) & 0xFF);
+    out.write(value & 0xFF);
   }
 
   public static class HTTP2ProtocolException extends RuntimeException {
-    public HTTP2ProtocolException(String msg) { super(msg); }
+    public HTTP2ProtocolException(String msg) {
+      super(msg);
+    }
   }
 }
 ```
@@ -884,14 +907,20 @@ package org.lattejava.http.server.internal;
 
 import module java.base;
 
+import org.lattejava.http.server.internal.h2.*;
+
 /**
  * Per-stream output. Buffers writes locally; on flush/close, fragments against peer MAX_FRAME_SIZE and enqueues DATA frames to the connection writer queue. Blocks on stream send-window when out of credits; the connection reader signals the per-stream condition on WINDOW_UPDATE.
  */
 public class HTTP2OutputStream extends OutputStream {
   private final BlockingQueue<HTTP2Frame> writerQueue;
+
   private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
   private final HTTP2Stream stream;
+
   private final int peerMaxFrameSize;
+
   private boolean closed;
 
   public HTTP2OutputStream(HTTP2Stream stream, BlockingQueue<HTTP2Frame> writerQueue, int peerMaxFrameSize) {
@@ -913,10 +942,14 @@ public class HTTP2OutputStream extends OutputStream {
   }
 
   @Override
-  public void write(int b) throws IOException { buffer.write(b); }
+  public void write(int b) throws IOException {
+    buffer.write(b);
+  }
 
   @Override
-  public void write(byte[] b, int off, int len) throws IOException { buffer.write(b, off, len); }
+  public void write(byte[] b, int off, int len) throws IOException {
+    buffer.write(b, off, len);
+  }
 
   private void flushAndFragment(boolean endStream) throws IOException {
     byte[] all = buffer.toByteArray();
@@ -927,7 +960,9 @@ public class HTTP2OutputStream extends OutputStream {
       // Block on flow-control if needed.
       while (stream.sendWindow() < chunk) {
         try {
-          synchronized (stream) { stream.wait(100); } // signaled by reader on WINDOW_UPDATE
+          synchronized (stream) {
+            stream.wait(100);
+          } // signaled by reader on WINDOW_UPDATE
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
           throw new InterruptedIOException();

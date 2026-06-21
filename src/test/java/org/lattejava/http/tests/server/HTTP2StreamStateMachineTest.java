@@ -8,9 +8,9 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.HTTP2Stream;
-import org.lattejava.http.server.internal.HTTP2Stream.Event;
-import org.lattejava.http.server.internal.HTTP2Stream.State;
+import org.lattejava.http.server.internal.h2.HTTP2Stream;
+import org.lattejava.http.server.internal.h2.HTTP2Stream.Event;
+import org.lattejava.http.server.internal.h2.HTTP2Stream.State;
 
 import static org.testng.Assert.*;
 

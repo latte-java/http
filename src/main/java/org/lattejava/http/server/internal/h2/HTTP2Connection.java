@@ -2,12 +2,13 @@
  * Copyright (c) 2026 The Latte Project
  * SPDX-License-Identifier: MIT
  */
-package org.lattejava.http.server.internal;
+package org.lattejava.http.server.internal.h2;
 
 import module java.base;
 import module org.lattejava.http;
 
 import org.lattejava.http.io.PushbackInputStream;
+import org.lattejava.http.server.internal.*;
 import org.lattejava.http.server.io.EmptyHTTPInputStream;
 
 /**
