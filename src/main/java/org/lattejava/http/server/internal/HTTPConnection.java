@@ -19,6 +19,13 @@ public interface HTTPConnection extends Runnable {
   long getStartInstant();
 
   /**
+   * Initiates a graceful, in-band shutdown of this connection if the protocol supports one. HTTP/2 emits
+   * {@code GOAWAY(NO_ERROR)}; HTTP/1.1 has no such signal and implements this as a no-op. Called by
+   * {@link HTTPServerAcceptorThread} during server shutdown, before the connection's thread is interrupted.
+   */
+  void shutdown();
+
+  /**
    * Aggregated state across the connection's threads. For HTTP/1.1 this is the worker's state; for HTTP/2 this is the
    * worst-case role state across reader/writer/active handlers (Read if any thread is blocked reading, Write if any is
    * blocked writing, otherwise Process).

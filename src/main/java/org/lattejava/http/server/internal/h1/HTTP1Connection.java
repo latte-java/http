@@ -304,6 +304,14 @@ public class HTTP1Connection implements HTTPConnection {
     }
   }
 
+  /**
+   * HTTP/1.1 has no graceful in-band shutdown signal; the connection is torn down by the socket close and thread
+   * interrupt that {@link HTTPServerAcceptorThread} performs at server shutdown. Intentionally a no-op.
+   */
+  @Override
+  public void shutdown() {
+  }
+
   @Override
   public HTTPConnection.State state() {
     return state;

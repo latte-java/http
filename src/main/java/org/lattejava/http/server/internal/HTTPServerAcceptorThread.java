@@ -18,8 +18,6 @@ package org.lattejava.http.server.internal;
 import module java.base;
 import module org.lattejava.http;
 
-import org.lattejava.http.server.internal.h2.*;
-
 /**
  * A thread that manages the accept process for a single server socket. Once a connection is accepted, the socket is
  * passed to a virtual thread for processing.
@@ -144,9 +142,7 @@ public class HTTPServerAcceptorThread extends Thread {
     // Close all the client connections as cleanly as possible.
     // HTTP/2 connections get a GOAWAY(NO_ERROR) so the peer knows the server is shutting down gracefully.
     for (ClientConnection client : clients) {
-      if (client.connection() instanceof HTTP2Connection h2) {
-        h2.shutdown();
-      }
+      client.connection().shutdown();
     }
     for (ClientConnection client : clients) {
       client.thread().interrupt();

@@ -158,6 +158,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
    * The writer thread emits it and in-flight streams are given up to the server's configured shutdown duration to
    * complete before the socket is force-closed by {@link HTTPServer}.
    */
+  @Override
   public void shutdown() {
     enqueueForWriter(new HTTP2Frame.GoawayFrame(highestSeenStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
   }
