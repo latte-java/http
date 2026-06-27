@@ -277,7 +277,7 @@ public class HTTP1Connection implements HTTPConnection {
       logger.debug("[{}] Closing socket with status [{}]. Bad request, failed to parse request. Reason [{}] Parser state [{}]", Thread.currentThread().threadId(), Status.BadRequest, e.getMessage(), e.getState());
       closeSocketOnError(response, Status.BadRequest);
     } catch (SocketException e) {
-      // When the HTTPServerThread shuts down, we will interrupt each client thread, so debug log it accordingly.
+      // When the HTTPServerAcceptorThread shuts down, we will interrupt each client thread, so debug log it accordingly.
       // - This will cause the socket to throw a SocketException, so log it.
       if (Thread.currentThread().isInterrupted()) {
         logger.debug("[{}] Closing socket. Server is shutting down.", Thread.currentThread().threadId());

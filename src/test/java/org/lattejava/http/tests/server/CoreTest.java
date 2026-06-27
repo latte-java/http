@@ -356,7 +356,7 @@ public class CoreTest extends BaseTest {
 
   /**
    * Regression: when HTTP1Connection.state() collapses its private {@code KeepAlive} state into {@code State.Read}, the
-   * HTTPServerThread cleaner applies its slow-reader throughput check to idle keep-alive sockets and evicts them after
+   * ConnectionReaperThread applies its slow-reader throughput check to idle keep-alive sockets and evicts them after
    * one cleaner cycle. A long-lived keep-alive socket whose first request finishes quickly accumulates a tiny number of
    * bytes over a now-long elapsed time, which computes below any reasonable minimum-throughput threshold. This test
    * sends one request, idles past two cleaner cycles, then sends a second request on the same raw socket — proving the
@@ -383,7 +383,7 @@ public class CoreTest extends BaseTest {
         assertTrue(n1 > 0, "Should read first response");
         assertTrue(new String(buf1, 0, n1).startsWith("HTTP/1.1 200"), "First response should be 200");
 
-        // The HTTPServerThread cleaner cycles every 2 seconds; sleep past at least two cycles so any incorrect
+        // The ConnectionReaperThread cycles every 2 seconds; sleep past at least two cycles so any incorrect
         // eviction would already have closed our socket from the server side.
         Thread.sleep(5_000);
 

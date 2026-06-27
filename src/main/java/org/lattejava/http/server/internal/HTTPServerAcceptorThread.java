@@ -26,10 +26,10 @@ import org.lattejava.http.server.internal.h2.*;
  *
  * @author Brian Pontarelli
  */
-public class HTTPServerThread extends Thread {
-  private final HTTPServerCleanerThread cleaner;
+public class HTTPServerAcceptorThread extends Thread {
+  private final ConnectionReaperThread cleaner;
 
-  private final Deque<ClientInfo> clients = new ConcurrentLinkedDeque<>();
+  private final Deque<ClientConnection> clients = new ConcurrentLinkedDeque<>();
 
   private final HTTPServerConfiguration configuration;
 
@@ -49,7 +49,7 @@ public class HTTPServerThread extends Thread {
 
   private volatile boolean running;
 
-  public HTTPServerThread(HTTPServerConfiguration configuration, HTTPContext context, HTTPListenerConfiguration listener)
+  public HTTPServerAcceptorThread(HTTPServerConfiguration configuration, HTTPContext context, HTTPListenerConfiguration listener)
       throws IOException, GeneralSecurityException {
     super("HTTP server [" + listener.getBindAddress().toString() + ":" + listener.getPort() + "]");
 
@@ -57,10 +57,10 @@ public class HTTPServerThread extends Thread {
     this.context = context;
     this.listener = listener;
     this.instrumenter = configuration.getInstrumenter();
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPServerThread.class);
+    this.logger = configuration.getLoggerFactory().getLogger(HTTPServerAcceptorThread.class);
     this.minimumReadThroughput = configuration.getMinimumReadThroughput();
     this.minimumWriteThroughput = configuration.getMinimumWriteThroughput();
-    this.cleaner = new HTTPServerCleanerThread();
+    this.cleaner = new ConnectionReaperThread();
 
     if (listener.isTLS()) {
       SSLContext sslContext = SecurityTools.serverContext(listener.getCertificateChain(), listener.getPrivateKey());
@@ -120,7 +120,7 @@ public class HTTPServerThread extends Thread {
                               .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
                               .start(conn);
 
-        clients.add(new ClientInfo(client, conn, throughput));
+        clients.add(new ClientConnection(client, conn, throughput));
       } catch (SocketTimeoutException ignore) {
         // Completely smother since this is expected with the SO_TIMEOUT setting in the constructor
         logger.debug("Nothing accepted. Cleaning up existing connections.");
@@ -143,12 +143,12 @@ public class HTTPServerThread extends Thread {
 
     // Close all the client connections as cleanly as possible.
     // HTTP/2 connections get a GOAWAY(NO_ERROR) so the peer knows the server is shutting down gracefully.
-    for (ClientInfo client : clients) {
-      if (client.runnable() instanceof HTTP2Connection h2) {
+    for (ClientConnection client : clients) {
+      if (client.connection() instanceof HTTP2Connection h2) {
         h2.shutdown();
       }
     }
-    for (ClientInfo client : clients) {
+    for (ClientConnection client : clients) {
       client.thread().interrupt();
     }
   }
@@ -172,23 +172,23 @@ public class HTTPServerThread extends Thread {
   }
 
   // - In theory we could hold onto some meta-data here that keeps track of how many requests we have processed on this thread and then exit.
-  record ClientInfo(Thread thread, HTTPConnection runnable, Throughput throughput) {
+  record ClientConnection(Thread thread, HTTPConnection connection, Throughput throughput) {
 
     public long getAge() {
-      return System.currentTimeMillis() - runnable().getStartInstant();
+      return System.currentTimeMillis() - connection().getStartInstant();
     }
 
     public long getHandledRequests() {
-      return runnable().getHandledRequests();
+      return connection().getHandledRequests();
     }
 
     public long getStartInstant() {
-      return runnable().getStartInstant();
+      return connection().getStartInstant();
     }
   }
 
-  private class HTTPServerCleanerThread extends Thread {
-    public HTTPServerCleanerThread() {
+  private class ConnectionReaperThread extends Thread {
+    public ConnectionReaperThread() {
       super("Cleaner for HTTP server [" + listener.getBindAddress().toString() + ":" + listener.getPort() + "]");
     }
 
@@ -199,9 +199,9 @@ public class HTTPServerThread extends Thread {
         int removedClientCount = 0;
         logger.trace("Wake up. Review [{}] client worker threads for cleanup.", currentClientCount);
 
-        Iterator<ClientInfo> iterator = clients.iterator();
+        Iterator<ClientConnection> iterator = clients.iterator();
         while (iterator.hasNext()) {
-          ClientInfo client = iterator.next();
+          ClientConnection client = iterator.next();
           Thread thread = client.thread();
           long threadId = thread.threadId();
           if (!thread.isAlive()) {
@@ -213,7 +213,7 @@ public class HTTPServerThread extends Thread {
 
           long now = System.currentTimeMillis();
           Throughput throughput = client.throughput();
-          HTTPConnection worker = client.runnable();
+          HTTPConnection worker = client.connection();
           HTTPConnection.State state = worker.state();
           long workerLastUsed = throughput.lastUsed();
           boolean readingSlow = false;

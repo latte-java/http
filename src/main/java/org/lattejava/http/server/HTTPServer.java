@@ -29,7 +29,7 @@ import org.lattejava.http.server.internal.*;
  */
 @SuppressWarnings("unused")
 public class HTTPServer implements Closeable, Configurable<HTTPServer> {
-  private final List<HTTPServerThread> servers = new ArrayList<>();
+  private final List<HTTPServerAcceptorThread> servers = new ArrayList<>();
 
   private HTTPServerConfiguration configuration = new HTTPServerConfiguration();
 
@@ -44,7 +44,7 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
     logger.info("HTTP server shutdown requested. Attempting to close each listener. Wait up to [{}] ms.", shutdownDuration);
 
     // First, shutdown all the threads
-    for (HTTPServerThread thread : servers) {
+    for (HTTPServerAcceptorThread thread : servers) {
       thread.shutdown();
     }
 
@@ -105,7 +105,7 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
 
     try {
       for (HTTPListenerConfiguration listener : configuration.getListeners()) {
-        HTTPServerThread server = new HTTPServerThread(configuration, context, listener);
+        HTTPServerAcceptorThread server = new HTTPServerAcceptorThread(configuration, context, listener);
         servers.add(server);
         server.start();
         logger.info("HTTP server listening on port [{}]", listener.getPort());
