@@ -165,11 +165,13 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   @Override
   public void run() {
     readerThread = Thread.currentThread();
+
     Thread writerThread = null;
     InputStream socketIn = null;
     try {
       var in = new ThroughputInputStream(socket.getInputStream(), throughput);
       socketIn = in;
+
       // 64 KiB userspace buffer between the frame writer and the socket. Without this, every writeFrame
       // hit the socket as a separate write syscall — JFR (2026-05-19) attributed ~13% of writer-thread
       // CPU to SocketDispatcher.write0. The BufferedOutputStream coalesces the frame-header + payload
@@ -182,6 +184,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       // may be grown again below if peer SETTINGS advertise a larger MAX_FRAME_SIZE than our own.
       buffers.ensureFrameReadCapacity(localSettings.maxFrameSize());
       buffers.ensureFrameWriteCapacity(localSettings.maxFrameSize());
+
       var writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
       var reader = new HTTP2FrameReader(in, buffers.frameReadBuffer());
 
