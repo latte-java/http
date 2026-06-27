@@ -11,7 +11,7 @@ import java.net.Socket;
  *
  * @author Daniel DeGroff
  */
-public interface ClientConnection {
+public interface HTTPConnection extends Runnable {
   long getHandledRequests();
 
   Socket getSocket();

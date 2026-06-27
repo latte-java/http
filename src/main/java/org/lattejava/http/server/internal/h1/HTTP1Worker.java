@@ -28,7 +28,7 @@ import org.lattejava.http.server.io.EmptyHTTPInputStream;
  *
  * @author Brian Pontarelli
  */
-public class HTTP1Worker implements ClientConnection, Runnable {
+public class HTTP1Worker implements HTTPConnection {
   private final HTTPBuffers buffers;
 
   private final HTTPServerConfiguration configuration;
@@ -305,12 +305,12 @@ public class HTTP1Worker implements ClientConnection, Runnable {
   }
 
   @Override
-  public ClientConnection.State state() {
+  public HTTPConnection.State state() {
     return switch (workerState) {
-      case KeepAlive -> ClientConnection.State.KeepAlive;
-      case Process -> ClientConnection.State.Process;
-      case Read -> ClientConnection.State.Read;
-      case Write -> ClientConnection.State.Write;
+      case KeepAlive -> HTTPConnection.State.KeepAlive;
+      case Process -> HTTPConnection.State.Process;
+      case Read -> HTTPConnection.State.Read;
+      case Write -> HTTPConnection.State.Write;
     };
   }
 

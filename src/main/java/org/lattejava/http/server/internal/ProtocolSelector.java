@@ -31,12 +31,12 @@ public class ProtocolSelector {
    * @param instrumenter  the instrumenter, may be null
    * @param listener      the listener configuration that accepted the connection
    * @param throughput    the per-connection throughput tracker
-   * @return a {@link ClientConnection} (also a {@link Runnable}) ready to be started on a virtual thread
+   * @return a {@link HTTPConnection} (also a {@link Runnable}) ready to be started on a virtual thread
    * @throws IOException if the socket or handshake fails before dispatch
    */
-  public static ClientConnection select(Socket socket, HTTPServerConfiguration configuration, HTTPContext context,
-                                        Instrumenter instrumenter, HTTPListenerConfiguration listener,
-                                        Throughput throughput) throws IOException {
+  public static HTTPConnection select(Socket socket, HTTPServerConfiguration configuration, HTTPContext context,
+                                      Instrumenter instrumenter, HTTPListenerConfiguration listener,
+                                      Throughput throughput) throws IOException {
     if (socket instanceof SSLSocket sslSocket) {
       // Force handshake so ALPN selection has happened.
       sslSocket.startHandshake();

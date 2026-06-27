@@ -26,7 +26,7 @@ import org.lattejava.http.server.io.EmptyHTTPInputStream;
  *
  * @author Daniel DeGroff
  */
-public class HTTP2Connection implements ClientConnection, Runnable {
+public class HTTP2Connection implements HTTPConnection, Runnable {
   // RFC 9113 §8.1.2.2: headers that are connection-specific and forbidden in HTTP/2.
   private static final Set<String> CONNECTION_SPECIFIC_HEADERS = Set.of(
       "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"
@@ -77,7 +77,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   private volatile int highestSeenStreamId = 0;
   // Reader thread handle, captured at the top of run() so the writer thread can interrupt it when it dies.
   private volatile Thread readerThread;
-  private volatile ClientConnection.State state = ClientConnection.State.Read;
+  private volatile HTTPConnection.State state = HTTPConnection.State.Read;
   // Set true when the writer virtual-thread exits (either via the shutdown sentinel or an unexpected exception).
   // The reader checks this before each blocking enqueue to avoid parking forever on a full writerQueue.
   private volatile boolean writerDead;
@@ -149,7 +149,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   }
 
   @Override
-  public ClientConnection.State state() {
+  public HTTPConnection.State state() {
     return state;
   }
 
@@ -268,7 +268,7 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
       try {
         while (true) {
-          state = ClientConnection.State.Read;
+          state = HTTPConnection.State.Read;
           if (writerDead) {
             logger.debug("Writer thread dead; reader exiting");
             break;

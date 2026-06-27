@@ -103,7 +103,7 @@ public class HTTPServerThread extends Thread {
         }
 
         Throughput throughput = new Throughput(configuration.getReadThroughputCalculationDelay().toMillis(), configuration.getWriteThroughputCalculationDelay().toMillis());
-        ClientConnection conn;
+        HTTPConnection conn;
         try {
           conn = ProtocolSelector.select(clientSocket, configuration, context, instrumenter, listener, throughput);
         } catch (IOException e) {
@@ -118,7 +118,7 @@ public class HTTPServerThread extends Thread {
         }
         Thread client = Thread.ofVirtual()
                               .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
-                              .start((Runnable) conn);
+                              .start(conn);
 
         clients.add(new ClientInfo(client, conn, throughput));
       } catch (SocketTimeoutException ignore) {
@@ -172,7 +172,7 @@ public class HTTPServerThread extends Thread {
   }
 
   // - In theory we could hold onto some meta-data here that keeps track of how many requests we have processed on this thread and then exit.
-  record ClientInfo(Thread thread, ClientConnection runnable, Throughput throughput) {
+  record ClientInfo(Thread thread, HTTPConnection runnable, Throughput throughput) {
 
     public long getAge() {
       return System.currentTimeMillis() - runnable().getStartInstant();
@@ -213,8 +213,8 @@ public class HTTPServerThread extends Thread {
 
           long now = System.currentTimeMillis();
           Throughput throughput = client.throughput();
-          ClientConnection worker = client.runnable();
-          ClientConnection.State state = worker.state();
+          HTTPConnection worker = client.runnable();
+          HTTPConnection.State state = worker.state();
           long workerLastUsed = throughput.lastUsed();
           boolean readingSlow = false;
           boolean writingSlow = false;
@@ -226,20 +226,20 @@ public class HTTPServerThread extends Thread {
           long writeThroughput = -1;
 
           String badClientReason = "[" + threadId + "] Check worker in state [" + state + "]";
-          if (state == ClientConnection.State.Read) {
+          if (state == HTTPConnection.State.Read) {
             // Here the SO_TIMEOUT set above or the Keep-Alive timeout in HTTP1Worker will dictate if the socket has timed out. This prevents slow readers
             // or network issues where the client reads 1 byte per timeout value (i.e. 1 byte per 2 seconds or something like that)
             readThroughput = throughput.readThroughput(now);
             badClient = readThroughput < minimumReadThroughput;
             readingSlow = badClient;
             badClientReason += " readingSlow=[" + readingSlow + "] readThroughput=[" + readThroughput + "] minimumReadThroughput=[" + minimumReadThroughput + "]";
-          } else if (state == ClientConnection.State.Write) {
+          } else if (state == HTTPConnection.State.Write) {
             // Check for slow clients when writing (or network issues)
             writeThroughput = throughput.writeThroughput(now);
             badClient = writeThroughput < minimumWriteThroughput;
             writingSlow = badClient;
             badClientReason += " writingSlow=[" + writingSlow + "] writeThroughput=[" + writeThroughput + "] minimumWriteThroughput=[" + minimumWriteThroughput + "]";
-          } else if (state == ClientConnection.State.Process) {
+          } else if (state == HTTPConnection.State.Process) {
             // Here lastUsed was the instant the last byte was read, so we calculate distance between that and now to see if it is beyond the timeout
             long waited = (now - workerLastUsed);
             badClient = waited > configuration.getProcessingTimeoutDuration().toMillis();
