@@ -43,7 +43,7 @@ public class ProtocolSelector {
 
       String proto = sslSocket.getApplicationProtocol();
       if ("h2".equals(proto)) {
-        return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, null);
+        return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, false);
       }
 
       // null, "", or "http/1.1" all → HTTP/1.1

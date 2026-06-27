@@ -57,7 +57,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   private final HTTP2Settings localSettings;
   private final Logger logger;
   private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
-  private final boolean prefaceAlreadyConsumed;
+  private final boolean prefaceConsumed;
   private final HTTP2RateLimitsTracker rateLimits;
   // Bounded deque of recently-closed stream IDs for RFC 9113 §5.1 STREAM_CLOSED error detection.
   // Access is confined to the reader thread, so no synchronization is needed.
@@ -83,7 +83,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   private volatile boolean writerDead;
 
   public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
-                         HTTPListenerConfiguration listener, Throughput throughput, Boolean prefaceAlreadyConsumed) throws IOException {
+                         HTTPListenerConfiguration listener, Throughput throughput, boolean prefaceConsumed) throws IOException {
     this.socket = socket;
     this.configuration = configuration;
     this.context = context;
@@ -94,7 +94,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     this.logger = configuration.getLoggerFactory().getLogger(HTTP2Connection.class);
     this.localSettings = configuration.getHTTP2Settings();
     this.rateLimits = configuration.getHTTP2RateLimits().newTracker();
-    this.prefaceAlreadyConsumed = Boolean.TRUE.equals(prefaceAlreadyConsumed);
+    this.prefaceConsumed = prefaceConsumed;
     this.startInstant = System.currentTimeMillis();
   }
 
@@ -191,7 +191,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
 
       // ALPN (TLS) and prior-knowledge paths: read the client connection preface first (or skip if ProtocolSelector
       // already consumed it via the prior-knowledge peek), then send our SETTINGS.
-      if (!prefaceAlreadyConsumed) {
+      if (!prefaceConsumed) {
         byte[] received = in.readNBytes(PREFACE.length);
         if (!Arrays.equals(received, PREFACE)) {
           logger.debug("Invalid HTTP/2 connection preface");
