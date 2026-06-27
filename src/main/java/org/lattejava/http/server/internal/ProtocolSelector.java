@@ -14,7 +14,7 @@ import org.lattejava.http.server.internal.h1.*;
 import org.lattejava.http.server.internal.h2.*;
 
 /**
- * Dispatches an accepted connection to either {@link HTTP1Worker} or {@link HTTP2Connection} based on TLS-ALPN
+ * Dispatches an accepted connection to either {@link HTTP1Connection} or {@link HTTP2Connection} based on TLS-ALPN
  * selection (TLS path) or peek of the connection preface (h2c prior-knowledge cleartext path).
  *
  * @author Daniel DeGroff
@@ -47,12 +47,12 @@ public class ProtocolSelector {
       }
 
       // null, "", or "http/1.1" all → HTTP/1.1
-      return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput);
+      return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput);
     }
 
     // Cleartext path: check for h2c prior-knowledge.
     if (listener.isH2cPriorKnowledgeEnabled()) {
-      // Wrap the socket input exactly as HTTP1Worker would so throughput accounting is consistent.
+      // Wrap the socket input exactly as HTTP1Connection would so throughput accounting is consistent.
       var pushback = new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter);
       byte[] peek = new byte[HTTP2_PREFACE.length];
       int n;
@@ -62,7 +62,7 @@ public class ProtocolSelector {
         // Slowloris-style client never finished the preface within the initial-read timeout. Fall back to HTTP/1.1,
         // which has its own preamble parser with its own timeout. The pushback stream has no buffered bytes at this
         // point so it is safe to pass directly to the worker.
-        return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput, pushback);
+        return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput, pushback);
       }
 
       if (n == HTTP2_PREFACE.length && Arrays.equals(peek, HTTP2_PREFACE)) {
@@ -72,10 +72,10 @@ public class ProtocolSelector {
       // Preface did not match — this is an HTTP/1.1 (or other) client on an h2c prior-knowledge listener.
       // Push the peeked bytes back so the HTTP/1.1 worker sees a complete, unmodified request stream.
       pushback.push(peek, 0, n);
-      return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput, pushback);
+      return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput, pushback);
     }
 
-    return new HTTP1Worker(socket, configuration, context, instrumenter, listener, throughput);
+    return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput);
   }
 
   private ProtocolSelector() {

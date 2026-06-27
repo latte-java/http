@@ -534,7 +534,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     streams.put(streamId, stream);
 
     // Apply the server's MultipartConfiguration as a deep copy so the handler may mutate it per-request without
-    // affecting the shared server-level config. Matches HTTP1Worker.java behavior.
+    // affecting the shared server-level config. Matches HTTP1Connection.java behavior.
     request.getMultiPartStreamProcessor().setMultipartConfiguration(new MultipartConfiguration(configuration.getMultipartConfiguration()));
 
     if ((flags & HTTP2Frame.FLAG_END_STREAM) != 0) {

@@ -151,7 +151,7 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
    *
    * <p>A client that sends a non-preface opening (e.g. a plain {@code GET} request) receives a normal
    * HTTP/1.1 response rather than a GOAWAY, because the peeked bytes are pushed back into the stream and the connection
-   * is handed off to {@link HTTP1Worker}.
+   * is handed off to {@link HTTP1Connection}.
    */
   @Test
   public void invalid_h2c_preface_falls_back_to_http1() throws Exception {

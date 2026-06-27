@@ -28,7 +28,7 @@ import org.lattejava.http.server.io.EmptyHTTPInputStream;
  *
  * @author Brian Pontarelli
  */
-public class HTTP1Worker implements HTTPConnection {
+public class HTTP1Connection implements HTTPConnection {
   private final HTTPBuffers buffers;
 
   private final HTTPServerConfiguration configuration;
@@ -53,8 +53,8 @@ public class HTTP1Worker implements HTTPConnection {
 
   private volatile WorkerState workerState;
 
-  public HTTP1Worker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
-                     HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
+  public HTTP1Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                         HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
     this(socket, configuration, context, instrumenter, listener, throughput, new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter));
   }
 
@@ -63,8 +63,8 @@ public class HTTP1Worker implements HTTPConnection {
    * bytes from the socket's InputStream and pushed them back into a pre-built {@link PushbackInputStream}. Passing the
    * stream directly avoids a second wrapping and ensures no peeked bytes are lost.
    */
-  public HTTP1Worker(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
-                     HTTPListenerConfiguration listener, Throughput throughput, PushbackInputStream inputStream) throws IOException {
+  public HTTP1Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
+                         HTTPListenerConfiguration listener, Throughput throughput, PushbackInputStream inputStream) throws IOException {
     this.socket = socket;
     this.configuration = configuration;
     this.context = context;
@@ -72,7 +72,7 @@ public class HTTP1Worker implements HTTPConnection {
     this.listener = listener;
     this.throughput = throughput;
     this.buffers = new HTTPBuffers(configuration);
-    this.logger = configuration.getLoggerFactory().getLogger(HTTP1Worker.class);
+    this.logger = configuration.getLoggerFactory().getLogger(HTTP1Connection.class);
     this.inputStream = inputStream;
     this.workerState = WorkerState.Read;
     this.startInstant = System.currentTimeMillis();
