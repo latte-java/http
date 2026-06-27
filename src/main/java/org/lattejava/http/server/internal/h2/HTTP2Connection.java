@@ -62,9 +62,6 @@ public class HTTP2Connection implements ClientConnection, Runnable {
   // Bounded deque of recently-closed stream IDs for RFC 9113 §5.1 STREAM_CLOSED error detection.
   // Access is confined to the reader thread, so no synchronization is needed.
   private final Deque<Integer> recentlyClosedStreams = new ArrayDeque<>();
-  // True for the h2c Upgrade/101 path: server sends its SETTINGS frame immediately after the 101, before reading the
-  // client connection preface. All other paths (ALPN, prior-knowledge) leave this false.
-  private final boolean serverSendsFirst;
   private final Socket socket;
   private final long startInstant;
   private final Map<Integer, HTTP2Stream> streams = new ConcurrentHashMap<>();
@@ -87,12 +84,6 @@ public class HTTP2Connection implements ClientConnection, Runnable {
 
   public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput, Boolean prefaceAlreadyConsumed) throws IOException {
-    this(socket, configuration, context, instrumenter, listener, throughput, prefaceAlreadyConsumed, false);
-  }
-
-  public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
-                         HTTPListenerConfiguration listener, Throughput throughput, Boolean prefaceAlreadyConsumed,
-                         boolean serverSendsFirst) throws IOException {
     this.socket = socket;
     this.configuration = configuration;
     this.context = context;
@@ -104,7 +95,6 @@ public class HTTP2Connection implements ClientConnection, Runnable {
     this.localSettings = configuration.getHTTP2Settings();
     this.rateLimits = configuration.getHTTP2RateLimits().newTracker();
     this.prefaceAlreadyConsumed = Boolean.TRUE.equals(prefaceAlreadyConsumed);
-    this.serverSendsFirst = serverSendsFirst;
     this.startInstant = System.currentTimeMillis();
   }
 
@@ -195,44 +185,25 @@ public class HTTP2Connection implements ClientConnection, Runnable {
       var writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
       var reader = new HTTP2FrameReader(in, buffers.frameReadBuffer());
 
-      if (serverSendsFirst) {
-        // h2c Upgrade/101 path (RFC 7540 §3.2): server sends its connection preface (SETTINGS) immediately after the
-        // 101, before reading the client preface. The client sends its preface concurrently; we read it next.
-        writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
-        out.flush();
-
-        // Read and validate the client connection preface.
+      // ALPN (TLS) and prior-knowledge paths: read the client connection preface first (or skip if ProtocolSelector
+      // already consumed it via the prior-knowledge peek), then send our SETTINGS.
+      if (!prefaceAlreadyConsumed) {
         byte[] received = in.readNBytes(PREFACE.length);
         if (!Arrays.equals(received, PREFACE)) {
-          logger.debug("Invalid HTTP/2 connection preface after h2c upgrade");
-          // RFC 9113 §3.5: server has already sent SETTINGS; emit GOAWAY(PROTOCOL_ERROR) before closing.
+          logger.debug("Invalid HTTP/2 connection preface");
+          // RFC 9113 §3.5: emit SETTINGS + GOAWAY(PROTOCOL_ERROR) so peer can observe the error before TCP close.
+          writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
           sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
           // Half-close immediately so the kernel sends FIN — h2spec keeps writing preface bytes;
           // bytes arriving after the 50 ms finally-drain race the close and cause OS RST instead of FIN.
           try { socket.shutdownOutput(); } catch (IOException ignore) { /* best effort */ }
           return;
         }
-      } else {
-        // ALPN (TLS) and prior-knowledge paths: read the client connection preface first (or skip if ProtocolSelector
-        // already consumed it), then send our SETTINGS.
-        if (!prefaceAlreadyConsumed) {
-          byte[] received = in.readNBytes(PREFACE.length);
-          if (!Arrays.equals(received, PREFACE)) {
-            logger.debug("Invalid HTTP/2 connection preface");
-            // RFC 9113 §3.5: emit SETTINGS + GOAWAY(PROTOCOL_ERROR) so peer can observe the error before TCP close.
-            writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
-            sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
-            // Half-close immediately so the kernel sends FIN — h2spec keeps writing preface bytes;
-            // bytes arriving after the 50 ms finally-drain race the close and cause OS RST instead of FIN.
-            try { socket.shutdownOutput(); } catch (IOException ignore) { /* best effort */ }
-            return;
-          }
-        }
-
-        // Send our initial SETTINGS frame.
-        writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
-        out.flush();
       }
+
+      // Send our initial SETTINGS frame.
+      writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
+      out.flush();
 
       // Read the peer's first SETTINGS frame.
       var firstFrame = reader.readFrame();

@@ -40,12 +40,6 @@ public class HTTPResponse {
 
   private String statusMessage;
 
-  private ProtocolSwitchHandler switchProtocolsHandler;
-
-  private Map<String, String> switchProtocolsHeaders;
-
-  private String switchProtocolsTarget;
-
   private Map<String, List<String>> trailers;
 
   private Writer writer;
@@ -483,30 +477,6 @@ public class HTTPResponse {
   }
 
   /**
-   * @return The protocol-switch handler registered via {@link #switchProtocols}, or {@code null} if no protocol switch
-   *     was requested for this response.
-   */
-  public ProtocolSwitchHandler getSwitchProtocolsHandler() {
-    return switchProtocolsHandler;
-  }
-
-  /**
-   * @return The additional response headers to emit alongside the 101 Switching Protocols status, or an empty map if
-   *     none were specified.
-   */
-  public Map<String, String> getSwitchProtocolsHeaders() {
-    return switchProtocolsHeaders == null ? Map.of() : switchProtocolsHeaders;
-  }
-
-  /**
-   * @return The target protocol token (e.g. {@code "h2c"}) for a 101 Switching Protocols response, or {@code null} if
-   *     no protocol switch was requested.
-   */
-  public String getSwitchProtocolsTarget() {
-    return switchProtocolsTarget;
-  }
-
-  /**
    * @return An unmodifiable view of all response trailers added via {@link #addTrailer(String, String)}. Returns an
    *     empty map if no trailers were added.
    */
@@ -595,10 +565,6 @@ public class HTTPResponse {
     if (rawOutputStream == null) {
       outputStream.setCompress(compress);
     }
-  }
-
-  public boolean isProtocolSwitchPending() {
-    return switchProtocolsHandler != null;
   }
 
   /**
@@ -753,34 +719,6 @@ public class HTTPResponse {
     List<String> list = new ArrayList<>(1);
     list.add(value);
     trailers.put(name.toLowerCase(Locale.ROOT), list);
-  }
-
-  /**
-   * Records the intent to perform a protocol switch. The worker will emit a {@code 101 Switching Protocols} response
-   * preamble and then hand the raw socket to the supplied handler. Normal response writing is bypassed — the handler
-   * owns the socket from that point on.
-   *
-   * @param protocol          the protocol token for the {@code Upgrade} response header.
-   * @param additionalHeaders extra headers to include in the 101 preamble, or {@code null} for none.
-   * @param handler           the handler that will take ownership of the socket after the 101 is flushed.
-   */
-  public void switchProtocols(String protocol, Map<String, String> additionalHeaders, ProtocolSwitchHandler handler) {
-    if (protocol == null || protocol.isEmpty()) {
-      throw new IllegalArgumentException("Protocol name must not be empty");
-    }
-    if (handler == null) {
-      throw new IllegalArgumentException("Handler must not be null");
-    }
-    if (additionalHeaders != null) {
-      for (String name : additionalHeaders.keySet()) {
-        if (name.equalsIgnoreCase("Connection") || name.equalsIgnoreCase("Upgrade")) {
-          throw new IllegalArgumentException("Header [" + name + "] is set automatically by switchProtocols and must not appear in additionalHeaders");
-        }
-      }
-    }
-    this.switchProtocolsTarget = protocol;
-    this.switchProtocolsHeaders = additionalHeaders;
-    this.switchProtocolsHandler = handler;
   }
 
   /**

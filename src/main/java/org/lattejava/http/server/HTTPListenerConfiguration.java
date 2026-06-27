@@ -31,7 +31,6 @@ public class HTTPListenerConfiguration {
   private final PrivateKey privateKey;
   private final boolean tls;
   private boolean h2cPriorKnowledgeEnabled = false;
-  private boolean h2cUpgradeEnabled = false;
   private boolean http2Enabled = true;
 
   /**
@@ -192,10 +191,6 @@ public class HTTPListenerConfiguration {
     return h2cPriorKnowledgeEnabled;
   }
 
-  public boolean isH2cUpgradeEnabled() {
-    return h2cUpgradeEnabled;
-  }
-
   public boolean isHTTP2Enabled() {
     return http2Enabled;
   }
@@ -206,11 +201,6 @@ public class HTTPListenerConfiguration {
 
   public HTTPListenerConfiguration withH2cPriorKnowledgeEnabled(boolean enabled) {
     this.h2cPriorKnowledgeEnabled = enabled;
-    return this;
-  }
-
-  public HTTPListenerConfiguration withH2cUpgradeEnabled(boolean enabled) {
-    this.h2cUpgradeEnabled = enabled;
     return this;
   }
 
