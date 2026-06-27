@@ -41,6 +41,15 @@ public interface HTTPConnection extends Runnable {
      * socket-level {@code SO_TIMEOUT} that the worker sets when it transitions into this state.
      */
     KeepAlive,
+    /**
+     * The connection is performing protocol negotiation (the TLS-ALPN handshake or the h2c preface read) on its
+     * virtual thread, before any protocol handler exists. The slow-reader throughput check MUST NOT apply in this
+     * state: handshake bytes flow on the raw socket, not through {@code ThroughputInputStream}, so a throughput sample
+     * taken now would read ~0 bytes/s and the reaper would evict a legitimate in-progress handshake. This phase is
+     * bounded instead by the socket-level {@code SO_TIMEOUT} (the initial-read timeout) — a stalled handshake read
+     * throws {@code SocketTimeoutException}, which closes the socket.
+     */
+    Negotiating,
     Process,
     Read,
     Write

@@ -88,9 +88,6 @@ public class HTTPServerAcceptorThread extends Thread {
         //   the server socket and fire up an HTTP worker, then we could consider seeing if we can improve performance here.
         Socket clientSocket = socket.accept();
         clientSocket.setSoTimeout((int) configuration.getInitialReadTimeoutDuration().toMillis());
-        if (clientSocket instanceof SSLSocket sslSocket) {
-          SecurityTools.configureALPN(sslSocket, listener);
-        }
         if (logger.isTraceEnabled()) {
           String listenerAddress = listener.getBindAddress().toString() + ":" + listener.getPort();
           logger.trace("[{}] Accepted inbound connection. [{}] existing connections.", listenerAddress, clients.size());
@@ -101,24 +98,16 @@ public class HTTPServerAcceptorThread extends Thread {
         }
 
         Throughput throughput = new Throughput(configuration.getReadThroughputCalculationDelay().toMillis(), configuration.getWriteThroughputCalculationDelay().toMillis());
-        HTTPConnection conn;
-        try {
-          conn = ProtocolSelector.select(clientSocket, configuration, context, instrumenter, listener, throughput);
-        } catch (IOException e) {
-          // Protocol selection failed (TLS handshake error, h2c-preface peek error, etc.). Close the accepted
-          // socket so the file descriptor does not leak; the outer accept loop continues.
-          logger.debug("Protocol selection failed; closing socket", e);
-          try {
-            clientSocket.close();
-          } catch (IOException ignore) {
-          }
-          continue;
-        }
+
+        // Protocol selection (TLS-ALPN handshake / h2c preface peek) is BLOCKING, so it runs inside ConnectionDispatcher
+        // on the per-connection virtual thread — never on this accept thread. The dispatcher is created unstarted and
+        // registered with the reaper before it starts, so the connection is tracked from the moment it can run.
+        ConnectionDispatcher dispatcher = new ConnectionDispatcher(clientSocket, configuration, context, instrumenter, listener, throughput);
         Thread client = Thread.ofVirtual()
                               .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
-                              .start(conn);
-
-        clients.add(new ClientConnection(client, conn, throughput));
+                              .unstarted(dispatcher);
+        clients.add(new ClientConnection(client, dispatcher, throughput));
+        client.start();
       } catch (SocketTimeoutException ignore) {
         // Completely smother since this is expected with the SO_TIMEOUT setting in the constructor
         logger.debug("Nothing accepted. Cleaning up existing connections.");

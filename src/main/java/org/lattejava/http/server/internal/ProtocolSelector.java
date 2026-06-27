@@ -38,7 +38,9 @@ public class ProtocolSelector {
                                       Instrumenter instrumenter, HTTPListenerConfiguration listener,
                                       Throughput throughput) throws IOException {
     if (socket instanceof SSLSocket sslSocket) {
-      // Force handshake so ALPN selection has happened.
+      // Configure ALPN, then force the handshake so ALPN selection has happened. Both run here — on the caller's
+      // virtual thread (ConnectionDispatcher), never on the accept thread.
+      SecurityTools.configureALPN(sslSocket, listener);
       sslSocket.startHandshake();
 
       String proto = sslSocket.getApplicationProtocol();
