@@ -51,7 +51,7 @@ public class HTTP1Connection implements HTTPConnection {
 
   private long handledRequests;
 
-  private volatile WorkerState workerState;
+  private volatile HTTPConnection.State state;
 
   public HTTP1Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
@@ -74,7 +74,7 @@ public class HTTP1Connection implements HTTPConnection {
     this.buffers = new HTTPBuffers(configuration);
     this.logger = configuration.getLoggerFactory().getLogger(HTTP1Connection.class);
     this.inputStream = inputStream;
-    this.workerState = WorkerState.Read;
+    this.state = HTTPConnection.State.Read;
     this.startInstant = System.currentTimeMillis();
     logger.trace("[{}] Starting HTTP worker.", Thread.currentThread().threadId());
   }
@@ -113,13 +113,13 @@ public class HTTP1Connection implements HTTPConnection {
         var throughputOutputStream = new ThroughputOutputStream(socket.getOutputStream(), throughput);
         response = new HTTPResponse();
 
-        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> workerState = WorkerState.Write);
+        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> state = HTTPConnection.State.Write);
         response.setOutputStream(outputStream);
 
         // Not this line of code will block
         // - When a client is using Keep-Alive - we will loop and block here while we wait for the client to send us bytes.
         byte[] requestBuffer = buffers.requestBuffer();
-        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> workerState = WorkerState.Read);
+        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> state = HTTPConnection.State.Read);
         if (logger.isTraceEnabled()) {
           int availableBufferedBytes = inputStream.getAvailableBufferedBytesRemaining();
           if (availableBufferedBytes != 0) {
@@ -168,7 +168,7 @@ public class HTTP1Connection implements HTTPConnection {
         String expect = request.getHeader(HTTPValues.Headers.Expect);
         if (expect != null) {
           if (expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
-            workerState = WorkerState.Write;
+            state = HTTPConnection.State.Write;
 
             boolean doContinue = handleExpectContinue(request);
             if (!doContinue) {
@@ -178,7 +178,7 @@ public class HTTP1Connection implements HTTPConnection {
             }
 
             // Otherwise, transition the state to Read
-            workerState = WorkerState.Read;
+            state = HTTPConnection.State.Read;
           } else {
             closeSocketOnError(response, HTTPValues.Status.ExpectationFailed);
             return;
@@ -192,8 +192,8 @@ public class HTTP1Connection implements HTTPConnection {
         }
 
         // Transition to processing
-        workerState = WorkerState.Process;
-        logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), workerState);
+        state = HTTPConnection.State.Process;
+        logger.trace("[{}] Set state [{}]. Call the request handler.", Thread.currentThread().threadId(), state);
         try {
           configuration.getHandler().handle(request, response);
           logger.trace("[{}] Handler completed successfully", Thread.currentThread().threadId());
@@ -232,9 +232,9 @@ public class HTTP1Connection implements HTTPConnection {
         }
 
         // Transition to Keep-Alive state and reset the SO timeout
-        workerState = WorkerState.KeepAlive;
+        state = HTTPConnection.State.KeepAlive;
         int soTimeout = (int) configuration.getKeepAliveTimeoutDuration().toMillis();
-        logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), workerState, soTimeout);
+        logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), state, soTimeout);
         socket.setSoTimeout(soTimeout);
 
         // Drain the InputStream so we can complete this request. Null when the request was bodyless and the
@@ -261,16 +261,16 @@ public class HTTP1Connection implements HTTPConnection {
       // - Close the connection, unless we drain it, the connection cannot be re-used.
       // - Treating this as an expected case because if we are in a keep-alive state, no big deal, the client can just re-open the request. If we
       //   are not ina keep alive state, the request does not need to be re-used anyway.
-      logger.debug("[{}] Closing socket [{}]. Too many bytes remaining in the InputStream. Drained [{}] bytes. Configured maximum bytes [{}].", Thread.currentThread().threadId(), workerState, e.getDrainedBytes(), e.getMaximumDrainedBytes());
+      logger.debug("[{}] Closing socket [{}]. Too many bytes remaining in the InputStream. Drained [{}] bytes. Configured maximum bytes [{}].", Thread.currentThread().threadId(), state, e.getDrainedBytes(), e.getMaximumDrainedBytes());
       closeSocketOnly(CloseSocketReason.Expected);
     } catch (SocketTimeoutException e) {
       // This might be a read timeout or a Keep-Alive timeout. The reason is based on the worker state.
-      CloseSocketReason reason = workerState == WorkerState.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
-      String message = workerState == WorkerState.Read ? "Initial read timeout" : "Keep-Alive expired";
+      CloseSocketReason reason = state == HTTPConnection.State.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
+      String message = state == HTTPConnection.State.Read ? "Initial read timeout" : "Keep-Alive expired";
       if (reason == CloseSocketReason.Expected) {
-        logger.trace("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), workerState, message);
+        logger.trace("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), state, message);
       } else {
-        logger.debug("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), workerState, message);
+        logger.debug("[{}] Closing socket [{}]. {}.", Thread.currentThread().threadId(), state, message);
       }
       closeSocketOnly(reason);
     } catch (ParseException e) {
@@ -306,12 +306,7 @@ public class HTTP1Connection implements HTTPConnection {
 
   @Override
   public HTTPConnection.State state() {
-    return switch (workerState) {
-      case KeepAlive -> HTTPConnection.State.KeepAlive;
-      case Process -> HTTPConnection.State.Process;
-      case Read -> HTTPConnection.State.Read;
-      case Write -> HTTPConnection.State.Write;
-    };
+    return state;
   }
 
   private void closeSocketOnError(HTTPResponse response, int status) {
@@ -517,13 +512,6 @@ public class HTTP1Connection implements HTTPConnection {
   private enum CloseSocketReason {
     Expected,
     Unexpected
-  }
-
-  private enum WorkerState {
-    KeepAlive,
-    Process,
-    Read,
-    Write
   }
 
   private static class Status {
