@@ -51,6 +51,34 @@ public class AcceptorDispatchTest extends BaseTest {
     }
   }
 
+  @Test(groups = "timeouts")
+  public void negotiatingConnectionSurvivesReaperCycles() throws Exception {
+    // Large SO_TIMEOUT (20s) so the handshake itself will not time out during the test window. The reaper cycles every
+    // ~2s with a 200 KB/s minimum read throughput. If a negotiating connection were reported as Read, the reaper would
+    // measure ~0 bytes/s and close it on the first cycle (~2-3s). With State.Negotiating it must stay open.
+    HTTPServer server = startTLSServer(Duration.ofSeconds(20));
+    Socket staller = null;
+    try {
+      staller = new Socket("127.0.0.1", 4242);
+      staller.setSoTimeout(6000); // longer than two reaper cycles
+
+      // Read one byte. If the server wrongly reaped the negotiating connection, the stream closes and read() returns
+      // -1 promptly. If correct, the server holds the connection open and our own read times out after 6s.
+      InputStream in = staller.getInputStream();
+      try {
+        int b = in.read();
+        fail("Server closed the negotiating connection (read returned [" + b + "]); it was reaped before SO_TIMEOUT.");
+      } catch (SocketTimeoutException expected) {
+        // Correct: the connection was still open after >2 reaper cycles, bounded only by SO_TIMEOUT.
+      }
+    } finally {
+      if (staller != null) {
+        staller.close();
+      }
+      server.close();
+    }
+  }
+
   private HTTPServer startTLSServer(Duration initialReadTimeout) {
     var certChain = new Certificate[]{certificate, intermediateCertificate};
     var listener = new HTTPListenerConfiguration(4242, certChain, keyPair.getPrivate());
