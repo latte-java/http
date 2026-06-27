@@ -103,18 +103,18 @@ The acceptor's shutdown loop then calls `client.connection().shutdown()` uncondi
 
 ## Naming map
 
-| Current | New | Rationale |
-|---|---|---|
-| `ClientConnection` (interface) | `HTTPConnection` | Symmetric supertype of `HTTP1Connection` / `HTTP2Connection`. |
-| `HTTP1Worker` | `HTTP1Connection` | Peer of `HTTP2Connection`; same noun. |
-| `HTTP2Connection` | *(unchanged)* | Already correct. |
-| `HTTP1Worker.WorkerState` (private enum) | *deleted* → use `HTTPConnection.State` | Removes the duplicate enum and the switch conversion in `state()`. |
-| — | `HTTPConnection.State.Negotiating` (new) | Handshake phase; reaper skips the throughput check. |
-| `HTTPServerThread` | `HTTPServerAcceptorThread` | Names its job (the accept loop); keeps the `HTTPServer*` family and `Thread` suffix. |
-| `HTTPServerThread.HTTPServerCleanerThread` (inner) | `ConnectionReaperThread` | It reaps dead / slow / timed-out connections; keeps the `Thread` suffix. |
-| `HTTPServerThread.ClientInfo` (record) | `ClientConnection` | The freed-up name; the server's per-client tracking record `(thread, connection, throughput)`. |
-| — | `ConnectionDispatcher` (new) | Virtual-thread Runnable: negotiates the protocol, then delegates to the real connection. |
-| `ProtocolSelector` | *(unchanged; now also calls `configureALPN`)* | Stateless protocol-decision helper. |
+| Current                                            | New                                           | Rationale                                                                                      |
+|----------------------------------------------------|-----------------------------------------------|------------------------------------------------------------------------------------------------|
+| `ClientConnection` (interface)                     | `HTTPConnection`                              | Symmetric supertype of `HTTP1Connection` / `HTTP2Connection`.                                  |
+| `HTTP1Worker`                                      | `HTTP1Connection`                             | Peer of `HTTP2Connection`; same noun.                                                          |
+| `HTTP2Connection`                                  | *(unchanged)*                                 | Already correct.                                                                               |
+| `HTTP1Worker.WorkerState` (private enum)           | *deleted* → use `HTTPConnection.State`        | Removes the duplicate enum and the switch conversion in `state()`.                             |
+| —                                                  | `HTTPConnection.State.Negotiating` (new)      | Handshake phase; reaper skips the throughput check.                                            |
+| `HTTPServerThread`                                 | `HTTPServerAcceptorThread`                    | Names its job (the accept loop); keeps the `HTTPServer*` family and `Thread` suffix.           |
+| `HTTPServerThread.HTTPServerCleanerThread` (inner) | `ConnectionReaperThread`                      | It reaps dead / slow / timed-out connections; keeps the `Thread` suffix.                       |
+| `HTTPServerThread.ClientInfo` (record)             | `ClientConnection`                            | The freed-up name; the server's per-client tracking record `(thread, connection, throughput)`. |
+| —                                                  | `ConnectionDispatcher` (new)                  | Virtual-thread Runnable: negotiates the protocol, then delegates to the real connection.       |
+| `ProtocolSelector`                                 | *(unchanged; now also calls `configureALPN`)* | Stateless protocol-decision helper.                                                            |
 
 Note: the `ClientConnection` record holds a field of type `HTTPConnection`, read as `client.connection().state()`, etc. The two names denote distinct concepts — the server's per-client bookkeeping versus the protocol handler — and do not collide in use.
 
