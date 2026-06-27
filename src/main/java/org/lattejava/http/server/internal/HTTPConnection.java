@@ -7,7 +7,9 @@ package org.lattejava.http.server.internal;
 import java.net.Socket;
 
 /**
- * Implemented by both HTTP/1.1 and HTTP/2 worker classes so the cleaner thread can monitor either uniformly.
+ * Implemented by {@link org.lattejava.http.server.internal.h1.HTTP1Connection},
+ * {@link org.lattejava.http.server.internal.h2.HTTP2Connection}, and {@link ConnectionDispatcher} so the
+ * {@code ConnectionReaperThread} can monitor any connection uniformly.
  *
  * @author Daniel DeGroff
  */
