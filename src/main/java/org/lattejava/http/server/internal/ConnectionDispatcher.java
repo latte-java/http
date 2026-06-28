@@ -70,6 +70,11 @@ public class ConnectionDispatcher implements HTTPConnection {
   public void run() {
     try {
       delegate = ProtocolSelector.select(socket, configuration, context, instrumenter, listener, throughput);
+      if (delegate == null) {
+        // Protocol selection rejected the client (negotiated and spoken protocols disagreed) and already closed the
+        // socket. Nothing left to run; the reaper removes this now-dead thread on its next pass.
+        return;
+      }
       delegate.run();
     } catch (IOException e) {
       // Protocol selection failed: TLS handshake error, h2c-preface peek error, or a slow-loris client that never

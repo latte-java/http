@@ -18,14 +18,16 @@ import static org.testng.Assert.*;
  */
 public class HTTP2ConnectionPrefaceTest extends BaseTest {
   /**
-   * TLS-ALPN path: server negotiates h2, then reads the preface itself. An invalid preface must cause the server to
-   * send GOAWAY(PROTOCOL_ERROR) and then close the connection — not an abrupt TCP RST.
+   * TLS-ALPN path: the server negotiates h2 but the client does not send a valid connection preface. ProtocolSelector
+   * reconciles the negotiated protocol (h2) against the sniffed protocol (h1, since the bytes are not the preface),
+   * finds they disagree, and closes the connection without emitting any frames.
    *
-   * <p>RFC 9113 §3.5 requires the server to emit SETTINGS (and optionally GOAWAY) before closing so the client
-   * can observe the protocol error. This was previously a TCP close with no GOAWAY frame.
+   * <p>RFC 9113 §3.4 explicitly permits omitting GOAWAY here: an invalid connection preface indicates the peer is not
+   * using HTTP/2, so there is no HTTP/2 peer to address a GOAWAY to. The server therefore writes nothing — the client
+   * observes EOF (or a closed connection) rather than a GOAWAY frame.
    */
   @Test
-  public void invalid_preface_emits_goaway_before_close() throws Exception {
+  public void invalid_preface_closes_connection() throws Exception {
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
     var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
@@ -36,7 +38,7 @@ public class HTTP2ConnectionPrefaceTest extends BaseTest {
       var ctx = SecurityTools.clientContext(rootCertificate);
       var sslSocket = (javax.net.ssl.SSLSocket) ctx.getSocketFactory().createSocket("127.0.0.1", port);
 
-      // Force ALPN to h2 so the server dispatches to HTTP2Connection (which will read the preface itself).
+      // Force ALPN to h2 so the server commits to HTTP/2 during negotiation.
       var params = sslSocket.getSSLParameters();
       params.setApplicationProtocols(new String[]{"h2"});
       sslSocket.setSSLParameters(params);
@@ -51,30 +53,14 @@ public class HTTP2ConnectionPrefaceTest extends BaseTest {
         out.flush();
 
         var in = sslSocket.getInputStream();
-        // Server must send GOAWAY(PROTOCOL_ERROR) before closing.
-        // Drain frames until GOAWAY or EOF.
-        boolean sawGoaway = false;
-        int goawayErrorCode = -1;
-        outer:
-        while (true) {
-          int b0 = in.read();
-          if (b0 == -1) break;
-          byte[] rest = new byte[8];
-          if (in.readNBytes(rest, 0, 8) != 8) break;
-          int frameLength = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-          int frameType = rest[2] & 0xFF;
-          byte[] payload = in.readNBytes(frameLength);
-          if (frameType == 0x7) { // GOAWAY
-            if (payload.length >= 8) {
-              goawayErrorCode = ((payload[4] & 0xFF) << 24) | ((payload[5] & 0xFF) << 16)
-                  | ((payload[6] & 0xFF) << 8) | (payload[7] & 0xFF);
-            }
-            sawGoaway = true;
-            break outer;
-          }
+        // The server must close the connection without sending any frames. Reading yields EOF (-1) on a clean close,
+        // or throws on a reset — both are acceptable manifestations of the server dropping a bad client.
+        try {
+          int first = in.read();
+          assertEquals(first, -1, "Server should close the connection on an invalid preface, sending no frames");
+        } catch (IOException expected) {
+          // Connection reset/closed — also acceptable.
         }
-        assertTrue(sawGoaway, "Server must send GOAWAY before closing on invalid preface");
-        assertEquals(goawayErrorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1); got: " + goawayErrorCode);
       }
     }
   }

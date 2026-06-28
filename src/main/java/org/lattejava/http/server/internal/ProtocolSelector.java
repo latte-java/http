@@ -14,8 +14,21 @@ import org.lattejava.http.server.internal.h1.*;
 import org.lattejava.http.server.internal.h2.*;
 
 /**
- * Dispatches an accepted connection to either {@link HTTP1Connection} or {@link HTTP2Connection} based on TLS-ALPN
- * selection (TLS path) or peek of the connection preface (h2c prior-knowledge cleartext path).
+ * Dispatches an accepted connection to either {@link HTTP1Connection} or {@link HTTP2Connection} by reconciling two
+ * independent signals:
+ * <ol>
+ *   <li>the protocol the connection <em>negotiated</em> — {@code h2} or {@code h1} from TLS-ALPN, or {@code unknown}
+ *       on a cleartext h2c prior-knowledge listener (which has no negotiation and permits either); and</li>
+ *   <li>the protocol the client actually <em>spoke</em> — {@code h2} when the first bytes are the HTTP/2 connection
+ *       preface, {@code h1} otherwise.</li>
+ * </ol>
+ * The connection is honored only when negotiation did not pin a protocol ({@code unknown}) or pinned the one that was
+ * spoken. A client that negotiates one protocol and speaks another is closed — bad clients are not honored, and a
+ * client that did not send a valid HTTP/2 preface is, by definition, not using HTTP/2 (RFC 9113 §3.4 permits closing
+ * without a GOAWAY in that case).
+ *
+ * <p>Because the preface is fully consumed here before {@link HTTP2Connection} is constructed, that class never reads
+ * or validates the preface itself.
  *
  * @author Daniel DeGroff
  */
@@ -23,7 +36,8 @@ public class ProtocolSelector {
   private static final byte[] HTTP2_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
   /**
-   * Selects the appropriate connection handler for the given socket.
+   * Selects the appropriate connection handler for the given socket, or closes the socket and returns {@code null} when
+   * the negotiated and spoken protocols disagree.
    *
    * @param socket        the accepted client socket
    * @param configuration the server configuration
@@ -31,55 +45,98 @@ public class ProtocolSelector {
    * @param instrumenter  the instrumenter, may be null
    * @param listener      the listener configuration that accepted the connection
    * @param throughput    the per-connection throughput tracker
-   * @return a {@link HTTPConnection} (also a {@link Runnable}) ready to be started on a virtual thread
-   * @throws IOException if the socket or handshake fails before dispatch
+   * @return a {@link HTTPConnection} (also a {@link Runnable}) ready to be started, or {@code null} if the connection
+   *     was closed because the client's negotiated and spoken protocols disagreed
+   * @throws IOException if the socket or TLS handshake fails before dispatch
    */
   public static HTTPConnection select(Socket socket, HTTPServerConfiguration configuration, HTTPContext context,
                                       Instrumenter instrumenter, HTTPListenerConfiguration listener,
                                       Throughput throughput) throws IOException {
+    // 1. Determine the protocol the connection committed to during negotiation.
+    Version negotiated;
     if (socket instanceof SSLSocket sslSocket) {
-      // Configure ALPN, then force the handshake so ALPN selection has happened. Both run here — on the caller's
-      // virtual thread (ConnectionDispatcher), never on the accept thread.
+      // Configuring ALPN and forcing the handshake both block, so they run here — on the per-connection virtual
+      // thread (ConnectionDispatcher), never on the accept thread. h2 over TLS requires ALPN, so the absence of an
+      // "h2" selection (null, "", or "http/1.1") pins HTTP/1.1.
       SecurityTools.configureALPN(sslSocket, listener);
       sslSocket.startHandshake();
-
-      String proto = sslSocket.getApplicationProtocol();
-      if ("h2".equals(proto)) {
-        return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, false);
-      }
-
-      // null, "", or "http/1.1" all → HTTP/1.1
-      return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput);
+      negotiated = "h2".equals(sslSocket.getApplicationProtocol()) ? Version.h2 : Version.h1;
+    } else {
+      // Cleartext has no ALPN. An h2c prior-knowledge listener permits either protocol — the preface decides — while
+      // any other cleartext listener is HTTP/1.1 only.
+      negotiated = listener.isH2cPriorKnowledgeEnabled() ? Version.unknown : Version.h1;
     }
 
-    // Cleartext path: check for h2c prior-knowledge.
-    if (listener.isH2cPriorKnowledgeEnabled()) {
-      // Wrap the socket input exactly as HTTP1Connection would so throughput accounting is consistent.
-      var pushback = new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter);
-      byte[] peek = new byte[HTTP2_PREFACE.length];
-      int n;
-      try {
-        n = pushback.readNBytes(peek, 0, peek.length);
-      } catch (SocketTimeoutException timeout) {
-        // Slowloris-style client never finished the preface within the initial-read timeout. Fall back to HTTP/1.1,
-        // which has its own preamble parser with its own timeout. The pushback stream has no buffered bytes at this
-        // point so it is safe to pass directly to the worker.
-        return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput, pushback);
-      }
+    // 2. Sniff the first bytes for the HTTP/2 connection preface. Reading runs through throughput accounting (so a
+    // stalled sniff is bounded by the socket SO_TIMEOUT) and pushes non-preface bytes back for the HTTP/1.1 worker.
+    var pushback = new PushbackInputStream(new ThroughputInputStream(socket.getInputStream(), throughput), instrumenter);
+    Version spoken = sniff(pushback);
 
-      if (n == HTTP2_PREFACE.length && Arrays.equals(peek, HTTP2_PREFACE)) {
-        return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, /*prefaceConsumed=*/true);
+    // 3. Honor the connection only when negotiation left the protocol open or agrees with what was spoken.
+    if (negotiated == Version.unknown || negotiated == spoken) {
+      if (spoken == Version.h2) {
+        return new HTTP2Connection(socket, configuration, context, instrumenter, listener, throughput, pushback);
       }
-
-      // Preface did not match — this is an HTTP/1.1 (or other) client on an h2c prior-knowledge listener.
-      // Push the peeked bytes back so the HTTP/1.1 worker sees a complete, unmodified request stream.
-      pushback.push(peek, 0, n);
       return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput, pushback);
     }
 
-    return new HTTP1Connection(socket, configuration, context, instrumenter, listener, throughput);
+    // Negotiated one protocol, spoke another — a broken or malicious client. Drop it.
+    configuration.getLoggerFactory()
+                 .getLogger(ProtocolSelector.class)
+                 .debug("Closing connection: client negotiated [{}] but spoke [{}].", negotiated, spoken);
+    socket.close();
+    return null;
+  }
+
+  /**
+   * Reads up to the 24-byte HTTP/2 connection preface from {@code pushback}, comparing byte-for-byte as it goes.
+   * Returns {@link Version#h2} only when every preface byte matches (and is therefore consumed). On the first
+   * mismatching byte — or a read timeout or EOF before the preface completes — the bytes read so far are pushed back so
+   * the HTTP/1.1 worker sees an unmodified stream, and {@link Version#h1} is returned. Short-circuiting on the first
+   * mismatch keeps the common HTTP/1.1 case to a single small read rather than blocking for a full 24 bytes.
+   */
+  private static Version sniff(PushbackInputStream pushback) throws IOException {
+    byte[] peek = new byte[HTTP2_PREFACE.length];
+    int total = 0;
+    while (total < HTTP2_PREFACE.length) {
+      int read;
+      try {
+        read = pushback.read(peek, total, HTTP2_PREFACE.length - total);
+      } catch (SocketTimeoutException timeout) {
+        // A slow or silent client never completed the preface within the initial-read timeout. Treat it as HTTP/1.1
+        // and let that worker's own preamble parser apply its timeout.
+        if (total > 0) {
+          pushback.push(peek, 0, total);
+        }
+        return Version.h1;
+      }
+
+      if (read == -1) {
+        // EOF before the preface completed — not HTTP/2. Hand any partial bytes to the HTTP/1.1 worker.
+        if (total > 0) {
+          pushback.push(peek, 0, total);
+        }
+        return Version.h1;
+      }
+
+      for (int i = total; i < total + read; i++) {
+        if (peek[i] != HTTP2_PREFACE[i]) {
+          pushback.push(peek, 0, total + read);
+          return Version.h1;
+        }
+      }
+      total += read;
+    }
+
+    return Version.h2;
   }
 
   private ProtocolSelector() {
+  }
+
+  enum Version {
+    h1,
+    h2,
+    unknown
   }
 }
