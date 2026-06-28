@@ -188,7 +188,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     readerThread = Thread.currentThread();
 
     Thread writerThread = null;
-    InputStream socketIn = null;
     try {
       // 64 KiB userspace buffer between the frame writer and the socket. Without this, every writeFrame
       // hit the socket as a separate write syscall — JFR (2026-05-19) attributed ~13% of writer-thread
@@ -436,12 +435,10 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
         socket.shutdownOutput();
       } catch (Exception ignore) {
       }
-      if (socketIn != null) {
-        try {
-          socket.setSoTimeout(50);
-          socketIn.skip(Long.MAX_VALUE);
-        } catch (IOException ignore) {
-        }
+      try {
+        socket.setSoTimeout(50);
+        inputStream.skip(Long.MAX_VALUE);
+      } catch (IOException ignore) {
       }
       try {
         socket.close();
