@@ -113,7 +113,8 @@ public class HTTP1Connection implements HTTPConnection {
         var throughputOutputStream = new ThroughputOutputStream(socket.getOutputStream(), throughput);
         response = new HTTPResponse();
 
-        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, request.getAcceptEncodings(), response, throughputOutputStream, buffers, () -> state = HTTPConnection.State.Write);
+        var protocol = new HTTP1OutputProtocol(request, response, throughputOutputStream, buffers, instrumenter, () -> state = HTTPConnection.State.Write);
+        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, response, protocol);
         response.setOutputStream(outputStream);
 
         // Not this line of code will block

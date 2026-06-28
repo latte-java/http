@@ -10,39 +10,36 @@ import module org.testng;
 
 import static org.testng.Assert.*;
 
+/**
+ * Unit tests for {@link ChunkedOutputStream} pure data-chunk framing. Trailer emission and the chunk terminator are
+ * now the responsibility of {@code HTTP1OutputProtocol.commitTrailers()} — tested at the server-level trailers
+ * integration tests — so this class only verifies data-chunk framing and the no-op close behavior.
+ */
 public class ChunkedOutputStreamTrailersTest {
   @Test
-  public void emits_trailer_fields_after_terminator() throws Exception {
+  public void data_chunk_framing_writes_hex_length_crlf_data_crlf() throws Exception {
     var sink = new ByteArrayOutputStream();
     var chunked = new ChunkedOutputStream(sink, new byte[16], new FastByteArrayOutputStream(256, 64));
     chunked.write("hello".getBytes());
-    chunked.setTrailers(Map.of("x-checksum", List.of("abc")));
     chunked.close();
 
-    String wire = sink.toString();
-    assertTrue(wire.contains("0\r\nx-checksum: abc\r\n\r\n"), "Expected trailer-fields after 0-chunk; got: " + wire);
+    // close() flushes the final buffered data chunk but does NOT write any terminator.
+    String wire = sink.toString(StandardCharsets.US_ASCII);
+    // "hello" is 5 bytes → hex "5"
+    assertTrue(wire.startsWith("5\r\nhello\r\n"), "Expected data-chunk framing; got: " + wire);
+    // No terminator written by ChunkedOutputStream itself.
+    assertFalse(wire.contains("0\r\n"), "ChunkedOutputStream must not write the 0-chunk terminator; got: " + wire);
   }
 
   @Test
-  public void multiple_trailer_values_emit_repeated_lines() throws Exception {
+  public void close_is_idempotent() throws Exception {
     var sink = new ByteArrayOutputStream();
     var chunked = new ChunkedOutputStream(sink, new byte[16], new FastByteArrayOutputStream(256, 64));
     chunked.write("x".getBytes());
-    chunked.setTrailers(Map.of("x-stat", List.of("1", "2")));
     chunked.close();
-
-    String wire = sink.toString();
-    assertTrue(wire.contains("0\r\nx-stat: 1\r\nx-stat: 2\r\n\r\n"), "Expected two x-stat lines; got: " + wire);
-  }
-
-  @Test
-  public void no_trailers_emits_bare_terminator() throws Exception {
-    var sink = new ByteArrayOutputStream();
-    var chunked = new ChunkedOutputStream(sink, new byte[16], new FastByteArrayOutputStream(256, 64));
-    chunked.write("hello".getBytes());
+    // Second close must be a no-op (no exception, no extra bytes).
+    int sizeAfterFirstClose = sink.size();
     chunked.close();
-
-    String wire = sink.toString();
-    assertTrue(wire.endsWith("0\r\n\r\n"), "Expected bare 0-chunk terminator; got: " + wire);
+    assertEquals(sink.size(), sizeAfterFirstClose, "Second close must not write additional bytes");
   }
 }

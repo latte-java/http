@@ -29,7 +29,6 @@ public class ChunkedOutputStream extends OutputStream {
   private final OutputStream delegate;
   private int bufferIndex;
   private boolean closed;
-  private Map<String, List<String>> trailers;
 
   public ChunkedOutputStream(OutputStream delegate, byte[] buffer, FastByteArrayOutputStream chuckOutputStream) {
     this.delegate = delegate;
@@ -37,28 +36,16 @@ public class ChunkedOutputStream extends OutputStream {
     this.chunkOutputStream = chuckOutputStream;
   }
 
+  /**
+   * Flushes the final buffered data chunk. Does NOT write the last-chunk marker, trailers, or the terminating CRLF, and
+   * does NOT close the delegate — the owning {@code HTTP1OutputProtocol.commitTrailers()} writes the chunk terminator
+   * (and any trailers) and flushes the socket sink.
+   */
   @Override
   public void close() throws IOException {
     if (!closed) {
       flush();
-      if (trailers == null || trailers.isEmpty()) {
-        delegate.write(HTTPValues.ControlBytes.ChunkedTerminator);
-      } else {
-        delegate.write(HTTPValues.ControlBytes.EmptyChunk);
-        for (var entry : trailers.entrySet()) {
-          for (String value : entry.getValue()) {
-            delegate.write(entry.getKey().getBytes(StandardCharsets.US_ASCII));
-            delegate.write(HTTPValues.ControlBytes.ColonSpace);
-            delegate.write(value.getBytes(StandardCharsets.US_ASCII));
-            delegate.write(HTTPValues.ControlBytes.CRLF);
-          }
-        }
-        delegate.write(HTTPValues.ControlBytes.CRLF);
-      }
-      delegate.flush();
-      delegate.close();
     }
-
     closed = true;
   }
 
@@ -79,10 +66,6 @@ public class ChunkedOutputStream extends OutputStream {
     }
 
     delegate.flush();
-  }
-
-  public void setTrailers(Map<String, List<String>> trailers) {
-    this.trailers = trailers;
   }
 
   @Override
