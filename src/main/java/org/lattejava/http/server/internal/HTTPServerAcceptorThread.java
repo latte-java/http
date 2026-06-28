@@ -25,7 +25,7 @@ import module org.lattejava.http;
  * @author Brian Pontarelli
  */
 public class HTTPServerAcceptorThread extends Thread {
-  private final ConnectionReaperThread cleaner;
+  private final ConnectionReaperThread reaperThread;
 
   private final Deque<ClientConnection> clients = new ConcurrentLinkedDeque<>();
 
@@ -58,7 +58,7 @@ public class HTTPServerAcceptorThread extends Thread {
     this.logger = configuration.getLoggerFactory().getLogger(HTTPServerAcceptorThread.class);
     this.minimumReadThroughput = configuration.getMinimumReadThroughput();
     this.minimumWriteThroughput = configuration.getMinimumWriteThroughput();
-    this.cleaner = new ConnectionReaperThread();
+    this.reaperThread = new ConnectionReaperThread();
 
     if (listener.isTLS()) {
       SSLContext sslContext = SecurityTools.serverContext(listener.getCertificateChain(), listener.getPrivateKey());
@@ -78,7 +78,7 @@ public class HTTPServerAcceptorThread extends Thread {
   @Override
   public void run() {
     running = true;
-    cleaner.start();
+    reaperThread.start();
 
     while (running) {
       try {
@@ -149,7 +149,7 @@ public class HTTPServerAcceptorThread extends Thread {
   public void shutdown() {
     running = false;
     try {
-      cleaner.interrupt();
+      reaperThread.interrupt();
       socket.close();
     } catch (IOException ignore) {
       // Ignorable since we are shutting down regardless
@@ -158,7 +158,6 @@ public class HTTPServerAcceptorThread extends Thread {
 
   // - In theory we could hold onto some meta-data here that keeps track of how many requests we have processed on this thread and then exit.
   record ClientConnection(Thread thread, HTTPConnection connection, Throughput throughput) {
-
     public long getAge() {
       return System.currentTimeMillis() - connection().getStartInstant();
     }
