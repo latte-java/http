@@ -90,6 +90,8 @@ public final class HTTPValues {
 
     public static final byte Dash = '-';
 
+    public static final byte[] HTTP2Preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+
     public static final byte LF = '\n';
 
     public static final byte[] CRLF = {CR, LF};
@@ -250,6 +252,8 @@ public final class HTTPValues {
 
     public static final String Connection = "Connection";
 
+    public static final String ConnectionLower = "connection";
+
     public static final String ContentDispositionLower = "content-disposition";
 
     public static final String ContentEncoding = "Content-Encoding";
@@ -280,6 +284,8 @@ public final class HTTPValues {
 
     public static final String IfModifiedSince = "If-Modified-Since";
 
+    public static final String KeepAliveLower = "keep-alive";
+
     public static final String LastModified = "Last-Modified";
 
     public static final String Location = "Location";
@@ -290,6 +296,11 @@ public final class HTTPValues {
      * The Origin header indicates where the cross-origin request or preflight request originates from.
      */
     public static final String Origin = "Origin";
+
+    public static final String ProxyConnectionLower = "proxy-connection";
+
+    // RFC 9113 §8.1.2.1: the only pseudo-headers valid in a client request.
+    public static final Set<String> RequestPseudoHeaders = Set.of(":authority", ":method", ":path", ":scheme");
 
     public static final String Referer = "Referer";
 
@@ -302,6 +313,15 @@ public final class HTTPValues {
     public static final String Trailer = "Trailer";
 
     public static final String TransferEncoding = "Transfer-Encoding";
+
+    public static final String TransferEncodingLower = "transfer-encoding";
+
+    public static final String UpgradeLower = "upgrade";
+
+    // RFC 9113 §8.1.2.2: headers that are connection-specific and forbidden in HTTP/2.
+    public static final Set<String> ConnectionSpecificHeaders = Set.of(
+        ConnectionLower, KeepAliveLower, ProxyConnectionLower, TransferEncodingLower, UpgradeLower
+    );
 
     public static final String UserAgent = "User-Agent";
 

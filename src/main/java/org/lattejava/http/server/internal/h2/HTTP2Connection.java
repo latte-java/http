@@ -9,7 +9,6 @@ import module org.lattejava.http;
 
 import org.lattejava.http.io.PushbackInputStream;
 import org.lattejava.http.server.internal.*;
-import org.lattejava.http.server.io.EmptyHTTPInputStream;
 
 /**
  * Per-connection HTTP/2 state and lifecycle. Owns the socket I/O, frame codec, HPACK state, and stream registry.
@@ -27,18 +26,9 @@ import org.lattejava.http.server.io.EmptyHTTPInputStream;
  * @author Daniel DeGroff
  */
 public class HTTP2Connection implements HTTPConnection, Runnable {
-  // RFC 9113 §8.1.2.2: headers that are connection-specific and forbidden in HTTP/2.
-  private static final Set<String> CONNECTION_SPECIFIC_HEADERS = Set.of(
-      "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"
-  );
-  private static final Set<String> H1_ONLY_HEADERS = Set.of(
-      "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade"
-  );
-  // RFC 9113 §8.1.2.1: the only pseudo-headers valid in a client request.
-  private static final Set<String> REQUEST_PSEUDO_HEADERS = Set.of(":authority", ":method", ":path", ":scheme");
-
   // Maximum number of recently-closed stream IDs to remember for §5.1 STREAM_CLOSED detection.
   private static final int MAX_RECENTLY_CLOSED = 100;
+
   // Maximum number of frames the writer drains per loop iteration. The blocking head-take is unchanged; this caps
   // the opportunistic drainTo that follows. 32 chosen so that even at peerMaxFrameSize=16384 a full batch is ~512KB,
   // inside one TCP-window worth of data on a typical link; smaller batches reduce per-frame queue contention
@@ -46,39 +36,63 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   private static final int WRITER_BATCH_SIZE = 32;
 
   private final HTTPBuffers buffers;
+
   private final HTTPServerConfiguration configuration;
+
   // Connection-level send window (RFC 9113 §6.9). Shared by every per-stream writer; replenished by the reader thread
   // on a stream-0 WINDOW_UPDATE. Starts at the HTTP/2 default of 65535 octets.
   private final HTTP2ConnectionWindow connectionSendWindow = new HTTP2ConnectionWindow(65535);
+
   private final HTTPContext context;
-  // The connection input stream, already wrapped for throughput accounting and positioned immediately after the
-  // HTTP/2 connection preface, which ProtocolSelector read and validated before constructing this connection.
-  private final InputStream inputStream;
-  private final Instrumenter instrumenter;
-  private final HTTPListenerConfiguration listener;
-  private final HTTP2Settings localSettings;
-  private final Logger logger;
-  private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
-  private final HTTP2RateLimitsTracker rateLimits;
-  // Bounded deque of recently-closed stream IDs for RFC 9113 §5.1 STREAM_CLOSED error detection.
-  // Access is confined to the reader thread, so no synchronization is needed.
-  private final Deque<Integer> recentlyClosedStreams = new ArrayDeque<>();
-  private final Socket socket;
-  private final long startInstant;
-  private final Map<Integer, HTTP2Stream> streams = new ConcurrentHashMap<>();
+
   // Active handler virtual-threads. Each handler adds itself on entry and removes itself in finally. The connection's
   // teardown path interrupts every thread in this set so handlers parked on writerQueue.put() or in HTTP2OutputStream's
   // flow-control wait loop unblock and propagate InterruptedIOException out of the user handler instead of leaking.
   private final Set<Thread> handlerThreads = ConcurrentHashMap.newKeySet();
+
+  // The connection input stream, already wrapped for throughput accounting and positioned immediately after the
+  // HTTP/2 connection preface, which ProtocolSelector read and validated before constructing this connection.
+  private final InputStream inputStream;
+
+  private final Instrumenter instrumenter;
+
+  private final HTTPListenerConfiguration listener;
+
+  private final HTTP2Settings localSettings;
+
+  private final Logger logger;
+
+  private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
+
+  private final HTTP2RateLimitsTracker rateLimits;
+
+  // Bounded deque of recently-closed stream IDs for RFC 9113 §5.1 STREAM_CLOSED error detection.
+  // Access is confined to the reader thread, so no synchronization is needed.
+  private final Deque<Integer> recentlyClosedStreams = new ArrayDeque<>();
+
+  private final Socket socket;
+
+  private final long startInstant;
+
   private final Map<Integer, BlockingQueue<byte[]>> streamPipes = new ConcurrentHashMap<>();
+
+  private final Map<Integer, HTTP2Stream> streams = new ConcurrentHashMap<>();
+
   private final Throughput throughput;
+
   private final BlockingQueue<HTTP2Frame> writerQueue = new LinkedBlockingQueue<>(128);
+
   private volatile boolean goawaySent;
+
   private long handledRequests;
+
   private volatile int highestSeenStreamId = 0;
+
   // Reader thread handle, captured at the top of run() so the writer thread can interrupt it when it dies.
   private volatile Thread readerThread;
+
   private volatile HTTPConnection.State state = HTTPConnection.State.Read;
+
   // Set true when the writer virtual-thread exits (either via the shutdown sentinel or an unexpected exception).
   // The reader checks this before each blocking enqueue to avoid parking forever on a full writerQueue.
   private volatile boolean writerDead;
@@ -105,8 +119,8 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
    * static method so the loop can be unit-tested without constructing a full {@link HTTP2Connection}.
    *
    * <p>Returns normally on clean shutdown (sentinel observed); propagates {@link InterruptedException} from
-   * {@code queue.take()} and rethrows {@link IOException} from {@code writer} / {@code out} so the caller (the
-   * writer virtual-thread lambda) can run its teardown finally block.
+   * {@code queue.take()} and rethrows {@link IOException} from {@code writer} / {@code out} so the caller (the writer
+   * virtual-thread lambda) can run its teardown finally block.
    */
   public static void runWriterLoop(BlockingQueue<HTTP2Frame> queue, HTTP2FrameWriter writer, OutputStream out) throws IOException, InterruptedException {
     List<HTTP2Frame> batch = new ArrayList<>(WRITER_BATCH_SIZE);
@@ -134,6 +148,26 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     }
   }
 
+  private static byte[] encodeSettings(HTTP2Settings s) {
+    var baos = new ByteArrayOutputStream();
+    writeSetting(baos, HTTP2Settings.SETTINGS_HEADER_TABLE_SIZE, s.headerTableSize());
+    writeSetting(baos, HTTP2Settings.SETTINGS_ENABLE_PUSH, 0); // server never pushes
+    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_CONCURRENT_STREAMS, s.maxConcurrentStreams());
+    writeSetting(baos, HTTP2Settings.SETTINGS_INITIAL_WINDOW_SIZE, s.initialWindowSize());
+    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_FRAME_SIZE, s.maxFrameSize());
+    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_HEADER_LIST_SIZE, s.maxHeaderListSize());
+    return baos.toByteArray();
+  }
+
+  private static void writeSetting(ByteArrayOutputStream out, int id, int value) {
+    out.write((id >> 8) & 0xFF);
+    out.write(id & 0xFF);
+    out.write((value >> 24) & 0xFF);
+    out.write((value >> 16) & 0xFF);
+    out.write((value >> 8) & 0xFF);
+    out.write(value & 0xFF);
+  }
+
   @Override
   public long getHandledRequests() {
     return handledRequests;
@@ -147,21 +181,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   @Override
   public long getStartInstant() {
     return startInstant;
-  }
-
-  @Override
-  public HTTPConnection.State state() {
-    return state;
-  }
-
-  /**
-   * Initiates a graceful shutdown by enqueuing a {@code GOAWAY(NO_ERROR)} frame with the highest seen client stream-id.
-   * The writer thread emits it and in-flight streams are given up to the server's configured shutdown duration to
-   * complete before the socket is force-closed by {@link HTTPServer}.
-   */
-  @Override
-  public void shutdown() {
-    enqueueForWriter(new HTTP2Frame.GoawayFrame(highestSeenStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
   }
 
   @Override
@@ -205,7 +224,9 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
         sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
         // Half-close immediately so the kernel sends FIN — h2spec keeps writing preface bytes;
         // bytes arriving after the 50 ms finally-drain race the close and cause OS RST instead of FIN.
-        try { socket.shutdownOutput(); } catch (IOException ignore) { /* best effort */ }
+        try {
+          socket.shutdownOutput();
+        } catch (IOException ignore) { /* best effort */ }
         return;
       }
       peerSettings.applyPayload(settings.payload());
@@ -434,6 +455,69 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     }
   }
 
+  /**
+   * Initiates a graceful shutdown by enqueuing a {@code GOAWAY(NO_ERROR)} frame with the highest seen client stream-id.
+   * The writer thread emits it and in-flight streams are given up to the server's configured shutdown duration to
+   * complete before the socket is force-closed by {@link HTTPServer}.
+   */
+  @Override
+  public void shutdown() {
+    enqueueForWriter(new HTTP2Frame.GoawayFrame(highestSeenStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
+  }
+
+  @Override
+  public HTTPConnection.State state() {
+    return state;
+  }
+
+  private HTTPRequest buildRequestFromHeaders(List<HPACKDynamicTable.HeaderField> fields, int streamId) {
+    HTTPRequest req = new HTTPRequest(context, configuration.getContextPath(),
+        listener.getCertificate() != null ? "https" : "http",
+        listener.getPort(),
+        socket.getInetAddress().getHostAddress());
+    req.setProtocol("HTTP/2.0");
+    for (var field : fields) {
+      String name = field.name();
+      String value = field.value();
+      switch (name) {
+        case ":method" -> req.setMethod(HTTPMethod.of(value));
+        case ":path" -> req.setPath(value); // setPath handles query-string splitting internally
+        case ":scheme" -> {
+        } // Scheme derived from listener.getCertificate(); pseudo-header recorded but not applied
+        case ":authority" -> req.addHeader("Host", value);
+        default -> req.addHeader(name, value);
+      }
+    }
+    return req;
+  }
+
+  /**
+   * Enqueue a frame for the writer thread. Returns {@code false} (and logs at debug) if the writer is dead or the queue
+   * stays full past the timeout — caller decides what to do (typically: return, the connection is tearing down). Used
+   * by reader-side enqueues only; handler-side calls are covered by the existing handler-thread-interrupt mechanism in
+   * the reader's finally block.
+   */
+  private boolean enqueueForWriter(HTTP2Frame f) {
+    if (writerDead) {
+      // Fire-and-forget: callers intentionally ignore the boolean. The frame is dropped because the connection
+      // is tearing down; whatever the caller wanted to send (RST_STREAM, WINDOW_UPDATE, ACK) is moot once the
+      // peer has lost the socket.
+      logger.debug("Dropping frame [{}] — writer thread already dead", f);
+      return false;
+    }
+    try {
+      if (!writerQueue.offer(f, 5, TimeUnit.SECONDS)) {
+        logger.debug("Writer queue full for [5s]; declaring writer death and dropping frame [{}]", f);
+        writerDead = true;
+        return false;
+      }
+      return true;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
+  }
+
   private void finalizeHeaderBlock(int streamId, int flags, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
     List<HPACKDynamicTable.HeaderField> fields;
     try {
@@ -546,33 +630,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     handledRequests++;
   }
 
-  /**
-   * Enqueue a frame for the writer thread. Returns {@code false} (and logs at debug) if the writer is dead or the queue
-   * stays full past the timeout — caller decides what to do (typically: return, the connection is tearing down). Used
-   * by reader-side enqueues only; handler-side calls are covered by the existing handler-thread-interrupt mechanism in
-   * the reader's finally block.
-   */
-  private boolean enqueueForWriter(HTTP2Frame f) {
-    if (writerDead) {
-      // Fire-and-forget: callers intentionally ignore the boolean. The frame is dropped because the connection
-      // is tearing down; whatever the caller wanted to send (RST_STREAM, WINDOW_UPDATE, ACK) is moot once the
-      // peer has lost the socket.
-      logger.debug("Dropping frame [{}] — writer thread already dead", f);
-      return false;
-    }
-    try {
-      if (!writerQueue.offer(f, 5, TimeUnit.SECONDS)) {
-        logger.debug("Writer queue full for [5s]; declaring writer death and dropping frame [{}]", f);
-        writerDead = true;
-        return false;
-      }
-      return true;
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return false;
-    }
-  }
-
   private void goAway(HTTP2ErrorCode code) {
     if (goawaySent) {
       return; // Idempotent — only one GOAWAY per connection.
@@ -581,28 +638,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     // Use the highest seen client stream-id.
     // lastStreamId == -1 is reserved as the writer-shutdown sentinel and must never be used for a real GOAWAY.
     enqueueForWriter(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
-  }
-
-  /**
-   * Writes a GOAWAY frame directly to the wire — bypassing the writer queue. Used only during the connection preamble
-   * phase (before the writer virtual-thread is started) to ensure the peer receives the error frame before the TCP
-   * connection is closed.
-   */
-  private void sendGoAwayDirect(HTTP2FrameWriter writer, OutputStream out, HTTP2ErrorCode code) {
-    try {
-      writer.writeFrame(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
-      out.flush();
-    } catch (IOException ignore) {
-      // Best-effort: if the peer already closed, suppress the write error.
-    }
-  }
-
-  /**
-   * Sends a stream-level error by enqueueing an RST_STREAM frame for {@code streamId}. Use this for stream errors (RFC
-   * 9113 §5.4.2), not connection errors.
-   */
-  private void rstStream(int streamId, HTTP2ErrorCode code) {
-    enqueueForWriter(new HTTP2Frame.RSTStreamFrame(streamId, code.value));
   }
 
   private void handleContinuationFrame(HTTP2Frame.ContinuationFrame f, ByteArrayOutputStream headerAccum, HPACKDecoder decoder, HPACKEncoder encoder) throws IOException {
@@ -860,107 +895,25 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   }
 
   /**
-   * Validates the decoded header list per RFC 9113 §8.1.2.*. Returns {@code true} if valid. On any violation, enqueues
-   * RST_STREAM(PROTOCOL_ERROR) for {@code streamId} and returns {@code false}.
+   * Sends a stream-level error by enqueueing an RST_STREAM frame for {@code streamId}. Use this for stream errors (RFC
+   * 9113 §5.4.2), not connection errors.
    */
-  private boolean validateHeaders(List<HPACKDynamicTable.HeaderField> fields, int streamId, boolean isTrailer) {
-    boolean seenRegularHeader = false;
-    Set<String> seenPseudo = new HashSet<>();
-
-    for (var f : fields) {
-      String name = f.name();
-
-      // §8.1.2/1: header names MUST be lowercase.
-      for (int i = 0; i < name.length(); i++) {
-        char c = name.charAt(i);
-        if (c >= 'A' && c <= 'Z') {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-      }
-
-      boolean isPseudo = name.startsWith(":");
-      if (isPseudo) {
-        // §8.1.2.1/3: pseudo-headers are forbidden in trailers.
-        if (isTrailer) {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-        // §8.1.2.1/4: pseudo-header after a regular header.
-        if (seenRegularHeader) {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-        // §8.1.2.1/1 + §8.1.2.1/2: unknown pseudo-header or response pseudo-header in request.
-        if (!REQUEST_PSEUDO_HEADERS.contains(name)) {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-        // §8.1.2.3/5–7: pseudo-headers MUST NOT appear more than once.
-        if (!seenPseudo.add(name)) {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-      } else {
-        seenRegularHeader = true;
-        // §8.1.2.2/1: connection-specific headers are forbidden.
-        if (CONNECTION_SPECIFIC_HEADERS.contains(name)) {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-        // §8.1.2.2/2: TE header may only contain "trailers".
-        if (name.equals("te") && !f.value().equalsIgnoreCase("trailers")) {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-      }
-    }
-
-    if (!isTrailer) {
-      // §8.1.2.3/2,3,4: required request pseudo-headers must be present.
-      if (!seenPseudo.contains(":method")) {
-        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-        return false;
-      }
-      if (!seenPseudo.contains(":scheme")) {
-        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-        return false;
-      }
-      if (!seenPseudo.contains(":path")) {
-        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-        return false;
-      }
-      // §8.1.2.3/1: :path must not be empty.
-      for (var f : fields) {
-        if (f.name().equals(":path") && f.value().isEmpty()) {
-          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
-          return false;
-        }
-      }
-    }
-
-    return true;
+  private void rstStream(int streamId, HTTP2ErrorCode code) {
+    enqueueForWriter(new HTTP2Frame.RSTStreamFrame(streamId, code.value));
   }
 
-  private HTTPRequest buildRequestFromHeaders(List<HPACKDynamicTable.HeaderField> fields, int streamId) {
-    HTTPRequest req = new HTTPRequest(context, configuration.getContextPath(),
-        listener.getCertificate() != null ? "https" : "http",
-        listener.getPort(),
-        socket.getInetAddress().getHostAddress());
-    req.setProtocol("HTTP/2.0");
-    for (var field : fields) {
-      String name = field.name();
-      String value = field.value();
-      switch (name) {
-        case ":method" -> req.setMethod(HTTPMethod.of(value));
-        case ":path" -> req.setPath(value); // setPath handles query-string splitting internally
-        case ":scheme" -> {
-        } // Scheme derived from listener.getCertificate(); pseudo-header recorded but not applied
-        case ":authority" -> req.addHeader("Host", value);
-        default -> req.addHeader(name, value);
-      }
+  /**
+   * Writes a GOAWAY frame directly to the wire — bypassing the writer queue. Used only during the connection preamble
+   * phase (before the writer virtual-thread is started) to ensure the peer receives the error frame before the TCP
+   * connection is closed.
+   */
+  private void sendGoAwayDirect(HTTP2FrameWriter writer, OutputStream out, HTTP2ErrorCode code) {
+    try {
+      writer.writeFrame(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
+      out.flush();
+    } catch (IOException ignore) {
+      // Best-effort: if the peer already closed, suppress the write error.
     }
-    return req;
   }
 
   private void spawnHandlerThread(HTTPRequest request, HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder) {
@@ -1032,6 +985,89 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   }
 
   /**
+   * Validates the decoded header list per RFC 9113 §8.1.2.*. Returns {@code true} if valid. On any violation, enqueues
+   * RST_STREAM(PROTOCOL_ERROR) for {@code streamId} and returns {@code false}.
+   */
+  private boolean validateHeaders(List<HPACKDynamicTable.HeaderField> fields, int streamId, boolean isTrailer) {
+    boolean seenRegularHeader = false;
+    Set<String> seenPseudo = new HashSet<>();
+
+    for (var f : fields) {
+      String name = f.name();
+
+      // §8.1.2/1: header names MUST be lowercase.
+      for (int i = 0; i < name.length(); i++) {
+        char c = name.charAt(i);
+        if (c >= 'A' && c <= 'Z') {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      }
+
+      boolean isPseudo = name.startsWith(":");
+      if (isPseudo) {
+        // §8.1.2.1/3: pseudo-headers are forbidden in trailers.
+        if (isTrailer) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.1/4: pseudo-header after a regular header.
+        if (seenRegularHeader) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.1/1 + §8.1.2.1/2: unknown pseudo-header or response pseudo-header in request.
+        if (!HTTPValues.Headers.RequestPseudoHeaders.contains(name)) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.3/5–7: pseudo-headers MUST NOT appear more than once.
+        if (!seenPseudo.add(name)) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      } else {
+        seenRegularHeader = true;
+        // §8.1.2.2/1: connection-specific headers are forbidden.
+        if (HTTPValues.Headers.ConnectionSpecificHeaders.contains(name)) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+        // §8.1.2.2/2: TE header may only contain "trailers".
+        if (name.equals("te") && !f.value().equalsIgnoreCase("trailers")) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      }
+    }
+
+    if (!isTrailer) {
+      // §8.1.2.3/2,3,4: required request pseudo-headers must be present.
+      if (!seenPseudo.contains(":method")) {
+        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+        return false;
+      }
+      if (!seenPseudo.contains(":scheme")) {
+        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+        return false;
+      }
+      if (!seenPseudo.contains(":path")) {
+        rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+        return false;
+      }
+      // §8.1.2.3/1: :path must not be empty.
+      for (var f : fields) {
+        if (f.name().equals(":path") && f.value().isEmpty()) {
+          rstStream(streamId, HTTP2ErrorCode.PROTOCOL_ERROR);
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /**
    * Wraps the per-stream {@link HTTP2OutputStream} with lazy HEADERS emission. On the first write or flush the current
    * response status and headers are encoded and enqueued as an HTTP/2 HEADERS frame; subsequent writes and flushes are
    * delegated directly to the underlying stream, enabling bidi-streaming handlers to interleave request reads and
@@ -1040,11 +1076,16 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
    * <p>RFC 9113 §8.1 — HEADERS must precede DATA. This class enforces that invariant.
    */
   private class LazyHeaderOutputStream extends OutputStream {
-    private final HTTPResponse response;
-    private final HTTP2Stream stream;
     private final HPACKEncoder encoder;
-    private HTTP2OutputStream delegate;
+
+    private final HTTPResponse response;
+
+    private final HTTP2Stream stream;
+
     private boolean closed;
+
+    private HTTP2OutputStream delegate;
+
     // Set when the client RST'd the stream before we sent headers. Subsequent writes and closes are no-ops.
     private boolean streamReset;
 
@@ -1052,27 +1093,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       this.response = response;
       this.stream = stream;
       this.encoder = encoder;
-    }
-
-    @Override
-    public void write(int b) throws IOException {
-      ensureHeadersSent();
-      if (streamReset) return;
-      delegate.write(b);
-    }
-
-    @Override
-    public void write(byte[] b, int off, int len) throws IOException {
-      ensureHeadersSent();
-      if (streamReset) return;
-      delegate.write(b, off, len);
-    }
-
-    @Override
-    public void flush() throws IOException {
-      ensureHeadersSent();
-      if (streamReset) return;
-      delegate.flush();
     }
 
     @Override
@@ -1090,6 +1110,44 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       }
     }
 
+    @Override
+    public void flush() throws IOException {
+      ensureHeadersSent();
+      if (streamReset) return;
+      delegate.flush();
+    }
+
+    @Override
+    public void write(int b) throws IOException {
+      ensureHeadersSent();
+      if (streamReset) return;
+      delegate.write(b);
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) throws IOException {
+      ensureHeadersSent();
+      if (streamReset) return;
+      delegate.write(b, off, len);
+    }
+
+    private void emitTrailers() {
+      List<HPACKDynamicTable.HeaderField> trailerFields = new ArrayList<>();
+      for (var entry : response.getTrailers().entrySet()) {
+        for (String v : entry.getValue()) {
+          trailerFields.add(new HPACKDynamicTable.HeaderField(entry.getKey(), v));
+        }
+      }
+      byte[] trailerBlock;
+      synchronized (encoder) {
+        trailerBlock = encoder.encode(trailerFields);
+      }
+      // Route through enqueueForWriter (not a raw writerQueue.put) so a dead writer is detected and the offer is
+      // bounded, matching every other handler-side enqueue rather than parking until interrupt on a full queue.
+      enqueueForWriter(new HTTP2Frame.HeadersFrame(stream.streamId(),
+          HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
+    }
+
     private void ensureHeadersSent() throws IOException {
       if (delegate != null || streamReset) return;
       // Build response HEADERS field list from the response state at the time of first write.
@@ -1097,7 +1155,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       respFields.add(new HPACKDynamicTable.HeaderField(":status", String.valueOf(response.getStatus())));
       for (var entry : response.getHeadersMap().entrySet()) {
         String lowerKey = entry.getKey().toLowerCase(Locale.ROOT);
-        if (H1_ONLY_HEADERS.contains(lowerKey)) {
+        if (HTTPValues.Headers.ConnectionSpecificHeaders.contains(lowerKey)) {
           logger.debug("Stripping h1.1-only response header [{}] on h2 emission", entry.getKey());
           continue;
         }
@@ -1136,42 +1194,5 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       }
       delegate = new HTTP2OutputStream(stream, writerQueue, connectionSendWindow, peerSettings.maxFrameSize());
     }
-
-    private void emitTrailers() {
-      List<HPACKDynamicTable.HeaderField> trailerFields = new ArrayList<>();
-      for (var entry : response.getTrailers().entrySet()) {
-        for (String v : entry.getValue()) {
-          trailerFields.add(new HPACKDynamicTable.HeaderField(entry.getKey(), v));
-        }
-      }
-      byte[] trailerBlock;
-      synchronized (encoder) {
-        trailerBlock = encoder.encode(trailerFields);
-      }
-      // Route through enqueueForWriter (not a raw writerQueue.put) so a dead writer is detected and the offer is
-      // bounded, matching every other handler-side enqueue rather than parking until interrupt on a full queue.
-      enqueueForWriter(new HTTP2Frame.HeadersFrame(stream.streamId(),
-          HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
-    }
-  }
-
-  private static byte[] encodeSettings(HTTP2Settings s) {
-    var baos = new ByteArrayOutputStream();
-    writeSetting(baos, HTTP2Settings.SETTINGS_HEADER_TABLE_SIZE, s.headerTableSize());
-    writeSetting(baos, HTTP2Settings.SETTINGS_ENABLE_PUSH, 0); // server never pushes
-    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_CONCURRENT_STREAMS, s.maxConcurrentStreams());
-    writeSetting(baos, HTTP2Settings.SETTINGS_INITIAL_WINDOW_SIZE, s.initialWindowSize());
-    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_FRAME_SIZE, s.maxFrameSize());
-    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_HEADER_LIST_SIZE, s.maxHeaderListSize());
-    return baos.toByteArray();
-  }
-
-  private static void writeSetting(ByteArrayOutputStream out, int id, int value) {
-    out.write((id >> 8) & 0xFF);
-    out.write(id & 0xFF);
-    out.write((value >> 24) & 0xFF);
-    out.write((value >> 16) & 0xFF);
-    out.write((value >> 8) & 0xFF);
-    out.write(value & 0xFF);
   }
 }

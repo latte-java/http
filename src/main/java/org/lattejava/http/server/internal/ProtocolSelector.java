@@ -33,8 +33,6 @@ import org.lattejava.http.server.internal.h2.*;
  * @author Daniel DeGroff
  */
 public class ProtocolSelector {
-  private static final byte[] HTTP2_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
-
   /**
    * Selects the appropriate connection handler for the given socket, or closes the socket and returns {@code null} when
    * the negotiated and spoken protocols disagree.
@@ -96,12 +94,12 @@ public class ProtocolSelector {
    * mismatch keeps the common HTTP/1.1 case to a single small read rather than blocking for a full 24 bytes.
    */
   private static Version sniff(PushbackInputStream pushback) throws IOException {
-    byte[] peek = new byte[HTTP2_PREFACE.length];
+    byte[] peek = new byte[HTTPValues.ControlBytes.HTTP2Preface.length];
     int total = 0;
-    while (total < HTTP2_PREFACE.length) {
+    while (total < HTTPValues.ControlBytes.HTTP2Preface.length) {
       int read;
       try {
-        read = pushback.read(peek, total, HTTP2_PREFACE.length - total);
+        read = pushback.read(peek, total, HTTPValues.ControlBytes.HTTP2Preface.length - total);
       } catch (SocketTimeoutException timeout) {
         // A slow or silent client never completed the preface within the initial-read timeout. Treat it as HTTP/1.1
         // and let that worker's own preamble parser apply its timeout.
@@ -120,7 +118,7 @@ public class ProtocolSelector {
       }
 
       for (int i = total; i < total + read; i++) {
-        if (peek[i] != HTTP2_PREFACE[i]) {
+        if (peek[i] != HTTPValues.ControlBytes.HTTP2Preface[i]) {
           pushback.push(peek, 0, total + read);
           return Version.h1;
         }
