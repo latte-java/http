@@ -9,25 +9,34 @@ import module org.lattejava.http;
 
 /**
  * Runs on the per-connection virtual thread. Performs protocol selection (the TLS-ALPN handshake or the h2c preface
- * peek) off the accept thread, then delegates to the resolved {@link org.lattejava.http.server.internal.h1.HTTP1Connection}
- * or {@link org.lattejava.http.server.internal.h2.HTTP2Connection}.
- *
- * <p>It implements {@link HTTPConnection} so {@link HTTPServerAcceptorThread} can register it with the reaper the
- * instant the connection is accepted — before the blocking negotiation runs. Until the delegate exists, the dispatcher
- * reports {@link HTTPConnection.State#Negotiating} so the reaper's throughput check does not evict an in-progress
- * handshake; the handshake is bounded by the socket {@code SO_TIMEOUT}.
+ * peek) off the accept thread, then delegates to the resolved
+ * {@link org.lattejava.http.server.internal.h1.HTTP1Connection} or
+ * {@link org.lattejava.http.server.internal.h2.HTTP2Connection}.
+ * <p>
+ * It implements {@link HTTPConnection} so {@link HTTPServerAcceptorThread} can register it with the reaper the instant
+ * the connection is accepted — before the blocking negotiation runs. Until the delegate exists, the dispatcher reports
+ * {@link HTTPConnection.State#Negotiating} so the reaper's throughput check does not evict an in-progress handshake;
+ * the handshake is bounded by the socket {@code SO_TIMEOUT}.
  *
  * @author Brian Pontarelli
  */
 public class ConnectionDispatcher implements HTTPConnection {
   private final HTTPServerConfiguration configuration;
+
   private final HTTPContext context;
+
   private final Instrumenter instrumenter;
+
   private final HTTPListenerConfiguration listener;
+
   private final Logger logger;
+
   private final Socket socket;
+
   private final long startInstant;
+
   private final Throughput throughput;
+
   private volatile HTTPConnection delegate;
 
   public ConnectionDispatcher(Socket socket, HTTPServerConfiguration configuration, HTTPContext context,
@@ -44,8 +53,7 @@ public class ConnectionDispatcher implements HTTPConnection {
 
   @Override
   public long getHandledRequests() {
-    HTTPConnection d = delegate;
-    return d != null ? d.getHandledRequests() : 0;
+    return delegate != null ? delegate.getHandledRequests() : 0;
   }
 
   @Override
@@ -55,16 +63,14 @@ public class ConnectionDispatcher implements HTTPConnection {
 
   @Override
   public long getStartInstant() {
-    HTTPConnection d = delegate;
-    return d != null ? d.getStartInstant() : startInstant;
+    return delegate != null ? delegate.getStartInstant() : startInstant;
   }
 
   @Override
   public void run() {
     try {
-      HTTPConnection selected = ProtocolSelector.select(socket, configuration, context, instrumenter, listener, throughput);
-      delegate = selected;
-      selected.run();
+      delegate = ProtocolSelector.select(socket, configuration, context, instrumenter, listener, throughput);
+      delegate.run();
     } catch (IOException e) {
       // Protocol selection failed: TLS handshake error, h2c-preface peek error, or a slow-loris client that never
       // finished the handshake within the initial-read SO_TIMEOUT. Close the socket so the file descriptor does not
@@ -79,15 +85,13 @@ public class ConnectionDispatcher implements HTTPConnection {
 
   @Override
   public void shutdown() {
-    HTTPConnection d = delegate;
-    if (d != null) {
-      d.shutdown();
+    if (delegate != null) {
+      delegate.shutdown();
     }
   }
 
   @Override
   public State state() {
-    HTTPConnection d = delegate;
-    return d != null ? d.state() : State.Negotiating;
+    return delegate != null ? delegate.state() : State.Negotiating;
   }
 }
