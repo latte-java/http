@@ -152,26 +152,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     }
   }
 
-  private static byte[] encodeSettings(HTTP2Settings s) {
-    var baos = new ByteArrayOutputStream();
-    writeSetting(baos, HTTP2Settings.SETTINGS_HEADER_TABLE_SIZE, s.headerTableSize());
-    writeSetting(baos, HTTP2Settings.SETTINGS_ENABLE_PUSH, 0); // server never pushes
-    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_CONCURRENT_STREAMS, s.maxConcurrentStreams());
-    writeSetting(baos, HTTP2Settings.SETTINGS_INITIAL_WINDOW_SIZE, s.initialWindowSize());
-    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_FRAME_SIZE, s.maxFrameSize());
-    writeSetting(baos, HTTP2Settings.SETTINGS_MAX_HEADER_LIST_SIZE, s.maxHeaderListSize());
-    return baos.toByteArray();
-  }
-
-  private static void writeSetting(ByteArrayOutputStream out, int id, int value) {
-    out.write((id >> 8) & 0xFF);
-    out.write(id & 0xFF);
-    out.write((value >> 24) & 0xFF);
-    out.write((value >> 16) & 0xFF);
-    out.write((value >> 8) & 0xFF);
-    out.write(value & 0xFF);
-  }
-
   @Override
   public long getHandledRequests() {
     return handledRequests;
@@ -200,7 +180,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       var out = new BufferedOutputStream(new ThroughputOutputStream(socket.getOutputStream(), throughput), 64 * 1024);
 
       // Pre-size buffers to our advertised SETTINGS_MAX_FRAME_SIZE so we can read inbound frames the peer
-      // sends within the limit we declared, and write outbound frames up to the same size. The write buffer
+      // sends within the limit we declared and write outbound frames up to the same size. The write buffer
       // may be grown again below if peer SETTINGS advertise a larger MAX_FRAME_SIZE than our own.
       buffers.ensureFrameReadCapacity(localSettings.maxFrameSize());
       buffers.ensureFrameWriteCapacity(localSettings.maxFrameSize());
@@ -210,12 +190,12 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
 
       // Send our initial SETTINGS frame. The client connection preface was already read and validated by
       // ProtocolSelector, so we begin directly at the SETTINGS exchange.
-      writer.writeFrame(new HTTP2Frame.SettingsFrame(0, encodeSettings(localSettings)));
+      writer.writeFrame(new HTTP2Frame.SettingsFrame(0, localSettings.toPayload()));
       out.flush();
 
       // Read the peer's first SETTINGS frame.
       var firstFrame = reader.readFrame();
-      if (!(firstFrame instanceof HTTP2Frame.SettingsFrame settings) || (settings.flags() & HTTP2Frame.FLAG_ACK) != 0) {
+      if (!(firstFrame instanceof HTTP2Frame.SettingsFrame(int flags, byte[] payload)) || (flags & HTTP2Frame.FLAG_ACK) != 0) {
         logger.debug("Expected client SETTINGS frame after preface");
         // RFC 9113 §3.5 / §5.4.1: emit GOAWAY(PROTOCOL_ERROR) before closing.
         sendGoAwayDirect(writer, out, HTTP2ErrorCode.PROTOCOL_ERROR);
@@ -226,7 +206,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
         } catch (IOException ignore) { /* best effort */ }
         return;
       }
-      peerSettings.applyPayload(settings.payload());
+      peerSettings.applyPayload(payload);
 
       // RFC 9113 §4.2: outbound DATA frames may be up to peer's SETTINGS_MAX_FRAME_SIZE. Grow the write buffer
       // if the peer accepts larger frames than we configured locally; the writer holds a byte[] reference, so

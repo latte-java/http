@@ -11,18 +11,30 @@ package org.lattejava.http.server.internal.h2;
  * @author Daniel DeGroff
  */
 public class HTTP2Settings {
-  public static final int SETTINGS_ENABLE_PUSH = 0x2;
-  public static final int SETTINGS_HEADER_TABLE_SIZE = 0x1;
-  public static final int SETTINGS_INITIAL_WINDOW_SIZE = 0x4;
-  public static final int SETTINGS_MAX_CONCURRENT_STREAMS = 0x3;
-  public static final int SETTINGS_MAX_FRAME_SIZE = 0x5;
-  public static final int SETTINGS_MAX_HEADER_LIST_SIZE = 0x6;
+  private static final int SETTINGS_ENABLE_PUSH = 0x2;
+
+  private static final int SETTINGS_HEADER_TABLE_SIZE = 0x1;
+
+  private static final int SETTINGS_INITIAL_WINDOW_SIZE = 0x4;
+
+  private static final int SETTINGS_MAX_CONCURRENT_STREAMS = 0x3;
+
+  private static final int SETTINGS_MAX_FRAME_SIZE = 0x5;
+
+  private static final int SETTINGS_MAX_HEADER_LIST_SIZE = 0x6;
+
+  private static final int SETTING_LENGTH = 6; // bytes per setting entry: 2-byte id + 4-byte value
 
   private int enablePush = 1;
+
   private int headerTableSize = 4096;
+
   private int initialWindowSize = 65535;
+
   private int maxConcurrentStreams = 100;
+
   private int maxFrameSize = 16384;
+
   private int maxHeaderListSize = Integer.MAX_VALUE;
 
   public static HTTP2Settings defaults() {
@@ -31,11 +43,26 @@ public class HTTP2Settings {
     return s;
   }
 
+  /**
+   * Packs one setting entry (big-endian: 2-byte id, 4-byte value) into {@code buf} at offset {@code p} and returns the
+   * offset of the next entry.
+   */
+  private static int writeSetting(byte[] buf, int p, int id, int value) {
+    buf[p] = (byte) (id >> 8);
+    buf[p + 1] = (byte) id;
+    buf[p + 2] = (byte) (value >> 24);
+    buf[p + 3] = (byte) (value >> 16);
+    buf[p + 4] = (byte) (value >> 8);
+    buf[p + 5] = (byte) value;
+    return p + SETTING_LENGTH;
+  }
+
   public void applyPayload(byte[] payload) {
-    if (payload.length % 6 != 0) {
+    if (payload.length % SETTING_LENGTH != 0) {
       throw new HTTP2SettingsException("SETTINGS payload length [" + payload.length + "] is not a multiple of 6", HTTP2ErrorCode.FRAME_SIZE_ERROR);
     }
-    for (int i = 0; i < payload.length; i += 6) {
+
+    for (int i = 0; i < payload.length; i += SETTING_LENGTH) {
       int id = ((payload[i] & 0xFF) << 8) | (payload[i + 1] & 0xFF);
       int value = ((payload[i + 2] & 0xFF) << 24) | ((payload[i + 3] & 0xFF) << 16)
           | ((payload[i + 4] & 0xFF) << 8) | (payload[i + 5] & 0xFF);
@@ -115,6 +142,24 @@ public class HTTP2Settings {
 
   public int maxHeaderListSize() {
     return maxHeaderListSize;
+  }
+
+  /**
+   * Encodes this server's settings as a SETTINGS frame payload. The server always advertises the same six parameters,
+   * so the payload is a fixed 36 bytes (six entries of {@link #SETTING_LENGTH} bytes each).
+   *
+   * @return the 36-byte SETTINGS payload.
+   */
+  public byte[] toPayload() {
+    byte[] payload = new byte[6 * SETTING_LENGTH];
+    int p = 0;
+    p = writeSetting(payload, p, SETTINGS_HEADER_TABLE_SIZE, headerTableSize);
+    p = writeSetting(payload, p, SETTINGS_ENABLE_PUSH, 0); // server never pushes
+    p = writeSetting(payload, p, SETTINGS_MAX_CONCURRENT_STREAMS, maxConcurrentStreams);
+    p = writeSetting(payload, p, SETTINGS_INITIAL_WINDOW_SIZE, initialWindowSize);
+    p = writeSetting(payload, p, SETTINGS_MAX_FRAME_SIZE, maxFrameSize);
+    writeSetting(payload, p, SETTINGS_MAX_HEADER_LIST_SIZE, maxHeaderListSize);
+    return payload;
   }
 
   public HTTP2Settings withHeaderTableSize(int size) {

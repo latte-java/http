@@ -51,4 +51,38 @@ public class HTTP2SettingsTest {
     HTTP2Settings s = HTTP2Settings.defaults();
     expectThrows(HTTP2Settings.HTTP2SettingsException.class, () -> s.applyPayload(payload));
   }
+
+  @Test
+  public void to_payload_emits_exact_bytes() {
+    // The server advertises exactly six settings (36 bytes), big-endian: 2-byte id, 4-byte value.
+    byte[] expected = {
+        0, 1, 0, 0, 0x10, 0,                               // HEADER_TABLE_SIZE = 4096
+        0, 2, 0, 0, 0, 0,                                  // ENABLE_PUSH = 0 (server never pushes)
+        0, 3, 0, 0, 0, 0x64,                               // MAX_CONCURRENT_STREAMS = 100
+        0, 4, 0, 0, (byte) 0xFF, (byte) 0xFF,              // INITIAL_WINDOW_SIZE = 65535
+        0, 5, 0, 0, 0x40, 0,                               // MAX_FRAME_SIZE = 16384
+        0, 6, 0x7F, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF  // MAX_HEADER_LIST_SIZE = 2^31-1
+    };
+    assertEquals(HTTP2Settings.defaults().toPayload(), expected);
+  }
+
+  @Test
+  public void to_payload_round_trips_through_apply_payload() {
+    HTTP2Settings original = HTTP2Settings.defaults()
+        .withHeaderTableSize(8192)
+        .withMaxConcurrentStreams(250)
+        .withInitialWindowSize(1048576)
+        .withMaxFrameSize(32768)
+        .withMaxHeaderListSize(16384);
+
+    HTTP2Settings parsed = HTTP2Settings.defaults();
+    parsed.applyPayload(original.toPayload());
+
+    assertEquals(parsed.headerTableSize(), 8192);
+    assertEquals(parsed.maxConcurrentStreams(), 250);
+    assertEquals(parsed.initialWindowSize(), 1048576);
+    assertEquals(parsed.maxFrameSize(), 32768);
+    assertEquals(parsed.maxHeaderListSize(), 16384);
+    assertEquals(parsed.enablePush(), 0); // server never pushes
+  }
 }
