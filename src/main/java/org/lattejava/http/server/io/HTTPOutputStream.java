@@ -62,6 +62,14 @@ public class HTTPOutputStream extends OutputStream {
     protocol.forceFlush();
   }
 
+  /**
+   * Flushes already-written body bytes to the client. This method does NOT commit the response: it will not emit the
+   * response preamble or HEADERS frame before the first body byte has been written, so calling it on a stream that has
+   * not yet been written to is a no-op (HTTP/1 never committed on {@code flush()} either, so this contract is consistent
+   * across protocols). Handlers that want to commit the response and push the status and headers to the client early
+   * (for example, an HTTP/2 bidirectional-streaming handler) must call {@link HTTPResponse#flush()} instead, which
+   * routes through {@link #forceFlush()} and commits the response.
+   */
   @Override
   public void flush() throws IOException {
     if (delegate != null) {

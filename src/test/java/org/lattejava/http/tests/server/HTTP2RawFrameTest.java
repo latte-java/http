@@ -10,6 +10,7 @@ import module org.testng;
 
 import org.lattejava.http.server.internal.h2.HPACKDecoder;
 import org.lattejava.http.server.internal.h2.HPACKDynamicTable;
+import org.lattejava.http.server.internal.h2.HPACKEncoder;
 
 import static org.testng.Assert.*;
 
@@ -402,6 +403,122 @@ public class HTTP2RawFrameTest extends BaseTest {
         boolean foundChecksum = fields.stream()
                                       .anyMatch(f -> f.name().equals("x-checksum") && f.value().equals("abc123"));
         assertTrue(foundChecksum, "Expected x-checksum: abc123 in trailer block; decoded: [" + fields + "]");
+      }
+    }
+  }
+
+  /**
+   * Design §11.4 — a gzip-compressed response body and response trailers MUST compose correctly on the wire. The
+   * request advertises {@code accept-encoding: gzip}, so the server compresses the body by default; because the handler
+   * also sets a trailer, the final DATA frame must defer END_STREAM and the trailers must arrive as a HEADERS frame with
+   * END_STREAM. This pins the interaction between gzip framing and the deferred-END_STREAM trailer path: the response
+   * HEADERS advertise {@code content-encoding: gzip} (and omit {@code content-length}), and the accumulated DATA payload
+   * gunzips back to the exact original body.
+   */
+  @Test
+  public void response_gzip_body_with_trailers_composes_on_the_wire() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    String body = "hello world ".repeat(200);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      // Setting a trailer makes the output stream defer END_STREAM on the final DATA frame. Compression is left on
+      // (the default) so the body is gzip-encoded because the request advertised accept-encoding: gzip.
+      res.setTrailer("x-checksum", "abc123");
+      try (var out = res.getOutputStream()) {
+        out.write(body.getBytes(StandardCharsets.UTF_8));
+      }
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2cConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+
+        // Build a request HEADERS block advertising gzip, using the production HPACK encoder. MINIMAL_HPACK_GET does
+        // not include accept-encoding, so we encode the required request pseudo-headers plus accept-encoding: gzip.
+        var encoder = new HPACKEncoder(new HPACKDynamicTable(4096));
+        byte[] requestHeaders = encoder.encode(List.of(
+            new HPACKDynamicTable.HeaderField(":method", "GET"),
+            new HPACKDynamicTable.HeaderField(":scheme", "http"),
+            new HPACKDynamicTable.HeaderField(":path", "/"),
+            new HPACKDynamicTable.HeaderField("accept-encoding", "gzip")
+        ));
+        writeFrameHeader(out, requestHeaders.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(requestHeaders);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+
+        // Read frames in order. Capture the FIRST HEADERS block (response headers), accumulate every DATA payload,
+        // track the LAST DATA frame's flags, and capture the SECOND HEADERS block + flags (the trailers).
+        byte[] responseHeaderBlock = null;
+        var dataAccum = new ByteArrayOutputStream();
+        boolean sawDataFrame = false;
+        int lastDataFlags = -1;
+        byte[] trailerBlock = null;
+        int trailerFlags = -1;
+        int sawHeadersCount = 0;
+        for (int i = 0; i < 30 && trailerBlock == null; i++) {
+          byte[] hdr = in.readNBytes(9);
+          if (hdr.length < 9) break;
+          int len = ((hdr[0] & 0xFF) << 16) | ((hdr[1] & 0xFF) << 8) | (hdr[2] & 0xFF);
+          int type = hdr[3] & 0xFF;
+          int flags = hdr[4] & 0xFF;
+          byte[] payload = in.readNBytes(len);
+          if (payload.length < len) break;
+          switch (type) {
+            case 0x1 -> { // HEADERS
+              sawHeadersCount++;
+              if (sawHeadersCount == 1) {
+                responseHeaderBlock = payload;
+              } else {
+                trailerBlock = payload;
+                trailerFlags = flags;
+              }
+            }
+            case 0x0 -> { // DATA
+              sawDataFrame = true;
+              lastDataFlags = flags;
+              dataAccum.write(payload);
+            }
+            default -> {
+            } // SETTINGS, WINDOW_UPDATE, etc. — ignore.
+          }
+        }
+
+        // Decode the response HEADERS block: content-encoding: gzip, vary: accept-encoding, no content-length.
+        assertNotNull(responseHeaderBlock, "Expected response HEADERS frame on stream 1");
+        var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+        var responseFields = decoder.decode(responseHeaderBlock);
+        assertTrue(responseFields.stream()
+                                 .anyMatch(f -> f.name().equals("content-encoding") && f.value().equalsIgnoreCase("gzip")),
+            "Expected content-encoding: gzip in response headers; decoded: [" + responseFields + "]");
+        assertTrue(responseFields.stream()
+                                 .anyMatch(f -> f.name().equals("vary") && f.value().equalsIgnoreCase("accept-encoding")),
+            "Expected vary: accept-encoding in response headers; decoded: [" + responseFields + "]");
+        assertFalse(responseFields.stream().anyMatch(f -> f.name().equals("content-length")),
+            "Compressed response MUST NOT carry content-length; decoded: [" + responseFields + "]");
+
+        // The final DATA frame must NOT have END_STREAM (trailers follow).
+        assertTrue(sawDataFrame, "Expected at least one DATA frame");
+        assertEquals(lastDataFlags & 0x1, 0,
+            "Final DATA frame MUST NOT have END_STREAM when trailers follow; flags=[" + lastDataFlags + "]");
+
+        // The trailers HEADERS frame must have END_STREAM and decode to include x-checksum: abc123.
+        assertNotNull(trailerBlock, "Expected trailers HEADERS frame after final DATA");
+        assertEquals(trailerFlags & 0x1, 0x1,
+            "Trailers HEADERS frame MUST have END_STREAM; flags=[" + trailerFlags + "]");
+        var trailerFields = decoder.decode(trailerBlock);
+        assertTrue(trailerFields.stream()
+                                .anyMatch(f -> f.name().equals("x-checksum") && f.value().equals("abc123")),
+            "Expected x-checksum: abc123 in trailer block; decoded: [" + trailerFields + "]");
+
+        // The key proof: gunzip the accumulated DATA payload and confirm it round-trips to the original body.
+        byte[] gzipped = dataAccum.toByteArray();
+        String decompressed;
+        try (var gzin = new GZIPInputStream(new ByteArrayInputStream(gzipped))) {
+          decompressed = new String(gzin.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        assertEquals(decompressed, body, "Gunzipped DATA payload must equal the original response body");
       }
     }
   }
