@@ -51,6 +51,8 @@ public class HTTP2CompressionTest extends BaseTest {
       assertEquals(resp.statusCode(), 200);
       assertEquals(resp.version(), HttpClient.Version.HTTP_2);
       assertEquals(resp.headers().firstValue("content-encoding").orElse(""), HTTPValues.ContentEncodings.Deflate);
+      assertEquals(resp.headers().firstValue("vary").orElse(""), HTTPValues.Headers.AcceptEncoding);
+      assertFalse(resp.headers().firstValue("content-length").isPresent(), "Content-Length must be removed when compressing");
       assertEquals(new String(inflate(resp.body()), StandardCharsets.UTF_8), body);
     }
   }
@@ -120,6 +122,8 @@ public class HTTP2CompressionTest extends BaseTest {
       assertEquals(resp.statusCode(), 200);
       assertEquals(resp.version(), HttpClient.Version.HTTP_2);
       assertEquals(resp.headers().firstValue("content-encoding").orElse(""), HTTPValues.ContentEncodings.Gzip);
+      assertEquals(resp.headers().firstValue("vary").orElse(""), HTTPValues.Headers.AcceptEncoding);
+      assertFalse(resp.headers().firstValue("content-length").isPresent(), "Content-Length must be removed when compressing");
       assertEquals(new String(ungzip(resp.body()), StandardCharsets.UTF_8), expected.toString());
     }
   }
