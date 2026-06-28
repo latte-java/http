@@ -80,6 +80,7 @@ public class HTTP1OutputProtocol implements HTTPOutputProtocol {
           }
           response.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
           chunked = true;
+
           // RFC 9110 §6.5: announce trailer names, gated on the client accepting trailers (TE: trailers).
           if (request != null && request.acceptsTrailers()) {
             response.setHeader(HTTPValues.Headers.Trailer, String.join(", ", response.getTrailers().keySet()));

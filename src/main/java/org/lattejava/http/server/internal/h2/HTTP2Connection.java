@@ -500,6 +500,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       logger.debug("Dropping frame [{}] — writer thread already dead", f);
       return false;
     }
+
     try {
       if (!writerQueue.offer(f, 5, TimeUnit.SECONDS)) {
         logger.debug("Writer queue full for [5s]; declaring writer death and dropping frame [{}]", f);
@@ -920,7 +921,8 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
         // handler can interleave request reads and response writes (required for bidi-streaming).
         // RFC 9113 §8.1 requires HEADERS to precede DATA frames — the HTTP2OutputProtocol enforces this.
         var protocol = new HTTP2OutputProtocol(response, stream, encoder);
-        response.setOutputStream(new HTTPOutputStream(configuration, request, response, protocol));
+        HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, response, protocol);
+        response.setOutputStream(outputStream);
 
         configuration.getHandler().handle(request, response);
 

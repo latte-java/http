@@ -22,6 +22,7 @@ public class HTTP2CompressionTest extends BaseTest {
     return HttpClient.newBuilder().sslContext(sslContext).version(HttpClient.Version.HTTP_2).build();
   }
 
+  @SuppressWarnings("resource")
   private HTTPServer startServer(HTTPHandler handler) {
     var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
     var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
@@ -31,18 +32,14 @@ public class HTTP2CompressionTest extends BaseTest {
   @Test
   public void deflate_compresses_h2_response() throws Exception {
     String body = "deflate me ".repeat(500);
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
-      try (OutputStream out = res.getOutputStream()) {
-        out.write(body.getBytes(StandardCharsets.UTF_8));
-      } catch (IOException e) {
-        throw new RuntimeException(e);
-      }
+      res.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
     };
 
-    try (var server = startServer(handler)) {
+    try (var server = startServer(handler); var client = h2Client()) {
       int port = server.getActualPort();
-      var resp = h2Client().send(
+      var resp = client.send(
           HttpRequest.newBuilder(URI.create("https://local.lattejava.org:" + port + "/"))
                      .header(HTTPValues.Headers.AcceptEncoding, HTTPValues.ContentEncodings.Deflate)
                      .build(),
@@ -60,31 +57,25 @@ public class HTTP2CompressionTest extends BaseTest {
   @Test
   public void gzip_compresses_h2_response() throws Exception {
     String body = "Hello world! ".repeat(500);
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setHeader(HTTPValues.Headers.ContentType, "text/plain");
       res.setStatus(200);
-      try (OutputStream out = res.getOutputStream()) {
-        out.write(body.getBytes(StandardCharsets.UTF_8));
-      } catch (IOException e) {
-        throw new RuntimeException(e);
-      }
+      res.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
     };
 
-    try (var server = startServer(handler)) {
+    try (var server = startServer(handler); var client = h2Client()) {
       int port = server.getActualPort();
-      var resp = h2Client().send(
+      var resp = client.send(
           HttpRequest.newBuilder(URI.create("https://local.lattejava.org:" + port + "/"))
                      .header(HTTPValues.Headers.AcceptEncoding, HTTPValues.ContentEncodings.Gzip)
                      .build(),
           HttpResponse.BodyHandlers.ofByteArray());
 
       assertEquals(resp.statusCode(), 200);
-      assertEquals(resp.version(), HttpClient.Version.HTTP_2,
-          "JDK HttpClient silently downgrades to h1.1 on ALPN failure — assert h2 explicitly");
+      assertEquals(resp.version(), HttpClient.Version.HTTP_2);
       assertEquals(resp.headers().firstValue("content-encoding").orElse(""), HTTPValues.ContentEncodings.Gzip);
       assertEquals(resp.headers().firstValue("vary").orElse(""), HTTPValues.Headers.AcceptEncoding);
-      assertFalse(resp.headers().firstValue("content-length").isPresent(),
-          "Content-Length must be removed when compressing");
+      assertFalse(resp.headers().firstValue("content-length").isPresent(), "Content-Length must be removed when compressing");
       assertEquals(new String(ungzip(resp.body()), StandardCharsets.UTF_8), body);
     }
   }
@@ -92,18 +83,15 @@ public class HTTP2CompressionTest extends BaseTest {
   @Test
   public void gzip_compresses_streamed_h2_response() throws Exception {
     // Multiple write+flush calls across more than one DATA frame, all gzip-compressed end to end.
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setStatus(200);
-      try {
-        OutputStream out = res.getOutputStream();
-        for (int i = 0; i < 200; i++) {
-          out.write(("chunk-" + i + "\n").getBytes(StandardCharsets.UTF_8));
-          out.flush();
-        }
-        out.close();
-      } catch (IOException e) {
-        throw new RuntimeException(e);
+
+      OutputStream out = res.getOutputStream();
+      for (int i = 0; i < 200; i++) {
+        out.write(("chunk-" + i + "\n").getBytes(StandardCharsets.UTF_8));
+        out.flush();
       }
+      out.close();
     };
 
     var expected = new StringBuilder();
@@ -111,9 +99,9 @@ public class HTTP2CompressionTest extends BaseTest {
       expected.append("chunk-").append(i).append("\n");
     }
 
-    try (var server = startServer(handler)) {
+    try (var server = startServer(handler); var client = h2Client()) {
       int port = server.getActualPort();
-      var resp = h2Client().send(
+      var resp = client.send(
           HttpRequest.newBuilder(URI.create("https://local.lattejava.org:" + port + "/"))
                      .header(HTTPValues.Headers.AcceptEncoding, HTTPValues.ContentEncodings.Gzip)
                      .build(),
@@ -131,19 +119,15 @@ public class HTTP2CompressionTest extends BaseTest {
   @Test
   public void setCompress_false_disables_h2_compression() throws Exception {
     String body = "uncompressed ".repeat(500);
-    HTTPHandler handler = (req, res) -> {
+    HTTPHandler handler = (_, res) -> {
       res.setCompress(false);
       res.setStatus(200);
-      try (OutputStream out = res.getOutputStream()) {
-        out.write(body.getBytes(StandardCharsets.UTF_8));
-      } catch (IOException e) {
-        throw new RuntimeException(e);
-      }
+      res.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
     };
 
-    try (var server = startServer(handler)) {
+    try (var server = startServer(handler); var client = h2Client()) {
       int port = server.getActualPort();
-      var resp = h2Client().send(
+      var resp = client.send(
           HttpRequest.newBuilder(URI.create("https://local.lattejava.org:" + port + "/"))
                      .header(HTTPValues.Headers.AcceptEncoding, HTTPValues.ContentEncodings.Gzip)
                      .build(),
