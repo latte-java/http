@@ -299,10 +299,10 @@ public final class HTTPValues {
 
     public static final String ProxyConnectionLower = "proxy-connection";
 
+    public static final String Referer = "Referer";
+
     // RFC 9113 §8.1.2.1: the only pseudo-headers valid in a client request.
     public static final Set<String> RequestPseudoHeaders = Set.of(":authority", ":method", ":path", ":scheme");
-
-    public static final String Referer = "Referer";
 
     public static final String RetryAfter = "Retry-After";
 
@@ -379,15 +379,23 @@ public final class HTTPValues {
   }
 
   public static final class Status {
+    public static final int BadRequest = 400;
+
     public static final String ContinueRequest = "100-continue";
 
     public static final int ExpectationFailed = 417;
+
+    public static final int HTTPVersionNotSupported = 505;
+
+    public static final int InternalServerError = 500;
 
     public static final int MovedPermanently = 301;
 
     public static final int MovedTemporarily = 302;
 
     public static final int NotModified = 304;
+
+    public static final int UnsupportedMediaType = 415;
 
     private Status() {
     }

@@ -152,7 +152,7 @@ public class HTTP1Connection implements HTTPConnection {
         response.setHeader(HTTPValues.Headers.Connection, request.isKeepAlive() ? HTTPValues.Connections.KeepAlive : HTTPValues.Connections.Close);
 
         // Ensure the preamble is valid
-        Integer status = validatePreamble(request);
+        Integer status = HTTP1Validator.validatePreamble(request, logger);
         if (status != null) {
           closeSocketOnError(response, status);
           return;
@@ -275,8 +275,8 @@ public class HTTP1Connection implements HTTPConnection {
       }
       closeSocketOnly(reason);
     } catch (ParseException e) {
-      logger.debug("[{}] Closing socket with status [{}]. Bad request, failed to parse request. Reason [{}] Parser state [{}]", Thread.currentThread().threadId(), Status.BadRequest, e.getMessage(), e.getState());
-      closeSocketOnError(response, Status.BadRequest);
+      logger.debug("[{}] Closing socket with status [{}]. Bad request, failed to parse request. Reason [{}] Parser state [{}]", Thread.currentThread().threadId(), HTTPValues.Status.BadRequest, e.getMessage(), e.getState());
+      closeSocketOnError(response, HTTPValues.Status.BadRequest);
     } catch (SocketException e) {
       // When the HTTPServerAcceptorThread shuts down, we will interrupt each client thread, so debug log it accordingly.
       // - This will cause the socket to throw a SocketException, so log it.
@@ -287,10 +287,10 @@ public class HTTP1Connection implements HTTPConnection {
       }
       closeSocketOnly(CloseSocketReason.Expected);
     } catch (IOException e) {
-      logger.debug(String.format("[%s] Closing socket with status [%d]. An IO exception was thrown during processing. These are pretty common.", Thread.currentThread().threadId(), Status.InternalServerError), e);
-      closeSocketOnError(response, Status.InternalServerError);
+      logger.debug(String.format("[%s] Closing socket with status [%d]. An IO exception was thrown during processing. These are pretty common.", Thread.currentThread().threadId(), HTTPValues.Status.InternalServerError), e);
+      closeSocketOnError(response, HTTPValues.Status.InternalServerError);
     } catch (Throwable e) {
-      ExceptionHandlerContext context = new ExceptionHandlerContext(logger, request, Status.InternalServerError, e);
+      ExceptionHandlerContext context = new ExceptionHandlerContext(logger, request, HTTPValues.Status.InternalServerError, e);
       try {
         configuration.getUnexpectedExceptionHandler().handle(context);
       } catch (Throwable ignore) {
@@ -397,139 +397,8 @@ public class HTTP1Connection implements HTTPConnection {
         : HTTPValues.Connections.KeepAlive.equalsIgnoreCase(connectionHeader);
   }
 
-  private Integer validatePreamble(HTTPRequest request) {
-    var debugEnabled = logger.isDebugEnabled();
-
-    // Validate protocol. Protocol version is required.
-    String protocol = request.getProtocol();
-    if (protocol == null) {
-      logger.debug("Invalid request. Missing HTTP Protocol");
-      return Status.BadRequest;
-    }
-
-    // Only HTTP/ protocol is supported.
-    if (!protocol.startsWith("HTTP/")) {
-      if (debugEnabled) {
-        logger.debug("Invalid request. Invalid protocol [{}]. Supported versions [{}].", protocol, HTTPValues.Protocols.HTTTP1_1);
-      }
-
-      return Status.BadRequest;
-    }
-
-    // Minor versions less than 1 are allowed per spec. For example, HTTP/1.0 should be allowed and is considered to be compatible enough.
-    if (!protocol.equals("HTTP/1.0") && !protocol.equals("HTTP/1.1")) {
-      if (debugEnabled) {
-        logger.debug("Invalid request. Unsupported HTTP version [{}]. Supported versions [{}].", protocol, HTTPValues.Protocols.HTTTP1_1);
-      }
-
-      return Status.HTTPVersionNotSupported;
-    }
-
-    // Host header is required
-    var host = request.getRawHost();
-    if (host == null) {
-      logger.debug("Invalid request. Missing Host header.");
-      return Status.BadRequest;
-    }
-
-    var hostHeaders = request.getHeaders(HTTPValues.Headers.Host);
-    if (hostHeaders.size() != 1) {
-      if (debugEnabled) {
-        logger.debug("Invalid request. Duplicate Host headers. [{}]", String.join(", ", hostHeaders));
-      }
-
-      return Status.BadRequest;
-    }
-
-    // Validate Transfer-Encoding and Content-Length per RFC 9112 §6.1 (see docs/design/2026-04-20-audit.md Vuln 1). This server only
-    // supports the "chunked" transfer coding, so anything else must be rejected rather than silently discarded — mishandling TE is the
-    // classic request-smuggling primitive. Specifically we reject: multiple Transfer-Encoding headers, TE values that aren't exactly
-    // "chunked" after trimming (e.g. "identity", "chunked, identity", "xchunked", "chunked " with trailing whitespace), and the CL+TE
-    // coexistence that a front-end proxy might resolve differently than we do.
-    var transferEncodingHeaders = request.getHeaders(HTTPValues.Headers.TransferEncoding);
-    if (transferEncodingHeaders != null && !transferEncodingHeaders.isEmpty()) {
-      if (transferEncodingHeaders.size() != 1) {
-        if (debugEnabled) {
-          logger.debug("Invalid request. Multiple Transfer-Encoding headers. [{}]", String.join(", ", transferEncodingHeaders));
-        }
-
-        return Status.BadRequest;
-      }
-
-      String rawTransferEncoding = transferEncodingHeaders.getFirst();
-      if (!HTTPValues.TransferEncodings.Chunked.equalsIgnoreCase(rawTransferEncoding.trim())) {
-        if (debugEnabled) {
-          logger.debug("Invalid request. Unsupported Transfer-Encoding. [{}]", rawTransferEncoding);
-        }
-
-        return Status.BadRequest;
-      }
-
-      if (request.getHeader(HTTPValues.Headers.ContentLength) != null) {
-        if (debugEnabled) {
-          logger.debug("Invalid request. Both Transfer-Encoding and Content-Length present. [{}] [{}]", rawTransferEncoding, request.getHeader(HTTPValues.Headers.ContentLength));
-        }
-
-        return Status.BadRequest;
-      }
-
-      // Normalize the stored value so downstream code (HTTPRequest.isChunked, ChunkedInputStream routing) sees an exact match regardless
-      // of incidental whitespace or case in the original header.
-      if (!HTTPValues.TransferEncodings.Chunked.equals(rawTransferEncoding)) {
-        request.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
-      }
-    } else {
-      var requestedContentLengthHeaders = request.getHeaders(HTTPValues.Headers.ContentLength);
-      if (requestedContentLengthHeaders != null) {
-        if (requestedContentLengthHeaders.size() != 1) {
-          if (debugEnabled) {
-            logger.debug("Invalid request. Duplicate Content-Length headers. [{}]", String.join(", ", requestedContentLengthHeaders));
-          }
-
-          // If we cannot trust the Content-Length it is unlikely we can correctly drain the InputStream in order for the client to read our response.
-          return Status.BadRequest;
-        }
-
-        var contentLength = request.getContentLength();
-        if (contentLength == null || contentLength < 0) {
-          if (debugEnabled) {
-            logger.debug("Invalid request. The Content-Length must be >= 0 and <= 9,223,372,036,854,775,807. [{}]", requestedContentLengthHeaders.getFirst());
-          }
-
-          // If we cannot trust the Content-Length it is unlikely we can correctly drain the InputStream in order for the client to read our response.
-          return Status.BadRequest;
-        }
-      }
-    }
-
-    // Validate Content-Encoding, we currently support deflate and gzip.
-    // - If we see anything else we should fail, we will be unable to handle the request.
-    var contentEncodings = request.getContentEncodings();
-    for (var encoding : contentEncodings) {
-      if (!encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip) && !encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
-        // Note that while we do not expect multiple Content-Encoding headers, the last one will be used. For good measure,
-        // use the last one in the debug message as well.
-        var contentEncodingHeader = request.getHeaders(HTTPValues.Headers.ContentEncoding).getLast();
-        logger.debug("Invalid request. The Content-Type header contains an un-supported value. [{}]", contentEncodingHeader);
-        return Status.UnsupportedMediaType;
-      }
-    }
-
-    return null;
-  }
-
   private enum CloseSocketReason {
     Expected,
     Unexpected
-  }
-
-  private static class Status {
-    public static final int BadRequest = 400;
-
-    public static final int HTTPVersionNotSupported = 505;
-
-    public static final int InternalServerError = 500;
-
-    public static final int UnsupportedMediaType = 415;
   }
 }
