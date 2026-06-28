@@ -97,6 +97,10 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   // The reader checks this before each blocking enqueue to avoid parking forever on a full writerQueue.
   private volatile boolean writerDead;
 
+  // Writer thread handle, captured in run() so shutdown() (invoked from the acceptor thread) can join it after
+  // enqueuing the graceful GOAWAY, guaranteeing the GOAWAY is flushed before the connection's thread is interrupted.
+  private volatile Thread writerThread;
+
   public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput, InputStream inputStream) throws IOException {
     this.socket = socket;
@@ -187,7 +191,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   public void run() {
     readerThread = Thread.currentThread();
 
-    Thread writerThread = null;
     try {
       // 64 KiB userspace buffer between the frame writer and the socket. Without this, every writeFrame
       // hit the socket as a separate write syscall — JFR (2026-05-19) attributed ~13% of writer-thread
@@ -448,13 +451,28 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   }
 
   /**
-   * Initiates a graceful shutdown by enqueuing a {@code GOAWAY(NO_ERROR)} frame with the highest seen client stream-id.
-   * The writer thread emits it and in-flight streams are given up to the server's configured shutdown duration to
-   * complete before the socket is force-closed by {@link HTTPServer}.
+   * Initiates a graceful shutdown by enqueuing a {@code GOAWAY(NO_ERROR)} frame with the highest seen client stream-id,
+   * followed by the writer-shutdown sentinel, then waits (bounded) for the writer thread to flush the GOAWAY and exit.
+   * <p>
+   * The wait is essential: this method is invoked from the acceptor thread, which interrupts the connection's thread
+   * immediately afterward. Interrupting a virtual thread blocked in a socket read closes the socket, which would
+   * otherwise race the writer and the peer would never see the GOAWAY. Blocking here until the writer has flushed and
+   * exited makes the GOAWAY-before-teardown ordering deterministic.
    */
   @Override
   public void shutdown() {
     enqueueForWriter(new HTTP2Frame.GoawayFrame(highestSeenStreamId, HTTP2ErrorCode.NO_ERROR.value, new byte[0]));
+    // Writer-shutdown sentinel (lastStreamId == -1) so the writer flushes the GOAWAY above and then exits.
+    enqueueForWriter(new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]));
+
+    Thread w = writerThread;
+    if (w != null) {
+      try {
+        w.join(Duration.ofSeconds(1));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    }
   }
 
   @Override
