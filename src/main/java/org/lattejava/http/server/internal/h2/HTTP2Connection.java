@@ -190,11 +190,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     Thread writerThread = null;
     InputStream socketIn = null;
     try {
-      // The input stream from ProtocolSelector is already throughput-wrapped and positioned just past the connection
-      // preface, which the selector read and validated. We start straight at the SETTINGS exchange.
-      var in = inputStream;
-      socketIn = in;
-
       // 64 KiB userspace buffer between the frame writer and the socket. Without this, every writeFrame
       // hit the socket as a separate write syscall — JFR (2026-05-19) attributed ~13% of writer-thread
       // CPU to SocketDispatcher.write0. The BufferedOutputStream coalesces the frame-header + payload
@@ -209,7 +204,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       buffers.ensureFrameWriteCapacity(localSettings.maxFrameSize());
 
       var writer = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
-      var reader = new HTTP2FrameReader(in, buffers.frameReadBuffer());
+      var reader = new HTTP2FrameReader(inputStream, buffers.frameReadBuffer());
 
       // Send our initial SETTINGS frame. The client connection preface was already read and validated by
       // ProtocolSelector, so we begin directly at the SETTINGS exchange.
