@@ -918,14 +918,14 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       try {
         // Use a lazy-header output stream: HEADERS are emitted on the first write or flush so that the
         // handler can interleave request reads and response writes (required for bidi-streaming).
-        // RFC 9113 §8.1 requires HEADERS to precede DATA frames — the LazyHeaderOutputStream enforces this.
-        var lazyOut = new LazyHeaderOutputStream(response, stream, encoder);
-        response.setRawOutputStream(lazyOut);
+        // RFC 9113 §8.1 requires HEADERS to precede DATA frames — the HTTP2OutputProtocol enforces this.
+        var protocol = new HTTP2OutputProtocol(response, stream, encoder);
+        response.setOutputStream(new HTTPOutputStream(configuration, request, response, protocol));
 
         configuration.getHandler().handle(request, response);
 
         // Ensure the output is closed even if the handler did not call out.close() explicitly.
-        lazyOut.close();
+        response.getOutputStream().close();
 
         try {
           stream.applyEvent(HTTP2Stream.Event.SEND_DATA_END_STREAM);
@@ -943,9 +943,9 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
         logger.debug("h2 handler processing exception on stream [{}]: [{}]", stream.streamId(), e.getMessage());
         try {
           response.setStatus(e.getStatus());
-          var lazyOut = new LazyHeaderOutputStream(response, stream, encoder);
-          response.setRawOutputStream(lazyOut);
-          lazyOut.close();
+          var errorProtocol = new HTTP2OutputProtocol(response, stream, encoder);
+          response.setOutputStream(new HTTPOutputStream(configuration, request, response, errorProtocol));
+          response.getOutputStream().close();
         } catch (Exception writeEx) {
           logger.debug("Failed to write error response for stream [{}]", stream.streamId(), writeEx);
         }
@@ -1063,89 +1063,29 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   }
 
   /**
-   * Wraps the per-stream {@link HTTP2OutputStream} with lazy HEADERS emission. On the first write or flush the current
-   * response status and headers are encoded and enqueued as an HTTP/2 HEADERS frame; subsequent writes and flushes are
-   * delegated directly to the underlying stream, enabling bidi-streaming handlers to interleave request reads and
-   * response writes.
+   * HTTP/2 implementation of {@link HTTPOutputProtocol}. On the first write or flush the response status and headers
+   * are HPACK-encoded and enqueued as a HEADERS frame (lazy emission preserves bidi-streaming); body bytes flow into an
+   * {@link HTTP2OutputStream} that fragments DATA frames under flow control. Trailers ride a trailing HEADERS frame.
    *
    * <p>RFC 9113 §8.1 — HEADERS must precede DATA. This class enforces that invariant.
    */
-  private class LazyHeaderOutputStream extends OutputStream {
+  private class HTTP2OutputProtocol implements HTTPOutputProtocol {
     private final HPACKEncoder encoder;
-
     private final HTTPResponse response;
-
     private final HTTP2Stream stream;
-
-    private boolean closed;
-
-    private HTTP2OutputStream delegate;
-
-    // Set when the client RST'd the stream before we sent headers. Subsequent writes and closes are no-ops.
+    private HTTP2OutputStream sink;
     private boolean streamReset;
+    private boolean wroteToClient;
 
-    LazyHeaderOutputStream(HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder) {
+    HTTP2OutputProtocol(HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder) {
       this.response = response;
       this.stream = stream;
       this.encoder = encoder;
     }
 
     @Override
-    public void close() throws IOException {
-      if (closed) return;
-      closed = true;
-      ensureHeadersSent();
-      if (streamReset) return;
-      if (response.hasTrailers()) {
-        delegate.setTrailersFollow(true);
-      }
-      delegate.close();
-      if (response.hasTrailers()) {
-        emitTrailers();
-      }
-    }
-
-    @Override
-    public void flush() throws IOException {
-      ensureHeadersSent();
-      if (streamReset) return;
-      delegate.flush();
-    }
-
-    @Override
-    public void write(int b) throws IOException {
-      ensureHeadersSent();
-      if (streamReset) return;
-      delegate.write(b);
-    }
-
-    @Override
-    public void write(byte[] b, int off, int len) throws IOException {
-      ensureHeadersSent();
-      if (streamReset) return;
-      delegate.write(b, off, len);
-    }
-
-    private void emitTrailers() {
-      List<HPACKDynamicTable.HeaderField> trailerFields = new ArrayList<>();
-      for (var entry : response.getTrailers().entrySet()) {
-        for (String v : entry.getValue()) {
-          trailerFields.add(new HPACKDynamicTable.HeaderField(entry.getKey(), v));
-        }
-      }
-      byte[] trailerBlock;
-      synchronized (encoder) {
-        trailerBlock = encoder.encode(trailerFields);
-      }
-      // Route through enqueueForWriter (not a raw writerQueue.put) so a dead writer is detected and the offer is
-      // bounded, matching every other handler-side enqueue rather than parking until interrupt on a full queue.
-      enqueueForWriter(new HTTP2Frame.HeadersFrame(stream.streamId(),
-          HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
-    }
-
-    private void ensureHeadersSent() throws IOException {
-      if (delegate != null || streamReset) return;
-      // Build response HEADERS field list from the response state at the time of first write.
+    public OutputStream commitHeaders(boolean closing, boolean suppressBody) {
+      // Build response HEADERS from the response state at first write/flush.
       List<HPACKDynamicTable.HeaderField> respFields = new ArrayList<>();
       respFields.add(new HPACKDynamicTable.HeaderField(":status", String.valueOf(response.getStatus())));
       for (var entry : response.getHeadersMap().entrySet()) {
@@ -1158,36 +1098,73 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
           respFields.add(new HPACKDynamicTable.HeaderField(lowerKey, v));
         }
       }
-      // Synchronize on the encoder: HPACKEncoder mutates a shared HPACKDynamicTable (ArrayDeque-backed)
-      // and is not thread-safe. Multiple handler virtual-threads can call encode() concurrently on
-      // the same connection-level encoder, corrupting the dynamic-table state without coordination.
+
+      // HPACKEncoder mutates a shared dynamic table and is not thread-safe across handler threads.
       byte[] headerBlock;
       synchronized (encoder) {
         headerBlock = encoder.encode(respFields);
       }
-      // RFC 9113 §5.1 — frames (other than PRIORITY) MUST NOT be sent on a closed stream. Take the stream
-      // monitor across the state check, state transition, AND enqueue so a concurrent RECV_RST_STREAM on the
-      // reader thread cannot interleave between the check and the put. (HTTP2Stream's own methods are
-      // synchronized on the same monitor, so applyEvent is re-entrant here.)
+
+      // RFC 9113 §5.1 — take the stream monitor across the state check, transition, AND enqueue so a concurrent
+      // RECV_RST_STREAM cannot interleave.
       synchronized (stream) {
         if (stream.state() == HTTP2Stream.State.CLOSED) {
           streamReset = true;
-          return;
+          return OutputStream.nullOutputStream();
         }
         try {
           stream.applyEvent(HTTP2Stream.Event.SEND_HEADERS_NO_END_STREAM);
         } catch (IllegalStateException ignored) {
-          // Should not occur now that the check + transition are atomic, but mark as reset for safety.
           streamReset = true;
-          return;
+          return OutputStream.nullOutputStream();
         }
         if (!enqueueForWriter(new HTTP2Frame.HeadersFrame(stream.streamId(), HTTP2Frame.FLAG_END_HEADERS, headerBlock))) {
-          // Writer is dead; the connection is tearing down. Subsequent handler writes are no-ops.
           streamReset = true;
-          return;
+          return OutputStream.nullOutputStream();
         }
       }
-      delegate = new HTTP2OutputStream(stream, writerQueue, connectionSendWindow, peerSettings.maxFrameSize());
+
+      wroteToClient = true;
+      sink = new HTTP2OutputStream(stream, writerQueue, connectionSendWindow, peerSettings.maxFrameSize());
+      return sink;
+    }
+
+    @Override
+    public void commitTrailers() {
+      if (streamReset || !response.hasTrailers()) {
+        return;
+      }
+
+      List<HPACKDynamicTable.HeaderField> trailerFields = new ArrayList<>();
+      for (var entry : response.getTrailers().entrySet()) {
+        for (String v : entry.getValue()) {
+          trailerFields.add(new HPACKDynamicTable.HeaderField(entry.getKey(), v));
+        }
+      }
+      byte[] trailerBlock;
+      synchronized (encoder) {
+        trailerBlock = encoder.encode(trailerFields);
+      }
+      enqueueForWriter(new HTTP2Frame.HeadersFrame(stream.streamId(),
+          HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
+    }
+
+    @Override
+    public void forceFlush() {
+      // No-op: HTTP/2 frames are enqueued to the writer queue as they are produced; there is no extra buffer to push.
+    }
+
+    @Override
+    public void prepareTrailers() {
+      // The END_STREAM flag rides the final DATA frame, so suppress it now if trailers will follow.
+      if (!streamReset && sink != null && response.hasTrailers()) {
+        sink.setTrailersFollow(true);
+      }
+    }
+
+    @Override
+    public boolean wroteToClient() {
+      return wroteToClient;
     }
   }
 }
