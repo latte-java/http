@@ -12,6 +12,7 @@ import org.lattejava.http.server.internal.h2.HTTP2ConnectionWindow;
 import org.lattejava.http.server.internal.h2.HTTP2Frame;
 import org.lattejava.http.server.internal.h2.HTTP2OutputStream;
 import org.lattejava.http.server.internal.h2.HTTP2Stream;
+import org.lattejava.http.server.internal.h2.HTTP2WriterThread;
 
 import static org.testng.Assert.*;
 
@@ -27,7 +28,7 @@ public class HTTP2OutputStreamFragmentationTest {
     var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
     var stream = new HTTP2Stream(1, 65535, 65535);
     var connectionWindow = new HTTP2ConnectionWindow(10);
-    var os = new HTTP2OutputStream(stream, queue, connectionWindow, 16);
+    var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), connectionWindow, 16);
 
     Thread.ofVirtual().start(() -> {
       try {
@@ -60,7 +61,7 @@ public class HTTP2OutputStreamFragmentationTest {
   public void empty_close_emits_zero_length_end_stream() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>();
     var stream = new HTTP2Stream(1, 65535, 65535);
-    var os = new HTTP2OutputStream(stream, queue, 16384);
+    var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16384);
 
     os.close();
 
@@ -73,7 +74,7 @@ public class HTTP2OutputStreamFragmentationTest {
   public void large_write_fragments_against_max_frame_size() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>();
     var stream = new HTTP2Stream(1, 65535, 65535);
-    var os = new HTTP2OutputStream(stream, queue, 16); // tiny max-frame-size for test
+    var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16); // tiny max-frame-size for test
 
     byte[] data = new byte[40];
     for (int i = 0; i < 40; i++) data[i] = (byte) i;
@@ -98,7 +99,7 @@ public class HTTP2OutputStreamFragmentationTest {
   public void single_write_no_fragmentation() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>();
     var stream = new HTTP2Stream(1, 65535, 65535);
-    var os = new HTTP2OutputStream(stream, queue, 16384);
+    var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16384);
 
     os.write("hello".getBytes());
     os.close();
@@ -118,7 +119,7 @@ public class HTTP2OutputStreamFragmentationTest {
     var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
     // Send-window starts at 1 (SETTINGS_INITIAL_WINDOW_SIZE=1 from peer).
     var stream = new HTTP2Stream(1, 65535, 1);
-    var os = new HTTP2OutputStream(stream, queue, 16384);
+    var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16384);
 
     // Simulate WINDOW_UPDATE arriving from a background thread after a brief delay.
     // The flushAndFragment loop will send 1 byte (consuming the window), wait for more credit, then send the second byte.

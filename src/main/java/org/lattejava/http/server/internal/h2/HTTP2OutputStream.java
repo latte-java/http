@@ -22,7 +22,7 @@ public class HTTP2OutputStream extends OutputStream {
   private final HTTP2ConnectionWindow connectionWindow;
   private final int peerMaxFrameSize;
   private final HTTP2Stream stream;
-  private final BlockingQueue<HTTP2Frame> writerQueue;
+  private final HTTP2WriterThread writer;
 
   private boolean closed;
   private boolean trailersFollow;
@@ -30,15 +30,15 @@ public class HTTP2OutputStream extends OutputStream {
   /**
    * Test/standalone constructor with no connection-level flow control. Uses an effectively unbounded connection
    * window, so only the per-stream window throttles output. Production code must use the
-   * {@link #HTTP2OutputStream(HTTP2Stream, BlockingQueue, HTTP2ConnectionWindow, int)} overload.
+   * {@link #HTTP2OutputStream(HTTP2Stream, HTTP2WriterThread, HTTP2ConnectionWindow, int)} overload.
    */
-  public HTTP2OutputStream(HTTP2Stream stream, BlockingQueue<HTTP2Frame> writerQueue, int peerMaxFrameSize) {
-    this(stream, writerQueue, new HTTP2ConnectionWindow(Integer.MAX_VALUE), peerMaxFrameSize);
+  public HTTP2OutputStream(HTTP2Stream stream, HTTP2WriterThread writer, int peerMaxFrameSize) {
+    this(stream, writer, new HTTP2ConnectionWindow(Integer.MAX_VALUE), peerMaxFrameSize);
   }
 
-  public HTTP2OutputStream(HTTP2Stream stream, BlockingQueue<HTTP2Frame> writerQueue, HTTP2ConnectionWindow connectionWindow, int peerMaxFrameSize) {
+  public HTTP2OutputStream(HTTP2Stream stream, HTTP2WriterThread writer, HTTP2ConnectionWindow connectionWindow, int peerMaxFrameSize) {
     this.stream = stream;
-    this.writerQueue = writerQueue;
+    this.writer = writer;
     this.connectionWindow = connectionWindow;
     this.peerMaxFrameSize = peerMaxFrameSize;
   }
@@ -138,11 +138,6 @@ public class HTTP2OutputStream extends OutputStream {
   }
 
   private void enqueue(HTTP2Frame.DataFrame frame) throws InterruptedIOException {
-    try {
-      writerQueue.put(frame);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new InterruptedIOException();
-    }
+    writer.enqueueBlocking(frame);
   }
 }
