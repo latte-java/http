@@ -86,7 +86,7 @@ module org.lattejava.web {
 
 ## Blank lines
 
-Remove blank lines between fields.
+Ensure there is one blank line between class members including fields, methods, and inner classes, interfaces, enums, records, etc.
 
 ### Example
 

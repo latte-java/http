@@ -16,11 +16,28 @@ import static org.lattejava.http.server.internal.h2.HTTP2Frame.*;
  */
 public class HTTP2FrameWriter {
   private final byte[] buffer;
+
   private final OutputStream out;
 
   public HTTP2FrameWriter(OutputStream out, byte[] buffer) {
     this.out = out;
     this.buffer = buffer;
+  }
+
+  private static void writeInt32(byte[] dst, int off, int v) {
+    dst[off] = (byte) ((v >> 24) & 0xFF);
+    dst[off + 1] = (byte) ((v >> 16) & 0xFF);
+    dst[off + 2] = (byte) ((v >> 8) & 0xFF);
+    dst[off + 3] = (byte) (v & 0xFF);
+  }
+
+  /**
+   * Flushes the underlying OutputStream.
+   *
+   * @throws IOException If the OutputStream throws an IOException.
+   */
+  public void flush() throws IOException {
+    out.flush();
   }
 
   public void writeFrame(HTTP2Frame frame) throws IOException {
@@ -50,13 +67,6 @@ public class HTTP2FrameWriter {
       case WindowUpdateFrame f ->
           writeFixedFourByte(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), f.windowSizeIncrement() & 0x7FFFFFFF);
     }
-  }
-
-  private static void writeInt32(byte[] dst, int off, int v) {
-    dst[off] = (byte) ((v >> 24) & 0xFF);
-    dst[off + 1] = (byte) ((v >> 16) & 0xFF);
-    dst[off + 2] = (byte) ((v >> 8) & 0xFF);
-    dst[off + 3] = (byte) (v & 0xFF);
   }
 
   // Writes a 4-byte fixed-length frame (RST_STREAM, WINDOW_UPDATE) directly into the shared buffer

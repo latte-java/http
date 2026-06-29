@@ -150,8 +150,10 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       var firstFrame = reader.readFrame();
       if (!(firstFrame instanceof HTTP2Frame.SettingsFrame(int flags, byte[] payload)) || (flags & HTTP2Frame.FLAG_ACK) != 0) {
         logger.debug("Expected client SETTINGS frame after preface");
+
         // RFC 9113 §3.5 / §5.4.1: emit GOAWAY(PROTOCOL_ERROR) before closing.
         sendGoAwayDirect(frameWriter, out, HTTP2ErrorCode.PROTOCOL_ERROR);
+
         // Half-close immediately so the kernel sends FIN — h2spec keeps writing preface bytes;
         // bytes arriving after the 50 ms finally-drain race the close and cause OS RST instead of FIN.
         try {
@@ -176,7 +178,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       // Start the writer: it drains its private queue and serializes frames to the socket, exiting on the
       // writer-shutdown sentinel (requestStop). It is stored in a field so the reader can join it before closing
       // the socket, guaranteeing GOAWAY frames are flushed before teardown, and so shutdown() can reach it.
-      writer = new HTTP2WriterThread(frameWriter, out, Thread.currentThread(), logger);
+      writer = new HTTP2WriterThread(frameWriter, readerThread, logger);
       writer.start();
 
       // Frame-handling loop.

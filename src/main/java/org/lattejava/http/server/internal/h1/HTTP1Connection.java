@@ -117,7 +117,7 @@ public class HTTP1Connection implements HTTPConnection {
         HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, response, protocol);
         response.setOutputStream(outputStream);
 
-        // Not this line of code will block
+        // Note: this line of code will block
         // - When a client is using Keep-Alive - we will loop and block here while we wait for the client to send us bytes.
         byte[] requestBuffer = buffers.requestBuffer();
         HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> state = HTTPConnection.State.Read);
@@ -225,8 +225,8 @@ public class HTTP1Connection implements HTTPConnection {
         response.close();
 
         boolean keepSocketAlive = keepSocketAlive(request, response);
-        // Close the socket.
         if (!keepSocketAlive) {
+          // Close the socket.
           logger.trace("[{}] Closing socket. No Keep-Alive.", Thread.currentThread().threadId());
           closeSocketOnly(CloseSocketReason.Expected);
           return;

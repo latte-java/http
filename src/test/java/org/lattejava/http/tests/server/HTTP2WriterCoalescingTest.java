@@ -89,7 +89,7 @@ public class HTTP2WriterCoalescingTest {
     var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
     var out = new CountingOutputStream();
     var frameWriter = new HTTP2FrameWriter(out, new byte[9 + 16384]);
-    var writerThread = new HTTP2WriterThread(frameWriter, out, new Thread(), new AccumulatingLogger(), queue);
+    var writerThread = new HTTP2WriterThread(frameWriter, new Thread(), new AccumulatingLogger(), queue);
 
     // Pre-load 5 small DATA frames + the sentinel so drainTo grabs them all in one shot.
     for (int i = 1; i <= 5; i++) {
@@ -110,7 +110,7 @@ public class HTTP2WriterCoalescingTest {
     var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
     var out = new CountingOutputStream();
     var frameWriter = new HTTP2FrameWriter(out, new byte[9 + 16384]);
-    var writerThread = new HTTP2WriterThread(frameWriter, out, new Thread(), new AccumulatingLogger(), queue);
+    var writerThread = new HTTP2WriterThread(frameWriter, new Thread(), new AccumulatingLogger(), queue);
 
     // Queue: 3 frames, then sentinel, then 2 more frames that should NOT be written.
     queue.put(new HTTP2Frame.DataFrame(1, 0, "a".getBytes()));
@@ -138,7 +138,7 @@ public class HTTP2WriterCoalescingTest {
     var out = new ThrowingOutputStream(28);
     var frameWriter = new HTTP2FrameWriter(out, new byte[9 + 16384]);
     var readerStub = new Thread();
-    var writerThread = new HTTP2WriterThread(frameWriter, out, readerStub, new AccumulatingLogger(), queue);
+    var writerThread = new HTTP2WriterThread(frameWriter, readerStub, new AccumulatingLogger(), queue);
 
     for (int i = 1; i <= 5; i++) {
       queue.put(new HTTP2Frame.DataFrame(i, 0, "data!".getBytes()));

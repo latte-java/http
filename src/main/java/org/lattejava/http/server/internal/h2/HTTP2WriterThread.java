@@ -33,34 +33,34 @@ public class HTTP2WriterThread implements Runnable {
   private static final HTTP2Frame SHUTDOWN_SENTINEL = new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]);
 
   private final Logger logger;
-  private final OutputStream out;
+
   private final BlockingQueue<HTTP2Frame> queue;
+
   private final Thread readerThread;
+
   private final HTTP2FrameWriter writer;
 
   private volatile boolean closed;
+
   private volatile Thread thread;
 
   /**
    * Production constructor. Creates the outbound queue, which never escapes this instance.
    *
    * @param writer       the wire-frame encoder.
-   * @param out          the buffered socket output stream flushed once per batch.
    * @param readerThread the connection reader thread, interrupted when this writer closes.
    * @param logger       the connection logger.
    */
-  public HTTP2WriterThread(HTTP2FrameWriter writer, OutputStream out, Thread readerThread, Logger logger) {
-    this(writer, out, readerThread, logger, new LinkedBlockingQueue<>(128));
+  public HTTP2WriterThread(HTTP2FrameWriter writer, Thread readerThread, Logger logger) {
+    this(writer, readerThread, logger, new LinkedBlockingQueue<>(128));
   }
 
   /**
    * Queue-injecting constructor for tests that need to pre-load frames and drive {@link #run()} directly. Production
    * code uses the four-argument constructor.
    */
-  public HTTP2WriterThread(HTTP2FrameWriter writer, OutputStream out, Thread readerThread, Logger logger,
-                           BlockingQueue<HTTP2Frame> queue) {
+  public HTTP2WriterThread(HTTP2FrameWriter writer, Thread readerThread, Logger logger, BlockingQueue<HTTP2Frame> queue) {
     this.writer = writer;
-    this.out = out;
     this.readerThread = readerThread;
     this.logger = logger;
     this.queue = queue;
@@ -75,7 +75,7 @@ public class HTTP2WriterThread implements Runnable {
    * @return a writer backed by {@code queue}.
    */
   public static HTTP2WriterThread forQueue(BlockingQueue<HTTP2Frame> queue) {
-    return new HTTP2WriterThread(null, null, null, null, queue);
+    return new HTTP2WriterThread(null, null, null, queue);
   }
 
   /**
@@ -131,8 +131,8 @@ public class HTTP2WriterThread implements Runnable {
   }
 
   /**
-   * Waits up to {@code timeout} for the writer thread to finish, returning immediately if it was never started. Swallows
-   * an interrupt (re-setting the calling thread's interrupt status) so teardown call sites stay terse.
+   * Waits up to {@code timeout} for the writer thread to finish, returning immediately if it was never started.
+   * Swallows an interrupt (re-setting the calling thread's interrupt status) so teardown call sites stay terse.
    *
    * @param timeout the maximum time to wait.
    */
@@ -172,12 +172,14 @@ public class HTTP2WriterThread implements Runnable {
         for (HTTP2Frame frame : batch) {
           if (frame instanceof HTTP2Frame.GoawayFrame goaway && goaway.lastStreamId() == -1) {
             // Sentinel: flush whatever preceded it, then exit. Frames after the sentinel in the batch are discarded.
-            out.flush();
+            writer.flush();
             return;
           }
+
           writer.writeFrame(frame);
         }
-        out.flush();
+
+        writer.flush();
         batch.clear();
       }
     } catch (Exception e) {
