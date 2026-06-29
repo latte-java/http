@@ -797,9 +797,9 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
    * phase (before the writer virtual-thread is started) to ensure the peer receives the error frame before the TCP
    * connection is closed.
    */
-  private void sendGoAwayDirect(HTTP2FrameWriter writer, OutputStream out, HTTP2ErrorCode code) {
+  private void sendGoAwayDirect(HTTP2FrameWriter frameWriter, OutputStream out, HTTP2ErrorCode code) {
     try {
-      writer.writeFrame(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
+      frameWriter.writeFrame(new HTTP2Frame.GoawayFrame(highestSeenStreamId, code.value, new byte[0]));
       out.flush();
     } catch (IOException ignore) {
       // Best-effort: if the peer already closed, suppress the write error.
