@@ -38,9 +38,13 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   private final Map<String, Long> maxRequestBodySize = new HashMap<>(DefaultMaxRequestSizes);
 
   private Path baseDir = Path.of("");
+
   private boolean compressByDefault = true;
+
   private String contextPath = "";
+
   private HTTPHandler handler;
+
   private Duration initialReadTimeoutDuration = Duration.ofSeconds(2);
 
   private Instrumenter instrumenter;
@@ -98,13 +102,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The HTTP handler for this server. Cannot be null and is required.
-   */
-  public HTTPHandler getHandler() {
-    return handler;
-  }
-
-  /**
    * @return The HTTP/1.x-specific configuration. Never null.
    */
   public HTTP1Configuration getHTTP1Configuration() {
@@ -116,6 +113,13 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public HTTP2Configuration getHTTP2Configuration() {
     return http2;
+  }
+
+  /**
+   * @return The HTTP handler for this server. Cannot be null and is required.
+   */
+  public HTTPHandler getHandler() {
+    return handler;
   }
 
   /**
@@ -334,16 +338,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withHandler(HTTPHandler handler) {
-    Objects.requireNonNull(handler, "You cannot set the handler to null");
-    this.handler = handler;
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
   public HTTPServerConfiguration withHTTP1(Consumer<HTTP1Configuration> consumer) {
     Objects.requireNonNull(consumer, "You cannot pass a null HTTP/1 configuration consumer");
     consumer.accept(http1);
@@ -357,6 +351,16 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   public HTTPServerConfiguration withHTTP2(Consumer<HTTP2Configuration> consumer) {
     Objects.requireNonNull(consumer, "You cannot pass a null HTTP/2 configuration consumer");
     consumer.accept(http2);
+    return this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public HTTPServerConfiguration withHandler(HTTPHandler handler) {
+    Objects.requireNonNull(handler, "You cannot set the handler to null");
+    this.handler = handler;
     return this;
   }
 
