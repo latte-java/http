@@ -208,7 +208,7 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
     };
     var server = makeServer("http", handler, listener);
     // Set a very small concurrent stream cap so the test triggers quickly.
-    server.configuration().withHTTP2MaxConcurrentStreams(2);
+    server.configuration().withHTTP2(h2 -> h2.withMaxConcurrentStreams(2));
     try (var ignored = server.start()) {
       try (var sock = openH2cConnection(server.getActualPort())) {
         var out = sock.getOutputStream();

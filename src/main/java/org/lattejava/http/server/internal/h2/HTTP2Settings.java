@@ -4,6 +4,8 @@
  */
 package org.lattejava.http.server.internal.h2;
 
+import org.lattejava.http.server.HTTP2Configuration;
+
 /**
  * Per-connection HTTP/2 settings (RFC 9113 §6.5.2). Mutable so a single instance can be reused as the peer changes its
  * settings mid-connection.
@@ -41,6 +43,24 @@ public class HTTP2Settings {
     HTTP2Settings s = new HTTP2Settings();
     s.enablePush = 0; // server default = no push
     return s;
+  }
+
+  /**
+   * Builds the server's local settings from its {@link HTTP2Configuration}, deriving SETTINGS_MAX_HEADER_LIST_SIZE
+   * from the shared {@code maxRequestHeaderSize} ({@code -1} disabled → {@link Integer#MAX_VALUE}).
+   *
+   * @param config               The HTTP/2 configuration.
+   * @param maxRequestHeaderSize The shared maximum request header size in bytes, or {@code -1} if disabled.
+   * @return A fresh local settings instance.
+   */
+  public static HTTP2Settings fromConfiguration(HTTP2Configuration config, int maxRequestHeaderSize) {
+    int maxHeaderListSize = maxRequestHeaderSize == -1 ? Integer.MAX_VALUE : maxRequestHeaderSize;
+    return defaults()
+        .withHeaderTableSize(config.getHeaderTableSize())
+        .withInitialWindowSize(config.getInitialWindowSize())
+        .withMaxConcurrentStreams(config.getMaxConcurrentStreams())
+        .withMaxFrameSize(config.getMaxFrameSize())
+        .withMaxHeaderListSize(maxHeaderListSize);
   }
 
   /**

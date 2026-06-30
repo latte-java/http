@@ -381,7 +381,7 @@ public class HTTP2BasicTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     var server = makeServer("http", handler, listener);
     // Override default 10s timeout to keep this test snappy.
-    server.configuration().withHTTP2HandlerReadTimeout(Duration.ofSeconds(2));
+    server.configuration().withHTTP2(h2 -> h2.withHandlerReadTimeout(Duration.ofSeconds(2)));
     try (var ignored = server.start()) {
       try (var sock = openH2cConnection(server.getActualPort())) {
         var out = sock.getOutputStream();

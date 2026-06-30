@@ -100,8 +100,8 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     this.inputStream = inputStream;
     this.buffers = new HTTPBuffers(configuration);
     this.logger = configuration.getLoggerFactory().getLogger(HTTP2Connection.class);
-    this.localSettings = configuration.getHTTP2Settings();
-    this.rateLimits = new HTTP2RateLimitsTracker(configuration.getHTTP2RateLimits());
+    this.localSettings = HTTP2Settings.fromConfiguration(configuration.getHTTP2Configuration(), configuration.getMaxRequestHeaderSize());
+    this.rateLimits = new HTTP2RateLimitsTracker(configuration.getHTTP2Configuration().getRateLimits());
     this.startInstant = System.currentTimeMillis();
   }
 
@@ -587,7 +587,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       }
       stream.consumeReceiveWindow(f.payload().length);
       try {
-        long timeoutMs = configuration.getHTTP2HandlerReadTimeout().toMillis();
+        long timeoutMs = configuration.getHTTP2Configuration().getHandlerReadTimeout().toMillis();
         if (!pipe.offer(f.payload(), timeoutMs, TimeUnit.MILLISECONDS)) {
           // RFC 9113 §5.2 flow control is the intended back-pressure mechanism — but if a handler is not consuming
           // its body at all (stuck or buggy), the per-stream pipe fills and blocking the reader thread would freeze

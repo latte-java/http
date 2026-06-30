@@ -79,6 +79,19 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
+   * Sets the handler that will process the requests.
+   * <p>
+   * Must not be null.
+   *
+   * @param handler The handler that processes the requests.
+   * @return This.
+   */
+  default T withHandler(HTTPHandler handler) {
+    configuration().withHandler(handler);
+    return (T) this;
+  }
+
+  /**
    * Configures the HTTP/1.x-specific options.
    *
    * @param consumer A consumer that receives the always-present {@link HTTP1Configuration} to mutate.
@@ -90,15 +103,13 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the handler that will process the requests.
-   * <p>
-   * Must not be null.
+   * Configures the HTTP/2-specific options.
    *
-   * @param handler The handler that processes the requests.
+   * @param consumer A consumer that receives the always-present {@link HTTP2Configuration} to mutate.
    * @return This.
    */
-  default T withHandler(HTTPHandler handler) {
-    configuration().withHandler(handler);
+  default T withHTTP2(Consumer<HTTP2Configuration> consumer) {
+    configuration().withHTTP2(consumer);
     return (T) this;
   }
 

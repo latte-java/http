@@ -98,7 +98,7 @@ public class HTTP2SecurityTest extends BaseTest {
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     var server = makeServer("http", handler, listener);
     // Set a small MAX_HEADER_LIST_SIZE so the test triggers quickly with modest data.
-    server.configuration().withHTTP2MaxHeaderListSize(2048);
+    server.configuration().withMaxRequestHeaderSize(2048);
     try (var ignored = server.start()) {
       try (var sock = openH2cConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
