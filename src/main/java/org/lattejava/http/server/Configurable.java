@@ -44,18 +44,6 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the buffer size for the chunked input stream. Defaults to 4 Kilobytes.
-   *
-   * @param chunkedBufferSize the buffer size used to read a request body that was encoded using 'chunked'
-   *                          transfer-encoding.
-   * @return This.
-   */
-  default T withChunkedBufferSize(int chunkedBufferSize) {
-    configuration().withChunkedBufferSize(chunkedBufferSize);
-    return (T) this;
-  }
-
-  /**
    * Sets the default compression behavior for the HTTP response. This behavior can be optionally set per response. See
    * {@link HTTPResponse#setCompress(boolean)}. Defaults to true.
    * <p>
@@ -91,15 +79,13 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets an ExpectValidator that is used if a client sends the server a {@code Expect: 100-continue} header.
-   * <p>
-   * Must not be null.
+   * Configures the HTTP/1.x-specific options.
    *
-   * @param validator The validator.
+   * @param consumer A consumer that receives the always-present {@link HTTP1Configuration} to mutate.
    * @return This.
    */
-  default T withExpectValidator(ExpectValidator validator) {
-    configuration().withExpectValidator(validator);
+  default T withHTTP1(Consumer<HTTP1Configuration> consumer) {
+    configuration().withHTTP1(consumer);
     return (T) this;
   }
 
@@ -136,18 +122,6 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withInstrumenter(Instrumenter instrumenter) {
     configuration().withInstrumenter(instrumenter);
-    return (T) this;
-  }
-
-  /**
-   * Sets the duration that the server will allow client connections to remain open and idle after each request has been
-   * processed. This is the Keep-Alive state before the first byte of the next request is read. Defaults to 20 seconds.
-   *
-   * @param duration The duration.
-   * @return This.
-   */
-  default T withKeepAliveTimeoutDuration(Duration duration) {
-    configuration().withKeepAliveTimeoutDuration(duration);
     return (T) this;
   }
 
@@ -230,20 +204,6 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the maximum size in bytes of a single chunk in a chunked-encoded request body. A chunk whose declared hex size
-   * exceeds this value is rejected as a malformed request before any body bytes are read. This defends against a 4 GiB
-   * (and larger) chunk size that would otherwise truncate when narrowed to an int and collide with the terminator
-   * chunk, enabling request smuggling. Defaults to 1 Megabyte.
-   *
-   * @param maxRequestChunkSize the maximum per-chunk size in bytes.
-   * @return This.
-   */
-  default T withMaxRequestChunkSize(int maxRequestChunkSize) {
-    configuration().withMaxRequestChunkSize(maxRequestChunkSize);
-    return (T) this;
-  }
-
-  /**
    * Sets the maximum size of the HTTP request header. The request header includes the HTTP request line, and all HTTP
    * request headers, essentially everything except the request body. If this maximum limit is exceeded, the connection
    * will be closed. Defaults to 128 Kilobytes.
@@ -255,31 +215,6 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withMaxRequestHeaderSize(int maxRequestHeaderSize) {
     configuration().withMaxRequestHeaderSize(maxRequestHeaderSize);
-    return (T) this;
-  }
-
-  /**
-   * Sets the base directory for this server. This is passed to the HTTPContext, which is available from this class.
-   * This defaults to the current working directory of the process. Defaults to 100,000.
-   *
-   * @param maxRequestsPerConnection The maximum number of requests that can be handled by a single persistent
-   *                                 connection.
-   * @return This.
-   */
-  default T withMaxRequestsPerConnection(int maxRequestsPerConnection) {
-    configuration().withMaxRequestsPerConnection(maxRequestsPerConnection);
-    return (T) this;
-  }
-
-  /**
-   * This configures the maximum size of a chunk in the response when the server is using chunked response encoding.
-   * Defaults to 16 Kilobytes.
-   *
-   * @param size The size in bytes.
-   * @return This.
-   */
-  default T withMaxResponseChunkSize(int size) {
-    configuration().withMaxResponseChunkSize(size);
     return (T) this;
   }
 

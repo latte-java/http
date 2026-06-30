@@ -217,7 +217,7 @@ public class HTTP1Connection implements HTTPConnection {
         }
 
         // Do this before we write the response preamble. The normal Keep-Alive check below will handle closing the socket.
-        if (handledRequests >= configuration.getMaxRequestsPerConnection()) {
+        if (handledRequests >= configuration.getHTTP1Configuration().getMaxRequestsPerConnection()) {
           logger.trace("[{}] Maximum requests per connection has been reached. Turn off Keep-Alive.", Thread.currentThread().threadId());
           response.setHeader(HTTPValues.Headers.Connection, HTTPValues.Connections.Close);
         }
@@ -234,7 +234,7 @@ public class HTTP1Connection implements HTTPConnection {
 
         // Transition to Keep-Alive state and reset the SO timeout
         state = HTTPConnection.State.KeepAlive;
-        int soTimeout = (int) configuration.getKeepAliveTimeoutDuration().toMillis();
+        int soTimeout = (int) configuration.getHTTP1Configuration().getKeepAliveTimeoutDuration().toMillis();
         logger.trace("[{}] Enter Keep-Alive state [{}] Reset socket timeout [{}].", Thread.currentThread().threadId(), state, soTimeout);
         socket.setSoTimeout(soTimeout);
 
@@ -362,7 +362,7 @@ public class HTTP1Connection implements HTTPConnection {
 
   private boolean handleExpectContinue(HTTPRequest request) throws IOException {
     var expectResponse = new HTTPResponse();
-    configuration.getExpectValidator().validate(request, expectResponse);
+    configuration.getHTTP1Configuration().getExpectValidator().validate(request, expectResponse);
 
     // Write directly to the socket because the HTTPOutputStream.close() does a lot of extra work that we don't want
     OutputStream out = socket.getOutputStream();

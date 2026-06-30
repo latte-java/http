@@ -85,7 +85,7 @@ public class AcceptorDispatchTest extends BaseTest {
     HTTPServer server = new HTTPServer()
         .withHandler((req, res) -> res.setStatus(200))
         .withInitialReadTimeout(initialReadTimeout)
-        .withKeepAliveTimeoutDuration(ServerTimeout)
+        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout))
         .withProcessingTimeoutDuration(ServerTimeout)
         .withMinimumReadThroughput(200 * 1024)
         .withMinimumWriteThroughput(200 * 1024)

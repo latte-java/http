@@ -403,7 +403,7 @@ public class HeadTest extends BaseSocketTest {
     var server = makeServer("http", handler)
         .withReadThroughputCalculationDelayDuration(Duration.ofMinutes(2))
         .withWriteThroughputCalculationDelayDuration(Duration.ofMinutes(2))
-        .withKeepAliveTimeoutDuration(Duration.ofSeconds(23))
+        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(23)))
         .withInitialReadTimeout(Duration.ofSeconds(19))
         .withProcessingTimeoutDuration(Duration.ofSeconds(27))
         // Suppress auto-Date so the byte-exact HEAD/GET response comparisons below stay deterministic.

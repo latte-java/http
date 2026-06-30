@@ -323,7 +323,7 @@ public class CoreTest extends BaseTest {
       res.setStatus(200);
     };
 
-    try (var ignore = makeServer("http", handler).withKeepAliveTimeoutDuration(Duration.ofSeconds(1)).start()) {
+    try (var ignore = makeServer("http", handler).withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(1))).start()) {
       URI uri = makeURI("http", "");
       var response = new RESTClient<>(Void.TYPE, Void.TYPE)
           .url(uri.toString())
@@ -369,7 +369,7 @@ public class CoreTest extends BaseTest {
       res.setContentLength(0L);
     };
     try (var ignore = makeServer("http", handler)
-        .withKeepAliveTimeoutDuration(Duration.ofSeconds(60))
+        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(60)))
         .start()) {
       try (var sock = new java.net.Socket("127.0.0.1", 4242)) {
         sock.setSoTimeout(15_000);
@@ -409,8 +409,8 @@ public class CoreTest extends BaseTest {
 
     HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var ignore = makeServer("http", handler)
-        .withMaxRequestsPerConnection(maxRequests)
-        .withKeepAliveTimeoutDuration(Duration.ofSeconds(60))
+        .withHTTP1(h1 -> h1.withMaxRequestsPerConnection(maxRequests)
+                           .withKeepAliveTimeoutDuration(Duration.ofSeconds(60)))
         .start();
          var client = makeClient("http", null)) {
 
@@ -826,7 +826,7 @@ public class CoreTest extends BaseTest {
         // - Increase other timeouts to be certain we are testing the correct one.
         .withProcessingTimeoutDuration(Duration.ofSeconds(1))
         .withInitialReadTimeout(Duration.ofSeconds(30))
-        .withKeepAliveTimeoutDuration(Duration.ofSeconds(30))
+        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(30)))
         .start();
 
          // Open a socket to the server and begin writing.

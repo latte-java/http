@@ -79,7 +79,7 @@ public abstract class BaseSocketTest extends BaseTest {
         .withWriteThroughputCalculationDelayDuration(Duration.ofMinutes(2))
 
         // Using various timeouts to make it easier to debug which one we are hitting.
-        .withKeepAliveTimeoutDuration(Duration.ofSeconds(23))
+        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(23)))
         .withInitialReadTimeout(Duration.ofSeconds(19))
         .withProcessingTimeoutDuration(Duration.ofSeconds(27))
 

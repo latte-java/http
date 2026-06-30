@@ -245,10 +245,10 @@ public abstract class BaseTest {
   public HTTPServer makeServer(String scheme, HTTPHandler handler, HTTPListenerConfiguration listener) {
     LoggerFactory factory = FileLoggerFactory.FACTORY;
     return new HTTPServer().withHandler(handler)
-                           .withKeepAliveTimeoutDuration(ServerTimeout)
+                           .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout)
+                                              .withExpectValidator(new AlwaysContinueExpectValidator()))
                            .withInitialReadTimeout(ServerTimeout)
                            .withProcessingTimeoutDuration(ServerTimeout)
-                           .withExpectValidator(new AlwaysContinueExpectValidator())
                            .withLoggerFactory(factory)
                            .withMinimumReadThroughput(200 * 1024)
                            .withMinimumWriteThroughput(200 * 1024)
@@ -270,10 +270,10 @@ public abstract class BaseTest {
 
     LoggerFactory factory = FileLoggerFactory.FACTORY;
     return new HTTPServer().withHandler(handler)
-                           .withKeepAliveTimeoutDuration(ServerTimeout)
+                           .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout)
+                                              .withExpectValidator(expectValidator != null ? expectValidator : new AlwaysContinueExpectValidator()))
                            .withInitialReadTimeout(ServerTimeout)
                            .withProcessingTimeoutDuration(ServerTimeout)
-                           .withExpectValidator(expectValidator != null ? expectValidator : new AlwaysContinueExpectValidator())
                            .withInstrumenter(instrumenter)
                            .withLoggerFactory(factory)
                            .withMinimumReadThroughput(200 * 1024)

@@ -72,8 +72,8 @@ public class HTTPInputStream extends InputStream {
     this.request = request;
     this.delegate = pushbackInputStream;
     this.pushbackInputStream = pushbackInputStream;
-    this.chunkedBufferSize = configuration.getChunkedBufferSize();
-    this.maxRequestChunkSize = configuration.getMaxRequestChunkSize();
+    this.chunkedBufferSize = configuration.getHTTP1Configuration().getChunkedBufferSize();
+    this.maxRequestChunkSize = configuration.getHTTP1Configuration().getMaxRequestChunkSize();
     this.maximumBytesToDrain = configuration.getMaxBytesToDrain();
     this.maximumContentLength = maximumContentLength;
   }

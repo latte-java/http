@@ -58,12 +58,12 @@ public class HTTPBuffers {
 
   /**
    * @return An output stream that can be used for chunking responses. This uses the configuration's
-   *     {@link HTTPServerConfiguration#getMaxResponseChunkSize()} value plus 64 bytes of padding for the header and
+   *     {@link HTTP1Configuration#getMaxResponseChunkSize()} value plus 64 bytes of padding for the header and
    *     footer.  This is lazily created.
    */
   public FastByteArrayOutputStream chuckedOutputStream() {
     if (chunkOutputStream == null) {
-      chunkOutputStream = new FastByteArrayOutputStream(configuration.getMaxResponseChunkSize() + 64, 64);
+      chunkOutputStream = new FastByteArrayOutputStream(configuration.getHTTP1Configuration().getMaxResponseChunkSize() + 64, 64);
     }
 
     return chunkOutputStream;
@@ -71,11 +71,11 @@ public class HTTPBuffers {
 
   /**
    * @return A byte array that can be used for chunking responses. This uses the configuration's
-   *     {@link HTTPServerConfiguration#getMaxResponseChunkSize()} value for the size. This is lazily created.
+   *     {@link HTTP1Configuration#getMaxResponseChunkSize()} value for the size. This is lazily created.
    */
   public byte[] chunkBuffer() {
     if (chunkBuffer == null) {
-      chunkBuffer = new byte[configuration.getMaxResponseChunkSize()];
+      chunkBuffer = new byte[configuration.getHTTP1Configuration().getMaxResponseChunkSize()];
     }
 
     return chunkBuffer;
