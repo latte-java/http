@@ -1,7 +1,7 @@
 # Configuration Cleanup Design
 
 - **Created:** 2026-06-30
-- **Status:** Draft — awaiting review
+- **Status:** Implemented
 - **Branch:** `http2/configuration`
 
 ## 1. Problem
