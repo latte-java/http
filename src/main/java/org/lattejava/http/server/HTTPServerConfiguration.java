@@ -18,7 +18,6 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
-import org.lattejava.http.server.internal.h2.HTTP2RateLimits;
 import org.lattejava.http.server.internal.h2.HTTP2Settings;
 
 /**
@@ -32,26 +31,24 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
       "application/x-www-form-urlencoded", 10L * 1024 * 1024    // 10 Megabytes
   );
 
+  private final HTTP1Configuration http1 = new HTTP1Configuration();
+
   private final List<HTTPListenerConfiguration> listeners = new ArrayList<>();
 
   private final Map<String, Long> maxRequestBodySize = new HashMap<>(DefaultMaxRequestSizes);
 
   private Path baseDir = Path.of("");
-  private int chunkedBufferSize = 4 * 1024; // 4 Kilobytes
   private boolean compressByDefault = true;
   private String contextPath = "";
-  private ExpectValidator expectValidator = new AlwaysContinueExpectValidator();
   private HTTPHandler handler;
   private Duration http2HandlerReadTimeout = Duration.ofSeconds(10);
   private Duration http2KeepAlivePingInterval;
-  private HTTP2RateLimits http2RateLimits = HTTP2RateLimits.defaults();
+  private HTTP2RateLimits http2RateLimits = new HTTP2RateLimits();
   private HTTP2Settings http2Settings = HTTP2Settings.defaults();
   private Duration http2SettingsAckTimeout = Duration.ofSeconds(10);
   private Duration initialReadTimeoutDuration = Duration.ofSeconds(2);
 
   private Instrumenter instrumenter;
-
-  private Duration keepAliveTimeoutDuration = Duration.ofSeconds(20);
 
   private LoggerFactory loggerFactory = SystemOutLoggerFactory.FACTORY;
 
@@ -59,13 +56,7 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   private int maxPendingSocketConnections = 4096;
 
-  private int maxRequestChunkSize = 1024 * 1024; // 1 Megabyte
-
   private int maxRequestHeaderSize = 128 * 1024; // 128 Kilobytes
-
-  private int maxRequestsPerConnection = 100_000; // 100,000
-
-  private int maxResponseChunkSize = 16 * 1024; // 16 Kilobytes
 
   private long minimumReadThroughput = 16 * 1024; // 16 Kilobytes/second
 
@@ -107,13 +98,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return the length of the buffer used to parse a chunked request.
-   */
-  public int getChunkedBufferSize() {
-    return chunkedBufferSize;
-  }
-
-  /**
    * @return The context page that the entire server serves requests under or null.
    */
   public String getContextPath() {
@@ -121,17 +105,17 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The expect validator. Cannot be null and is required.
-   */
-  public ExpectValidator getExpectValidator() {
-    return expectValidator;
-  }
-
-  /**
    * @return The HTTP handler for this server. Cannot be null and is required.
    */
   public HTTPHandler getHandler() {
     return handler;
+  }
+
+  /**
+   * @return The HTTP/1.x-specific configuration. Never null.
+   */
+  public HTTP1Configuration getHTTP1Configuration() {
+    return http1;
   }
 
   /**
@@ -187,14 +171,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public Instrumenter getInstrumenter() {
     return instrumenter;
-  }
-
-  /**
-   * @return The timeout between requests when the server is in Keep-Alive mode. This is the maximum value to prevent
-   *     DoS attacks that use the HTTP headers to set extremely long timeouts.
-   */
-  public Duration getKeepAliveTimeoutDuration() {
-    return keepAliveTimeoutDuration;
   }
 
   /**
@@ -260,37 +236,11 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
-   * @return The maximum size of a single chunk in a request body that uses chunked Transfer-Encoding. A chunk whose
-   *     declared size exceeds this value is rejected before any body bytes are read. Also bounds the hex chunk-size
-   *     string length to prevent integer overflow. Defaults to 1 Megabyte.
-   */
-  public int getMaxRequestChunkSize() {
-    return maxRequestChunkSize;
-  }
-
-  /**
    * @return the maximum size of the HTTP request header in bytes. This configuration does not affect the HTTP response
    *     header. Defaults to 128 Kilobytes.
    */
   public int getMaxRequestHeaderSize() {
     return maxRequestHeaderSize;
-  }
-
-  /**
-   * This limit only applies when using a persistent connection. If this number is reached without hitting a Keep-Alive
-   * timeout the connection will be closed just as it would be if the Keep-Alive timeout was reached.
-   *
-   * @return The maximum number of requests that can be handled by a single persistent connection. Defaults to 100,000.
-   */
-  public int getMaxRequestsPerConnection() {
-    return maxRequestsPerConnection;
-  }
-
-  /**
-   * @return The max chunk size in the response. Defaults to 16 Kilobytes.
-   */
-  public int getMaxResponseChunkSize() {
-    return maxResponseChunkSize;
   }
 
   /**
@@ -415,19 +365,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withChunkedBufferSize(int chunkedBufferSize) {
-    if (chunkedBufferSize <= 1024) {
-      throw new IllegalArgumentException("The chunked buffer size must be greater than or equal to 1024 bytes");
-    }
-
-    this.chunkedBufferSize = chunkedBufferSize;
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
   public HTTPServerConfiguration withCompressByDefault(boolean compressByDefault) {
     this.compressByDefault = compressByDefault;
     return this;
@@ -446,9 +383,9 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withExpectValidator(ExpectValidator validator) {
-    Objects.requireNonNull(validator, "You cannot set the expect validator to null");
-    this.expectValidator = validator;
+  public HTTPServerConfiguration withHandler(HTTPHandler handler) {
+    Objects.requireNonNull(handler, "You cannot set the handler to null");
+    this.handler = handler;
     return this;
   }
 
@@ -456,9 +393,9 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withHandler(HTTPHandler handler) {
-    Objects.requireNonNull(handler, "You cannot set the handler to null");
-    this.handler = handler;
+  public HTTPServerConfiguration withHTTP1(Consumer<HTTP1Configuration> consumer) {
+    Objects.requireNonNull(consumer, "You cannot pass a null HTTP/1 configuration consumer");
+    consumer.accept(http1);
     return this;
   }
 
@@ -586,20 +523,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withKeepAliveTimeoutDuration(Duration duration) {
-    Objects.requireNonNull(duration, "You cannot set the keep-alive timeout duration to null");
-    if (duration.isZero() || duration.isNegative()) {
-      throw new IllegalArgumentException("The keep-alive timeout duration must be grater than 0");
-    }
-
-    this.keepAliveTimeoutDuration = duration;
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
   public HTTPServerConfiguration withListener(HTTPListenerConfiguration listener) {
     Objects.requireNonNull(listener, "You cannot add a null HTTPListenerConfiguration");
     this.listeners.add(listener);
@@ -656,54 +579,12 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
-  public HTTPServerConfiguration withMaxRequestChunkSize(int maxRequestChunkSize) {
-    // The upper bound is 0x0FFFFFFF (268,435,455). Any larger would allow an 8-character hex chunk size, and an attacker sending
-    // 0x80000000..0xFFFFFFFF would then produce a negative int after parseInt. Cap here so the hex-length cap in ChunkedInputStream stays
-    // consistent with the config.
-    if (maxRequestChunkSize < 1 || maxRequestChunkSize > 0x0FFFFFFF) {
-      throw new IllegalArgumentException("The maximum request chunk size must be between 1 and [" + 0x0FFFFFFF + "] (~256 Megabytes).");
-    }
-
-    this.maxRequestChunkSize = maxRequestChunkSize;
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
   public HTTPServerConfiguration withMaxRequestHeaderSize(int maxRequestHeaderSize) {
     if (maxRequestHeaderSize != -1 && maxRequestHeaderSize <= 0) {
       throw new IllegalArgumentException("The maximum request header size must be greater than 0. Set to -1 to disable this limitation.");
     }
 
     this.maxRequestHeaderSize = maxRequestHeaderSize;
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public HTTPServerConfiguration withMaxRequestsPerConnection(int maxRequestsPerConnection) {
-    if (maxRequestsPerConnection < 10) {
-      throw new IllegalArgumentException("The maximum number of requests per connection must be greater than or equal to 10");
-    }
-
-    this.maxRequestsPerConnection = maxRequestsPerConnection;
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public HTTPServerConfiguration withMaxResponseChunkSize(int maxResponseChunkSize) {
-    if (maxResponseChunkSize < 128) {
-      throw new IllegalArgumentException("The maximum chunk size must be greater than or equal to 128.");
-    }
-
-    this.maxResponseChunkSize = maxResponseChunkSize;
     return this;
   }
 

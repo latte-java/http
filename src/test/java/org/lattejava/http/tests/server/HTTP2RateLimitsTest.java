@@ -8,20 +8,19 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.h2.HTTP2RateLimits;
+import org.lattejava.http.server.internal.h2.HTTP2RateLimitsTracker;
 
 import static org.testng.Assert.*;
 
 public class HTTP2RateLimitsTest {
   @Test
   public void newTracker_returns_isolated_counters() {
-    // Each HTTP/2 connection must get its own tracker. The configuration record is a shared
-    // immutable template; calling newTracker() per accept gives the connection an independent
-    // ArrayDeque so concurrent connections don't race on the same non-thread-safe collection
-    // (and one noisy connection cannot trip the rate limit for everyone else).
-    var config = HTTP2RateLimits.defaults();
-    var t1 = config.newTracker();
-    var t2 = config.newTracker();
+    // Each HTTP/2 connection must get its own tracker. The configuration is a shared template; constructing a tracker
+    // per accept gives the connection an independent ArrayDeque so concurrent connections don't race on the same
+    // non-thread-safe collection (and one noisy connection cannot trip the rate limit for everyone else).
+    var config = new HTTP2RateLimits();
+    var t1 = new HTTP2RateLimitsTracker(config);
+    var t2 = new HTTP2RateLimitsTracker(config);
 
     for (int i = 0; i < 100; i++) {
       t1.recordRstStream();
@@ -32,7 +31,7 @@ public class HTTP2RateLimitsTest {
 
   @Test
   public void over_threshold_returns_true() {
-    var tracker = HTTP2RateLimits.defaults().newTracker();
+    var tracker = new HTTP2RateLimitsTracker(new HTTP2RateLimits());
     for (int i = 0; i < 100; i++) {
       tracker.recordRstStream();
     }
@@ -41,7 +40,7 @@ public class HTTP2RateLimitsTest {
 
   @Test
   public void under_threshold_returns_false() {
-    var tracker = HTTP2RateLimits.defaults().newTracker();
+    var tracker = new HTTP2RateLimitsTracker(new HTTP2RateLimits());
     for (int i = 0; i < 100; i++) {
       assertFalse(tracker.recordRstStream(), "under-threshold call " + i + " should return false");
     }
@@ -49,8 +48,8 @@ public class HTTP2RateLimitsTest {
 
   @Test
   public void window_expires_old_events() throws Exception {
-    var config = new HTTP2RateLimits(/*emptyDataMax=*/100, /*emptyDataWindowMs=*/30000, /*pingMax=*/10, /*pingWindowMs=*/1000, /*rstStreamMax=*/3, /*rstStreamWindowMs=*/100, /*settingsMax=*/10, /*settingsWindowMs=*/1000, /*windowUpdateMax=*/100, /*windowUpdateWindowMs=*/1000);
-    var tracker = config.newTracker();
+    var config = new HTTP2RateLimits().withRstStreamMax(3).withRstStreamWindowMs(100);
+    var tracker = new HTTP2RateLimitsTracker(config);
     tracker.recordRstStream();
     tracker.recordRstStream();
     tracker.recordRstStream();

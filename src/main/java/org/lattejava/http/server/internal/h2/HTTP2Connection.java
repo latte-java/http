@@ -101,7 +101,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     this.buffers = new HTTPBuffers(configuration);
     this.logger = configuration.getLoggerFactory().getLogger(HTTP2Connection.class);
     this.localSettings = configuration.getHTTP2Settings();
-    this.rateLimits = configuration.getHTTP2RateLimits().newTracker();
+    this.rateLimits = new HTTP2RateLimitsTracker(configuration.getHTTP2RateLimits());
     this.startInstant = System.currentTimeMillis();
   }
 

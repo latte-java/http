@@ -6,6 +6,8 @@ package org.lattejava.http.server.internal.h2;
 
 import module java.base;
 
+import org.lattejava.http.server.HTTP2RateLimits;
+
 /**
  * Per-connection sliding-window counters for the five DoS-class HTTP/2 attacks. Each {@code record*} call appends now()
  * to its deque, prunes entries older than the configured window, and returns {@code true} when the per-window threshold
@@ -14,7 +16,7 @@ import module java.base;
  * <p>Not thread-safe. Each accepted connection has one reader virtual-thread which is the sole caller for that
  * connection's tracker. Sharing a tracker across connections is a correctness bug: the ArrayDeques would race and the
  * shared counters would trip the threshold prematurely (and could NPE between {@code isEmpty()} and
- * {@code peekFirst()}). Always obtain trackers via {@link HTTP2RateLimits#newTracker()}.
+ * {@code peekFirst()}). Each accepted connection constructs its own tracker.
  *
  * @author Daniel DeGroff
  */
@@ -26,28 +28,28 @@ public class HTTP2RateLimitsTracker {
   private final ArrayDeque<Long> settings = new ArrayDeque<>();
   private final ArrayDeque<Long> windowUpdate = new ArrayDeque<>();
 
-  HTTP2RateLimitsTracker(HTTP2RateLimits config) {
+  public HTTP2RateLimitsTracker(HTTP2RateLimits config) {
     this.config = config;
   }
 
   public boolean recordEmptyData() {
-    return record(emptyData, config.emptyDataMax(), config.emptyDataWindowMs());
+    return record(emptyData, config.getEmptyDataMax(), config.getEmptyDataWindowMs());
   }
 
   public boolean recordPing() {
-    return record(ping, config.pingMax(), config.pingWindowMs());
+    return record(ping, config.getPingMax(), config.getPingWindowMs());
   }
 
   public boolean recordRstStream() {
-    return record(rstStream, config.rstStreamMax(), config.rstStreamWindowMs());
+    return record(rstStream, config.getRstStreamMax(), config.getRstStreamWindowMs());
   }
 
   public boolean recordSettings() {
-    return record(settings, config.settingsMax(), config.settingsWindowMs());
+    return record(settings, config.getSettingsMax(), config.getSettingsWindowMs());
   }
 
   public boolean recordWindowUpdate() {
-    return record(windowUpdate, config.windowUpdateMax(), config.windowUpdateWindowMs());
+    return record(windowUpdate, config.getWindowUpdateMax(), config.getWindowUpdateWindowMs());
   }
 
   private static boolean record(ArrayDeque<Long> q, int max, long windowMs) {
