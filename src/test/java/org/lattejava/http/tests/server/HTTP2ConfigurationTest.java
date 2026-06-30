@@ -42,6 +42,11 @@ public class HTTP2ConfigurationTest {
   }
 
   @Test(expectedExceptions = IllegalArgumentException.class)
+  public void rejects_above_range_max_frame_size() {
+    new HTTP2Configuration().withMaxFrameSize(16777216);
+  }
+
+  @Test(expectedExceptions = IllegalArgumentException.class)
   public void rejects_out_of_range_max_frame_size() {
     new HTTP2Configuration().withMaxFrameSize(1024);
   }

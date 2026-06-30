@@ -7,9 +7,6 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
-import java.time.Duration;
-import java.util.Objects;
-
 /**
  * HTTP/1.x-specific server configuration: chunked transfer-encoding buffers and limits, keep-alive behavior, and the
  * {@code Expect: 100-continue} validator. Instantiated with defaults by {@link HTTPServerConfiguration} and mutated

@@ -14,7 +14,7 @@ import static org.testng.Assert.*;
 
 public class HTTP2RateLimitsTest {
   @Test
-  public void newTracker_returns_isolated_counters() {
+  public void separate_trackers_have_isolated_counters() {
     // Each HTTP/2 connection must get its own tracker. The configuration is a shared template; constructing a tracker
     // per accept gives the connection an independent ArrayDeque so concurrent connections don't race on the same
     // non-thread-safe collection (and one noisy connection cannot trip the rate limit for everyone else).
