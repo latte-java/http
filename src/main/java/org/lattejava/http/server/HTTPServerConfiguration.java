@@ -57,8 +57,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   private long minimumWriteThroughput = 16 * 1024; // 16 Kilobytes/second
 
-  private int multipartBufferSize = 16 * 1024; // 16 Kilobytes
-
   private MultipartConfiguration multipartStreamConfiguration = new MultipartConfiguration();
 
   private Duration processingTimeoutDuration = Duration.ofSeconds(10);
@@ -227,15 +225,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public long getMinimumWriteThroughput() {
     return minimumWriteThroughput;
-  }
-
-  /**
-   * @return The multipart buffer size in bytes. This is primary used for parsing multipart requests by the
-   *     {@link HTTPRequest} class. Defaults to 16 Kilobytes.
-   */
-  @Deprecated
-  public int getMultipartBufferSize() {
-    return multipartBufferSize;
   }
 
   /**
@@ -498,20 +487,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
     }
 
     this.minimumWriteThroughput = bytesPerSecond;
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  @SuppressWarnings("deprecation")
-  public HTTPServerConfiguration withMultipartBufferSize(int multipartBufferSize) {
-    if (multipartBufferSize <= 0) {
-      throw new IllegalArgumentException("The multi-part buffer size must be greater than 0");
-    }
-
-    this.multipartBufferSize = multipartBufferSize;
     return this;
   }
 

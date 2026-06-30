@@ -268,19 +268,6 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the size of the buffer that is used to process the multipart request body. This defaults to 16 Kilobytes.
-   *
-   * @param multipartBufferSize The size of the buffer.
-   * @return This.
-   * @deprecated use the configuration found in {@link MultipartConfiguration} instead.
-   */
-  @Deprecated
-  default T withMultipartBufferSize(int multipartBufferSize) {
-    configuration().withMultipartBufferSize(multipartBufferSize);
-    return (T) this;
-  }
-
-  /**
    * Sets the multipart processor configuration.
    * <p>
    * This configuration is used when parsing a multipart HTTP request that includes files.
