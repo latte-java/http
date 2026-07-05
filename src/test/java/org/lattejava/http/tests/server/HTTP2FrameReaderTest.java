@@ -30,14 +30,14 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(payload.length, 0x0, 0x1, 7));
     bytes.write(payload);
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     HTTP2Frame frame = reader.readFrame();
 
     assertTrue(frame instanceof HTTP2Frame.DataFrame);
     var data = (HTTP2Frame.DataFrame) frame;
     assertEquals(data.streamId(), 7);
     assertEquals(data.flags(), 0x1);
-    assertEquals(data.payload(), payload);
+    assertEquals(data.data(), payload);
   }
 
   @Test
@@ -45,7 +45,7 @@ public class HTTP2FrameReaderTest {
     var bytes = new ByteArrayOutputStream();
     bytes.write(header(0, 0x4, 0x1, 0));
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     HTTP2Frame frame = reader.readFrame();
 
     assertTrue(frame instanceof HTTP2Frame.SettingsFrame);
@@ -58,7 +58,7 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(4, 0x8, 0, 3));
     bytes.write(new byte[]{0, 0, 0, 100});
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     HTTP2Frame frame = reader.readFrame();
 
     var wu = (HTTP2Frame.WindowUpdateFrame) frame;
@@ -72,7 +72,7 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(2, 0xFE, 0, 5));
     bytes.write(new byte[]{1, 2});
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     HTTP2Frame frame = reader.readFrame();
 
     assertTrue(frame instanceof HTTP2Frame.UnknownFrame);
@@ -86,7 +86,7 @@ public class HTTP2FrameReaderTest {
     bytes.write(header(3, 0x3, 0, 1)); // RST_STREAM payload must be exactly 4
     bytes.write(new byte[]{1, 2, 3});
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(bytes.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     expectThrows(HTTP2FrameReader.FrameSizeException.class, reader::readFrame);
   }
 
@@ -96,11 +96,11 @@ public class HTTP2FrameReaderTest {
     var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
     writer.writeFrame(new HTTP2Frame.DataFrame(7, 0x1, "hello".getBytes()));
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     var frame = (HTTP2Frame.DataFrame) reader.readFrame();
     assertEquals(frame.streamId(), 7);
     assertEquals(frame.flags(), 0x1);
-    assertEquals(frame.payload(), "hello".getBytes());
+    assertEquals(frame.data(), "hello".getBytes());
   }
 
   @Test
@@ -109,7 +109,7 @@ public class HTTP2FrameReaderTest {
     var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
     writer.writeFrame(new HTTP2Frame.GoawayFrame(13, 0x1, new byte[0]));
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     var frame = (HTTP2Frame.GoawayFrame) reader.readFrame();
     assertEquals(frame.lastStreamId(), 13);
     assertEquals(frame.errorCode(), 0x1);
@@ -122,9 +122,9 @@ public class HTTP2FrameReaderTest {
     byte[] opaque = {1, 2, 3, 4, 5, 6, 7, 8};
     writer.writeFrame(new HTTP2Frame.PingFrame(0, opaque));
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     var frame = (HTTP2Frame.PingFrame) reader.readFrame();
-    assertEquals(frame.opaqueData(), opaque);
+    assertEquals(frame.data(), opaque);
   }
 
   @Test
@@ -133,7 +133,7 @@ public class HTTP2FrameReaderTest {
     var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
     writer.writeFrame(new HTTP2Frame.RSTStreamFrame(5, 0x3));
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     var frame = (HTTP2Frame.RSTStreamFrame) reader.readFrame();
     assertEquals(frame.streamId(), 5);
     assertEquals(frame.errorCode(), 0x3);
@@ -146,9 +146,9 @@ public class HTTP2FrameReaderTest {
     var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
     writer.writeFrame(new HTTP2Frame.SettingsFrame(0, payload));
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     var frame = (HTTP2Frame.SettingsFrame) reader.readFrame();
-    assertEquals(frame.payload(), payload);
+    assertEquals(frame.data(), payload);
   }
 
   @Test
@@ -157,7 +157,7 @@ public class HTTP2FrameReaderTest {
     var writer = new HTTP2FrameWriter(sink, new byte[16384 + 9]);
     writer.writeFrame(new HTTP2Frame.WindowUpdateFrame(11, 1024));
 
-    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384]);
+    var reader = new HTTP2FrameReader(new ByteArrayInputStream(sink.toByteArray()), new byte[16384], Integer.MAX_VALUE);
     var frame = (HTTP2Frame.WindowUpdateFrame) reader.readFrame();
     assertEquals(frame.streamId(), 11);
     assertEquals(frame.windowSizeIncrement(), 1024);

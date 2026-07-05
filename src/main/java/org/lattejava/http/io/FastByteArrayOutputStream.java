@@ -51,6 +51,16 @@ public class FastByteArrayOutputStream extends OutputStream {
   public void close() {
   }
 
+  public byte[] finalBytes() {
+    if (count == 0) {
+      return new byte[0];
+    }
+
+    byte[] finalBytes = new byte[count];
+    System.arraycopy(buffer, 0, finalBytes, 0, count);
+    return finalBytes;
+  }
+
   /**
    * Resets this output stream by setting the count to 0.
    */

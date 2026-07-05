@@ -19,17 +19,22 @@ import module java.base;
  */
 public class HTTP2OutputStream extends OutputStream {
   private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
   private final HTTP2ConnectionWindow connectionWindow;
+
   private final int peerMaxFrameSize;
+
   private final HTTP2Stream stream;
+
   private final HTTP2WriterThread writer;
 
   private boolean closed;
+
   private boolean trailersFollow;
 
   /**
-   * Test/standalone constructor with no connection-level flow control. Uses an effectively unbounded connection
-   * window, so only the per-stream window throttles output. Production code must use the
+   * Test/standalone constructor with no connection-level flow control. Uses an effectively unbounded connection window,
+   * so only the per-stream window throttles output. Production code must use the
    * {@link #HTTP2OutputStream(HTTP2Stream, HTTP2WriterThread, HTTP2ConnectionWindow, int)} overload.
    */
   public HTTP2OutputStream(HTTP2Stream stream, HTTP2WriterThread writer, int peerMaxFrameSize) {
@@ -52,6 +57,11 @@ public class HTTP2OutputStream extends OutputStream {
     flushAndFragment(/*endStream=*/!trailersFollow);
   }
 
+  @Override
+  public void flush() throws IOException {
+    flushAndFragment(/*endStream=*/false);
+  }
+
   /**
    * Sets whether a HEADERS frame carrying trailers will follow this DATA stream. When {@code true}, the final DATA
    * frame written by {@link #close()} will not carry END_STREAM, leaving the caller responsible for sending a HEADERS
@@ -64,11 +74,6 @@ public class HTTP2OutputStream extends OutputStream {
   }
 
   @Override
-  public void flush() throws IOException {
-    flushAndFragment(/*endStream=*/false);
-  }
-
-  @Override
   public void write(int b) throws IOException {
     buffer.write(b);
   }
@@ -76,6 +81,10 @@ public class HTTP2OutputStream extends OutputStream {
   @Override
   public void write(byte[] b, int off, int len) throws IOException {
     buffer.write(b, off, len);
+  }
+
+  private void enqueue(HTTP2Frame.DataFrame frame) throws InterruptedIOException {
+    writer.enqueueBlocking(frame);
   }
 
   private void flushAndFragment(boolean endStream) throws IOException {
@@ -92,6 +101,7 @@ public class HTTP2OutputStream extends OutputStream {
         enqueue(new HTTP2Frame.DataFrame(stream.streamId(), endStream ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
         return;
       }
+
       // Connection window can't cover the whole frame right now; return the stream credit and fall to the slow path.
       stream.releaseSendWindow(size);
     }
@@ -114,6 +124,7 @@ public class HTTP2OutputStream extends OutputStream {
         Thread.currentThread().interrupt();
         throw new InterruptedIOException();
       }
+
       int chunk;
       try {
         chunk = connectionWindow.acquire(streamGrant, 100);
@@ -122,22 +133,21 @@ public class HTTP2OutputStream extends OutputStream {
         Thread.currentThread().interrupt();
         throw new InterruptedIOException();
       }
+
       if (chunk < streamGrant) {
         stream.releaseSendWindow(streamGrant - chunk);
       }
+
       byte[] piece = new byte[chunk];
       System.arraycopy(all, off, piece, 0, chunk);
       off += chunk;
       boolean last = (off >= all.length) && endStream;
       enqueue(new HTTP2Frame.DataFrame(stream.streamId(), last ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
     }
+
     // If endStream and the buffer was empty, still emit a zero-length DATA frame with END_STREAM.
     if (endStream && all.length == 0) {
       enqueue(new HTTP2Frame.DataFrame(stream.streamId(), HTTP2Frame.FLAG_END_STREAM, new byte[0]));
     }
-  }
-
-  private void enqueue(HTTP2Frame.DataFrame frame) throws InterruptedIOException {
-    writer.enqueueBlocking(frame);
   }
 }

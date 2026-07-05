@@ -68,6 +68,73 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
+   * RFC 9113 §4.3 — CONTINUATION for a different stream inside an open header block is a connection error.
+   */
+  @Test
+  public void continuation_on_wrong_stream_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, 3, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET, 0, 3);
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length - 3, 0x9 /* CONTINUATION */, 0x4 /* END_HEADERS */, 3);
+        out.write(MINIMAL_HPACK_GET, 3, MINIMAL_HPACK_GET.length - 3);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for CONTINUATION on wrong stream; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * Design §4.4 rule 3 — once a closed stream ID is evicted from the 100-entry recently-closed memory, DATA on it is
+   * ignored per §6.1 (not STREAM_CLOSED), and the connection keeps serving. Raises rstStreamMax so 101 client resets
+   * don't trip the rapid-reset guard.
+   */
+  @Test
+  public void data_on_forgotten_closed_stream_is_ignored() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    // The handler reads the body: the 101 reset streams park in the body read until the RST EOFs their pipe, and by
+    // then the stream is CLOSED so the response is suppressed (HTTP2OutputProtocol.commitHeaders null-sinks reset
+    // streams). Net effect: the ONLY response frames on the wire come from the final request, so the assertion below
+    // genuinely proves the post-eviction request was served.
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withRateLimits(rl -> rl.withRstStreamMax(1000))).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        // Open and reset 101 streams (IDs 1..201) — stream 1 falls out of the recently-closed memory.
+        for (int id = 1; id <= 201; id += 2) {
+          writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS, no END_STREAM */, id);
+          out.write(MINIMAL_HPACK_GET);
+          writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, id);
+          out.write(new byte[]{0, 0, 0, 0x8}); // CANCEL
+        }
+        // DATA on evicted stream 1 — must be ignored, not STREAM_CLOSED.
+        writeFrameHeader(out, 3, 0x0 /* DATA */, 0x1 /* END_STREAM */, 1);
+        out.write(new byte[]{1, 2, 3});
+        // The connection must still serve a fresh request.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 203);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        assertEquals(readUntilResponseHeaders(in), 203,
+            "Expected a response on stream 203 — the connection must survive DATA on a forgotten stream (helper returns stream ID)");
+      }
+    }
+  }
+
+  /**
    * RFC 9113 §5.1 — a DATA frame on a recently-closed stream (one the client just RST'd) must produce
    * {@code GOAWAY(STREAM_CLOSED)} (error code {@code 0x5}).
    */
@@ -249,6 +316,33 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
+   * CVE-2024-27316 guard — cumulative HEADERS+CONTINUATION fragments beyond maxHeaderListSize (derived from
+   * maxRequestHeaderSize) must produce GOAWAY(ENHANCE_YOUR_CALM=0xb) without buffering the rest of the block.
+   */
+  @Test
+  public void header_block_exceeding_max_header_list_size_triggers_enhance_your_calm() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).withMaxRequestHeaderSize(1024).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // 800-byte junk fragment (never decoded — the cap fires pre-decode), no END_HEADERS.
+        byte[] junk = new byte[800];
+        writeFrameHeader(out, junk.length, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(junk);
+        // Second 800-byte fragment pushes the cumulative block past 1024.
+        writeFrameHeader(out, junk.length, 0x9 /* CONTINUATION */, 0x4 /* END_HEADERS */, 1);
+        out.write(junk);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0xb, "Expected GOAWAY(ENHANCE_YOUR_CALM=0xb) for oversized header block; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
    * RFC 9113 §5.1 — a HEADERS frame on a recently-closed stream (one the client just RST'd) must produce
    * {@code GOAWAY(STREAM_CLOSED)} (error code {@code 0x5}).
    */
@@ -295,6 +389,71 @@ public class HTTP2RawFrameTest extends BaseTest {
         sock.setSoTimeout(5000);
         int errorCode = readUntilGoaway(sock.getInputStream());
         assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for HEADERS on stream 0; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * Design §4.4 — a refused stream ID is consumed: retrying HEADERS on the same ID is a monotonicity violation,
+   * GOAWAY(PROTOCOL_ERROR). RFC 9113 permits retrying a refused request only on a new stream ID.
+   */
+  @Test
+  public void headers_reusing_refused_stream_id_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    CountDownLatch release = new CountDownLatch(1);
+    HTTPHandler handler = (req, res) -> {
+      try {
+        release.await(10, TimeUnit.SECONDS);
+      } catch (InterruptedException ignore) {
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withMaxConcurrentStreams(1)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 1);
+        out.write(MINIMAL_HPACK_GET);
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 3); // refused at cap
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+        assertEquals(readUntilRstStream(in), 0x7);
+
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 3); // reuse of a consumed ID
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        int errorCode = readUntilGoaway(in);
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for reusing a refused stream ID; got: " + errorCode);
+        release.countDown();
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §4.3 — a header block split across HEADERS + CONTINUATION is one field block; the request must succeed
+   * with the fragments reassembled.
+   */
+  @Test
+  public void headers_split_across_continuations_yields_request() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS on stream 1: first 3 bytes of the block, END_STREAM but NOT END_HEADERS.
+        writeFrameHeader(out, 3, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET, 0, 3);
+        // CONTINUATION on stream 1: the rest, END_HEADERS.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length - 3, 0x9 /* CONTINUATION */, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET, 3, MINIMAL_HPACK_GET.length - 3);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int streamId = readUntilResponseHeaders(sock.getInputStream());
+        assertEquals(streamId, 1, "Expected response HEADERS on stream 1 from a split header block; got: " + streamId);
       }
     }
   }
@@ -440,6 +599,121 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
+   * Task 5 review finding — a HEADERS block that opens a stream but fails validation (here: unparseable
+   * content-length, §8.1.2.6) must release its MAX_CONCURRENT_STREAMS slot when it is RST. Otherwise a
+   * malformed-request flood permanently consumes the cap and well-formed requests get spuriously REFUSED.
+   */
+  @Test
+  public void malformed_headers_do_not_leak_concurrency_slots() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withMaxConcurrentStreams(2)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        // HPACK literal-without-indexing, name = static index 28 (content-length), value "abc" (unparseable).
+        byte[] badContentLength = {(byte) 0x0f, (byte) 0x0d, 0x03, 'a', 'b', 'c'};
+        byte[] malformed = new byte[MINIMAL_HPACK_GET.length + badContentLength.length];
+        System.arraycopy(MINIMAL_HPACK_GET, 0, malformed, 0, MINIMAL_HPACK_GET.length);
+        System.arraycopy(badContentLength, 0, malformed, MINIMAL_HPACK_GET.length, badContentLength.length);
+
+        // Two malformed streams — enough to fill the cap of 2 if the slots leak.
+        for (int id = 1; id <= 3; id += 2) {
+          writeFrameHeader(out, malformed.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, id);
+          out.write(malformed);
+        }
+        out.flush();
+        assertEquals(readUntilRstStream(in), 0x1, "Expected RST_STREAM(PROTOCOL_ERROR) for malformed content-length");
+        assertEquals(readUntilRstStream(in), 0x1, "Expected RST_STREAM(PROTOCOL_ERROR) for malformed content-length");
+
+        // A well-formed request must now succeed — the two malformed streams must not occupy the cap.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 5);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+        assertEquals(readUntilResponseHeaders(in), 5, "Expected a response on stream 5 — malformed streams leaked the cap");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.5.2 — SETTINGS_INITIAL_WINDOW_SIZE above 2^31-1 in the client's opening SETTINGS must produce
+   * GOAWAY(FLOW_CONTROL_ERROR=0x3). Today the connection closes silently during negotiation; the redesign returns the
+   * error through HTTP2Tools.negotiateSettings and run() emits the GOAWAY directly.
+   */
+  @Test
+  public void malformed_settings_at_negotiation_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = new Socket("localhost", server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // h2c prior-knowledge preface, then a SETTINGS frame with INITIAL_WINDOW_SIZE (id 0x4) = 2^31.
+        out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+        writeFrameHeader(out, 6, 0x4 /* SETTINGS */, 0, 0);
+        out.write(new byte[]{0x0, 0x4, (byte) 0x80, 0x0, 0x0, 0x0}); // id=4, value=0x80000000
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected GOAWAY(FLOW_CONTROL_ERROR=0x3) for INITIAL_WINDOW_SIZE overflow; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.1 — a second HEADERS on an open stream without END_STREAM is not trailers and must produce
+   * RST_STREAM(STREAM_CLOSED=0x5) on that stream, not a connection error.
+   */
+  @Test
+  public void mid_stream_headers_without_end_stream_triggers_rst_stream_closed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 without END_STREAM (body pending) — stream is OPEN.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // Second HEADERS on stream 1, END_HEADERS but no END_STREAM — illegal mid-stream HEADERS.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x5, "Expected RST_STREAM(STREAM_CLOSED=0x5) for mid-stream HEADERS; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §4.3 — no frame of any type, on any stream (including stream 0), may interleave inside a header block.
+   */
+  @Test
+  public void ping_interleaved_in_header_block_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS on stream 1 without END_HEADERS — header block is open.
+        writeFrameHeader(out, 3, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET, 0, 3);
+        // PING interleaved mid-block — connection error PROTOCOL_ERROR.
+        writeFrameHeader(out, 8, 0x6 /* PING */, 0, 0);
+        out.write(new byte[8]);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for PING mid header block; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
    * RFC 9113 §6.7 — PING frame with non-zero stream ID must trigger GOAWAY(PROTOCOL_ERROR).
    */
   @Test
@@ -562,6 +836,75 @@ public class HTTP2RawFrameTest extends BaseTest {
       sock.close();
       // Give the server time to clean up. The 10-second @Test timeout is the safety net.
       Thread.sleep(1500);
+    }
+  }
+
+  /**
+   * Design §9 / RFC 9113 §4.3 — a header block on a stream refused at MAX_CONCURRENT_STREAMS must still be
+   * HPACK-decoded (dynamic-table state is connection-wide), so a later request that references the dynamic table
+   * entries added by the refused block must decode correctly.
+   */
+  @Test
+  public void refused_stream_header_block_still_updates_hpack_state() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicReference<String> customHeader = new AtomicReference<>();
+    HTTPHandler handler = (req, res) -> {
+      if (req.getHeader("x-a") != null) {
+        customHeader.set(req.getHeader("x-a"));
+      } else {
+        try {
+          release.await(10, TimeUnit.SECONDS); // hold stream 1 open so the cap stays occupied
+        } catch (InterruptedException ignore) {
+        }
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withMaxConcurrentStreams(1)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        // Stream 1: occupies the single concurrent-stream slot; handler blocks on the latch.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        // Stream 3: refused at the cap. Its block adds "x-a: 1" to the dynamic table via literal-with-incremental-
+        // indexing (0x40, new name). RFC 9113 §4.3: the server must decode this block even though it refuses the
+        // stream.
+        byte[] literalXA = {
+            (byte) 0x40, 0x03, 'x', '-', 'a', 0x01, '1'
+        };
+        byte[] refusedBlock = new byte[MINIMAL_HPACK_GET.length + literalXA.length];
+        System.arraycopy(MINIMAL_HPACK_GET, 0, refusedBlock, 0, MINIMAL_HPACK_GET.length);
+        System.arraycopy(literalXA, 0, refusedBlock, MINIMAL_HPACK_GET.length, literalXA.length);
+        writeFrameHeader(out, refusedBlock.length, 0x1, 0x4 | 0x1, 3);
+        out.write(refusedBlock);
+        out.flush();
+        int rstCode = readUntilRstStream(in);
+        assertEquals(rstCode, 0x7, "Expected RST_STREAM(REFUSED_STREAM=0x7) at the concurrency cap; got: " + rstCode);
+
+        // Release stream 1 and let it finish so the slot frees up. NOTE: readUntilResponseHeaders returns the STREAM
+        // ID of the first response HEADERS frame, not the HTTP status (Task 2 discovered this helper contract).
+        release.countDown();
+        assertEquals(readUntilResponseHeaders(in), 1, "Expected the released stream 1 response first");
+
+        // Stream 5: references the dynamic-table entry the REFUSED block created. MINIMAL_HPACK_GET's 0x41 byte
+        // (literal with incremental indexing) adds ":authority: localhost" at index 62, pushing "x-a: 1" to index 63
+        // (0x80 | 63 = 0xBF). If the server skipped decoding stream 3's block, its table is desynchronized and this
+        // block fails (COMPRESSION_ERROR GOAWAY) or decodes the wrong header.
+        byte[] indexedBlock = new byte[MINIMAL_HPACK_GET.length + 1];
+        System.arraycopy(MINIMAL_HPACK_GET, 0, indexedBlock, 0, MINIMAL_HPACK_GET.length);
+        indexedBlock[MINIMAL_HPACK_GET.length] = (byte) 0xBF;
+        writeFrameHeader(out, indexedBlock.length, 0x1, 0x4 | 0x1, 5);
+        out.write(indexedBlock);
+        out.flush();
+
+        assertEquals(readUntilResponseHeaders(in), 5, "Expected a response on stream 5 (helper returns stream ID)");
+        assertEquals(customHeader.get(), "1", "Dynamic-table entry from the refused block must decode on stream 5");
+      }
     }
   }
 

@@ -36,7 +36,7 @@ public class HTTP2FlowControlTest {
 
   @Test
   public void send_window_decrements_and_replenishes() {
-    var s = new HTTP2Stream(1, 65535, 1000);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 1000, null, null);
     s.consumeSendWindow(400);
     assertEquals(s.sendWindow(), 600);
     s.incrementSendWindow(200);
@@ -45,13 +45,13 @@ public class HTTP2FlowControlTest {
 
   @Test
   public void send_window_underflow_throws() {
-    var s = new HTTP2Stream(1, 65535, 100);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 100, null, null);
     expectThrows(IllegalStateException.class, () -> s.consumeSendWindow(101));
   }
 
   @Test
   public void window_overflow_past_signed_int_max_throws() {
-    var s = new HTTP2Stream(1, 65535, 1);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 1, null, null);
     expectThrows(IllegalStateException.class, () -> s.incrementSendWindow(Integer.MAX_VALUE));
   }
 
@@ -60,7 +60,7 @@ public class HTTP2FlowControlTest {
   // SETTINGS-induced window decrease could land between a separate sendWindow() read and consumeSendWindow() call.
   @Test
   public void try_acquire_send_window_is_all_or_nothing() {
-    var s = new HTTP2Stream(1, 65535, 100);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 100, null, null);
     assertFalse(s.tryAcquireSendWindow(101)); // not enough credit
     assertEquals(s.sendWindow(), 100);        // consumed nothing
     assertTrue(s.tryAcquireSendWindow(60));   // enough credit
@@ -70,7 +70,7 @@ public class HTTP2FlowControlTest {
   // acquireSendWindow grants min(want, available) atomically when credit is already present, never over-consuming.
   @Test
   public void acquire_send_window_grants_min_of_want_and_available() throws Exception {
-    var s = new HTTP2Stream(1, 65535, 30);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 30, null, null);
     assertEquals(s.acquireSendWindow(100, 100), 30); // want 100, only 30 available
     assertEquals(s.sendWindow(), 0);
   }
@@ -78,7 +78,7 @@ public class HTTP2FlowControlTest {
   // acquireSendWindow blocks while the window is non-positive and resumes when a WINDOW_UPDATE replenishes it.
   @Test
   public void acquire_send_window_blocks_until_replenished() throws Exception {
-    var s = new HTTP2Stream(1, 65535, 0);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 0, null, null);
     Thread.ofVirtual().start(() -> {
       try {
         Thread.sleep(50);
@@ -97,7 +97,7 @@ public class HTTP2FlowControlTest {
   // releaseSendWindow returns credit acquired but not used (e.g. when the connection window was the tighter bound).
   @Test
   public void release_send_window_returns_unused_credit() {
-    var s = new HTTP2Stream(1, 65535, 100);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 100, null, null);
     assertTrue(s.tryAcquireSendWindow(100));
     assertEquals(s.sendWindow(), 0);
     s.releaseSendWindow(40);
@@ -106,7 +106,7 @@ public class HTTP2FlowControlTest {
 
   @Test
   public void receive_window_replenishes() {
-    var s = new HTTP2Stream(1, 1000, 65535);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 1000, 65535, null, null);
     s.consumeReceiveWindow(400);
     assertEquals(s.receiveWindow(), 600);
     s.incrementReceiveWindow(400);
@@ -118,7 +118,7 @@ public class HTTP2FlowControlTest {
     // RFC 9113 §6.9.2: when peer reduces SETTINGS_INITIAL_WINDOW_SIZE mid-connection, the delta is applied
     // to all open streams' send-windows — possibly making them negative. The writer must check
     // `available >= bytesToSend` (signed comparison) and wait for WINDOW_UPDATE rather than treating negative as an error.
-    var s = new HTTP2Stream(1, 65535, 65535);
+    var s = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 65535, null, null);
     s.consumeSendWindow(50000);                // sendWindow now 15535
     s.incrementSendWindow(-30000);             // peer reduced INITIAL_WINDOW_SIZE by 30000 → window now -14465
     assertEquals(s.sendWindow(), -14465);

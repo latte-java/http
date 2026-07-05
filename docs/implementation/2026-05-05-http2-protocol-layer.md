@@ -738,17 +738,17 @@ public class HTTP2FrameWriter {
   public void writeFrame(HTTP2Frame frame) throws IOException {
     switch (frame) {
       case DataFrame f -> writeWithPayload(FRAME_TYPE_DATA, f.flags(), f.streamId(), f.payload());
-      case HeadersFrame f -> writeWithPayload(FRAME_TYPE_HEADERS, f.flags(), f.streamId(), f.headerBlockFragment());
+      case HeadersFrame f -> writeWithPayload(FRAME_TYPE_HEADERS, f.flags(), f.streamId(), f.data());
       case PriorityFrame f -> writeWithPayload(FRAME_TYPE_PRIORITY, 0, f.streamId(), new byte[5]);
       case RstStreamFrame f -> writeWithPayload(FRAME_TYPE_RST_STREAM, 0, f.streamId(), int32(f.errorCode()));
       case SettingsFrame f -> writeWithPayload(FRAME_TYPE_SETTINGS, f.flags(), 0, f.payload());
       case PushPromiseFrame f -> {
-        byte[] payload = new byte[4 + f.headerBlockFragment().length];
+        byte[] payload = new byte[4 + f.data().length];
         writeInt32(payload, 0, f.promisedStreamId() & 0x7FFFFFFF);
-        System.arraycopy(f.headerBlockFragment(), 0, payload, 4, f.headerBlockFragment().length);
+        System.arraycopy(f.data(), 0, payload, 4, f.data().length);
         writeWithPayload(FRAME_TYPE_PUSH_PROMISE, f.flags(), f.streamId(), payload);
       }
-      case PingFrame f -> writeWithPayload(FRAME_TYPE_PING, f.flags(), 0, f.opaqueData());
+      case PingFrame f -> writeWithPayload(FRAME_TYPE_PING, f.flags(), 0, f.data());
       case GoawayFrame f -> {
         byte[] payload = new byte[8 + f.debugData().length];
         writeInt32(payload, 0, f.lastStreamId() & 0x7FFFFFFF);
@@ -758,8 +758,7 @@ public class HTTP2FrameWriter {
       }
       case WindowUpdateFrame f ->
           writeWithPayload(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), int32(f.windowSizeIncrement() & 0x7FFFFFFF));
-      case ContinuationFrame f ->
-          writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.headerBlockFragment());
+      case ContinuationFrame f -> writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.data());
       case UnknownFrame f -> writeWithPayload(f.type(), f.flags(), f.streamId(), f.payload());
     }
   }

@@ -5,6 +5,7 @@
 package org.lattejava.http.server.internal.h2;
 
 import module java.base;
+import module org.lattejava.http;
 
 import static org.lattejava.http.server.internal.h2.HTTP2Frame.*;
 
@@ -16,14 +17,81 @@ import static org.lattejava.http.server.internal.h2.HTTP2Frame.*;
  */
 public class HTTP2FrameReader {
   private final byte[] buffer;
+
   private final InputStream in;
 
-  public HTTP2FrameReader(InputStream in, byte[] buffer) {
+  private final int maxHeaderListSize;
+
+  public HTTP2FrameReader(InputStream in, byte[] buffer, int maxHeaderListSize) {
     this.in = in;
     this.buffer = buffer;
+    this.maxHeaderListSize = maxHeaderListSize;
   }
 
+  private static byte[] copyOf(byte[] src, int len) {
+    byte[] dst = new byte[len];
+    System.arraycopy(src, 0, dst, 0, len);
+    return dst;
+  }
+
+  private static byte[] copyOfRange(byte[] src, int from, int to) {
+    byte[] dst = new byte[to - from];
+    System.arraycopy(src, from, dst, 0, to - from);
+    return dst;
+  }
+
+  /**
+   * Reads the next logical frame. A HEADERS frame without END_HEADERS is assembled here: CONTINUATION frames are read
+   * and concatenated until END_HEADERS, and the returned {@link HTTP2Frame.HeadersFrame} always carries the complete
+   * header block with END_HEADERS set (END_STREAM comes from the initial HEADERS — RFC 9113 permits it nowhere else in
+   * the sequence). CONTINUATION therefore never escapes this reader.
+   */
   public HTTP2Frame readFrame() throws IOException {
+    HTTP2Frame frame = readRawFrame();
+    if (frame instanceof ContinuationFrame) {
+      // RFC 9113 §6.10: CONTINUATION with no open header block is a connection error PROTOCOL_ERROR.
+      throw new ProtocolException("CONTINUATION frame without a preceding HEADERS frame");
+    }
+
+    // Everything except headers is returned because it's a complete frame
+    if (!(frame instanceof HeadersFrame headers)) {
+      return frame;
+    }
+
+    if (headers.data().length > maxHeaderListSize) {
+      throw new HeaderListSizeException("Header block exceeds [" + maxHeaderListSize + "] bytes");
+    }
+
+    if ((headers.flags() & FLAG_END_HEADERS) != 0) {
+      return headers;
+    }
+
+    // Assemble: RFC 9113 §4.3 — the following frames MUST be CONTINUATION on the same stream, no interleaving of any
+    // other frame type or stream, until END_HEADERS.
+    @SuppressWarnings("resource")
+    FastByteArrayOutputStream accumulator = new FastByteArrayOutputStream(headers.data().length * 2, headers.data().length);
+    accumulator.write(headers.data());
+    while (true) {
+      HTTP2Frame next = readRawFrame();
+      if (!(next instanceof ContinuationFrame(int streamId, int flags, byte[] headerBlockFragment)) ||
+          streamId != headers.streamId()) {
+        throw new ProtocolException("Frame [" + next.getClass().getSimpleName() + "] on stream [" + next.streamId() +
+            "] interleaved in the header block of stream [" + headers.streamId() + "]");
+      }
+
+      accumulator.write(headerBlockFragment);
+      if (accumulator.size() > maxHeaderListSize) {
+        throw new HeaderListSizeException("Header block exceeds [" + maxHeaderListSize + "] bytes");
+      }
+
+      if ((flags & FLAG_END_HEADERS) != 0) {
+        byte[] finalBlock = accumulator.finalBytes();
+        return new HeadersFrame(headers.streamId(), headers.flags() | FLAG_END_HEADERS, finalBlock);
+      }
+    }
+  }
+
+  private HTTP2Frame readRawFrame() throws IOException {
     if (in.readNBytes(buffer, 0, 9) != 9) {
       throw new EOFException("Connection closed before frame header");
     }
@@ -127,24 +195,22 @@ public class HTTP2FrameReader {
     };
   }
 
-  private static byte[] copyOf(byte[] src, int len) {
-    byte[] dst = new byte[len];
-    System.arraycopy(src, 0, dst, 0, len);
-    return dst;
-  }
-
-  private static byte[] copyOfRange(byte[] src, int from, int to) {
-    byte[] dst = new byte[to - from];
-    System.arraycopy(src, from, dst, 0, to - from);
-    return dst;
-  }
-
   /**
    * Thrown when the frame reader detects a FRAME_SIZE_ERROR condition (RFC 9113 §6, §7). The connection handler must
    * respond with GOAWAY(FRAME_SIZE_ERROR).
    */
   public static class FrameSizeException extends IOException {
     public FrameSizeException(String message) {
+      super(message);
+    }
+  }
+
+  /**
+   * Thrown when a cumulative header block exceeds the advertised SETTINGS_MAX_HEADER_LIST_SIZE while being assembled
+   * (CVE-2024-27316 guard). The connection handler must respond with GOAWAY(ENHANCE_YOUR_CALM).
+   */
+  public static class HeaderListSizeException extends IOException {
+    public HeaderListSizeException(String message) {
       super(message);
     }
   }

@@ -42,9 +42,8 @@ public class HTTP2FrameWriter {
 
   public void writeFrame(HTTP2Frame frame) throws IOException {
     switch (frame) {
-      case ContinuationFrame f ->
-          writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.headerBlockFragment());
-      case DataFrame f -> writeWithPayload(FRAME_TYPE_DATA, f.flags(), f.streamId(), f.payload());
+      case ContinuationFrame f -> writeWithPayload(FRAME_TYPE_CONTINUATION, f.flags(), f.streamId(), f.data());
+      case DataFrame f -> writeWithPayload(FRAME_TYPE_DATA, f.flags(), f.streamId(), f.data());
       case GoawayFrame f -> {
         byte[] payload = new byte[8 + f.debugData().length];
         writeInt32(payload, 0, f.lastStreamId() & 0x7FFFFFFF);
@@ -52,32 +51,32 @@ public class HTTP2FrameWriter {
         System.arraycopy(f.debugData(), 0, payload, 8, f.debugData().length);
         writeWithPayload(FRAME_TYPE_GOAWAY, 0, 0, payload);
       }
-      case HeadersFrame f -> writeHeaderBlock(FRAME_TYPE_HEADERS, f.flags(), f.streamId(), f.headerBlockFragment());
-      case PingFrame f -> writeWithPayload(FRAME_TYPE_PING, f.flags(), 0, f.opaqueData());
+      case HeadersFrame f -> writeHeaderBlock(f.flags(), f.streamId(), f.data());
+      case PingFrame f -> writeWithPayload(FRAME_TYPE_PING, f.flags(), 0, f.data());
       case PriorityFrame f -> writeWithPayload(FRAME_TYPE_PRIORITY, 0, f.streamId(), new byte[5]);
       case PushPromiseFrame f -> {
-        byte[] payload = new byte[4 + f.headerBlockFragment().length];
+        byte[] payload = new byte[4 + f.data().length];
         writeInt32(payload, 0, f.promisedStreamId() & 0x7FFFFFFF);
-        System.arraycopy(f.headerBlockFragment(), 0, payload, 4, f.headerBlockFragment().length);
+        System.arraycopy(f.data(), 0, payload, 4, f.data().length);
         writeWithPayload(FRAME_TYPE_PUSH_PROMISE, f.flags(), f.streamId(), payload);
       }
-      case RSTStreamFrame f -> writeFixedFourByte(FRAME_TYPE_RST_STREAM, 0, f.streamId(), f.errorCode());
-      case SettingsFrame f -> writeWithPayload(FRAME_TYPE_SETTINGS, f.flags(), 0, f.payload());
-      case UnknownFrame f -> writeWithPayload(f.type(), f.flags(), f.streamId(), f.payload());
+      case RSTStreamFrame f -> writeFixedFourByte(FRAME_TYPE_RST_STREAM, f.streamId(), f.errorCode());
+      case SettingsFrame f -> writeWithPayload(FRAME_TYPE_SETTINGS, f.flags(), 0, f.data());
+      case UnknownFrame f -> writeWithPayload(f.type(), f.flags(), f.streamId(), f.data());
       case WindowUpdateFrame f ->
-          writeFixedFourByte(FRAME_TYPE_WINDOW_UPDATE, 0, f.streamId(), f.windowSizeIncrement() & 0x7FFFFFFF);
+          writeFixedFourByte(FRAME_TYPE_WINDOW_UPDATE, f.streamId(), f.windowSizeIncrement() & 0x7FFFFFFF);
     }
   }
 
   // Writes a 4-byte fixed-length frame (RST_STREAM, WINDOW_UPDATE) directly into the shared buffer
   // without allocating a payload byte[]. This is the hottest write path — every DATA frame received
   // triggers a WINDOW_UPDATE — so keeping it allocation-free matters.
-  private void writeFixedFourByte(int type, int flags, int streamId, int value) throws IOException {
+  private void writeFixedFourByte(int type, int streamId, int value) throws IOException {
     buffer[0] = 0;
     buffer[1] = 0;
     buffer[2] = 4;
     buffer[3] = (byte) type;
-    buffer[4] = (byte) flags;
+    buffer[4] = (byte) 0; // No flags
     writeInt32(buffer, 5, streamId & 0x7FFFFFFF);
     writeInt32(buffer, 9, value);
     out.write(buffer, 0, 13);
@@ -101,13 +100,15 @@ public class HTTP2FrameWriter {
    * is set on the final wire frame regardless of fragmentation. Caller flags other than END_HEADERS (e.g. END_STREAM)
    * ride on the first frame so the receiver applies them to the stream as a whole.
    */
-  private void writeHeaderBlock(int firstFrameType, int callerFlags, int streamId, byte[] block) throws IOException {
+  private void writeHeaderBlock(int callerFlags, int streamId, byte[] block) throws IOException {
     int maxPayload = buffer.length - 9;
     if (block.length <= maxPayload) {
-      writeFromBlock(firstFrameType, callerFlags | FLAG_END_HEADERS, streamId, block, 0, block.length);
+      writeFromBlock(HTTP2Frame.FRAME_TYPE_HEADERS, callerFlags | FLAG_END_HEADERS, streamId, block, 0, block.length);
       return;
     }
-    writeFromBlock(firstFrameType, callerFlags & ~FLAG_END_HEADERS, streamId, block, 0, maxPayload);
+
+    writeFromBlock(HTTP2Frame.FRAME_TYPE_HEADERS, callerFlags & ~FLAG_END_HEADERS, streamId, block, 0, maxPayload);
+
     int off = maxPayload;
     while (off < block.length) {
       int chunkLen = Math.min(maxPayload, block.length - off);

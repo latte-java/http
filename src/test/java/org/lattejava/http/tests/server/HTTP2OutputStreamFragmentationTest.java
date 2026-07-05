@@ -26,7 +26,7 @@ public class HTTP2OutputStreamFragmentationTest {
   @Test
   public void connection_window_caps_chunk_and_blocks_when_exhausted() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
-    var stream = new HTTP2Stream(1, 65535, 65535);
+    var stream = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 65535, null, null);
     var connectionWindow = new HTTP2ConnectionWindow(10);
     var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), connectionWindow, 16);
 
@@ -44,36 +44,36 @@ public class HTTP2OutputStreamFragmentationTest {
 
     var f1 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
     assertNotNull(f1, "First DATA frame should arrive within 2 seconds");
-    assertEquals(f1.payload().length, 10, "First frame capped by the 10-octet connection window");
+    assertEquals(f1.data().length, 10, "First frame capped by the 10-octet connection window");
     assertEquals(f1.flags(), 0);
 
     var f2 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
     assertNotNull(f2, "Second DATA frame should arrive after the connection WINDOW_UPDATE");
-    assertEquals(f2.payload().length, 16, "Remaining bytes fragmented by maxFrameSize");
+    assertEquals(f2.data().length, 16, "Remaining bytes fragmented by maxFrameSize");
 
     var f3 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
     assertNotNull(f3);
-    assertEquals(f3.payload().length, 4);
+    assertEquals(f3.data().length, 4);
     assertEquals(f3.flags(), HTTP2Frame.FLAG_END_STREAM);
   }
 
   @Test
   public void empty_close_emits_zero_length_end_stream() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>();
-    var stream = new HTTP2Stream(1, 65535, 65535);
+    var stream = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 65535, null, null);
     var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16384);
 
     os.close();
 
     var f = (HTTP2Frame.DataFrame) queue.take();
-    assertEquals(f.payload().length, 0);
+    assertEquals(f.data().length, 0);
     assertEquals(f.flags(), HTTP2Frame.FLAG_END_STREAM);
   }
 
   @Test
   public void large_write_fragments_against_max_frame_size() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>();
-    var stream = new HTTP2Stream(1, 65535, 65535);
+    var stream = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 65535, null, null);
     var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16); // tiny max-frame-size for test
 
     byte[] data = new byte[40];
@@ -83,29 +83,29 @@ public class HTTP2OutputStreamFragmentationTest {
 
     // Expect 3 frames: 16, 16, 8 (last with END_STREAM)
     var f1 = (HTTP2Frame.DataFrame) queue.take();
-    assertEquals(f1.payload().length, 16);
+    assertEquals(f1.data().length, 16);
     assertEquals(f1.flags(), 0);
 
     var f2 = (HTTP2Frame.DataFrame) queue.take();
-    assertEquals(f2.payload().length, 16);
+    assertEquals(f2.data().length, 16);
     assertEquals(f2.flags(), 0);
 
     var f3 = (HTTP2Frame.DataFrame) queue.take();
-    assertEquals(f3.payload().length, 8);
+    assertEquals(f3.data().length, 8);
     assertEquals(f3.flags(), HTTP2Frame.FLAG_END_STREAM);
   }
 
   @Test
   public void single_write_no_fragmentation() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>();
-    var stream = new HTTP2Stream(1, 65535, 65535);
+    var stream = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 65535, null, null);
     var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16384);
 
     os.write("hello".getBytes());
     os.close();
 
     var f1 = (HTTP2Frame.DataFrame) queue.take();
-    assertEquals(f1.payload(), "hello".getBytes());
+    assertEquals(f1.data(), "hello".getBytes());
     assertEquals(f1.flags(), HTTP2Frame.FLAG_END_STREAM, "Final frame has END_STREAM");
   }
 
@@ -118,7 +118,7 @@ public class HTTP2OutputStreamFragmentationTest {
   public void flow_control_window_one_sends_byte_by_byte() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
     // Send-window starts at 1 (SETTINGS_INITIAL_WINDOW_SIZE=1 from peer).
-    var stream = new HTTP2Stream(1, 65535, 1);
+    var stream = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 1, null, null);
     var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), 16384);
 
     // Simulate WINDOW_UPDATE arriving from a background thread after a brief delay.
@@ -141,14 +141,14 @@ public class HTTP2OutputStreamFragmentationTest {
     // Expect 2 frames: 1 byte then 1 byte (END_STREAM).
     var f1 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
     assertNotNull(f1, "First DATA frame should arrive within 2 seconds");
-    assertEquals(f1.payload().length, 1, "First frame: 1 byte (window=1)");
+    assertEquals(f1.data().length, 1, "First frame: 1 byte (window=1)");
     assertEquals(f1.flags(), 0, "First frame: no END_STREAM");
-    assertEquals(f1.payload()[0], (byte) 'o');
+    assertEquals(f1.data()[0], (byte) 'o');
 
     var f2 = (HTTP2Frame.DataFrame) queue.poll(2, java.util.concurrent.TimeUnit.SECONDS);
     assertNotNull(f2, "Second DATA frame should arrive after WINDOW_UPDATE");
-    assertEquals(f2.payload().length, 1, "Second frame: 1 byte (remaining)");
+    assertEquals(f2.data().length, 1, "Second frame: 1 byte (remaining)");
     assertEquals(f2.flags(), HTTP2Frame.FLAG_END_STREAM, "Second frame: END_STREAM");
-    assertEquals(f2.payload()[0], (byte) 'k');
+    assertEquals(f2.data()[0], (byte) 'k');
   }
 }
