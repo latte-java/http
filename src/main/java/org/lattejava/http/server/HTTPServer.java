@@ -106,7 +106,7 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
         HTTPServerAcceptorThread server = new HTTPServerAcceptorThread(configuration, context, listener);
         servers.add(server);
         server.start();
-        logger.log(Level.INFO, "HTTP server listening on port [{0}]", listener.getPort());
+        logger.log(Level.INFO, "HTTP server listening on port [{0,number,#}]", listener.getPort());
       }
 
       logger.log(Level.INFO, "HTTP server started successfully");
