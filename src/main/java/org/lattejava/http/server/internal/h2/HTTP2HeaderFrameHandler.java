@@ -84,6 +84,13 @@ public class HTTP2HeaderFrameHandler {
       return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.REFUSED_STREAM);
     }
 
+    // RFC 9113 §5.3.1 — a stream cannot depend on itself. Checked after the HPACK decode so the dynamic table stays
+    // synchronized even though the request is rejected.
+    if (f.priorityDependency() == stream.streamId()) {
+      stream.deregister();
+      return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
+    }
+
     if (!HTTP2Tools.validateHeaders(fields, false)) {
       stream.deregister();
       return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
@@ -164,6 +171,11 @@ public class HTTP2HeaderFrameHandler {
     }
 
     if (!HTTP2Tools.validateHeaders(fields, true)) {
+      return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
+    }
+
+    // RFC 9113 §5.3.1 — a stream cannot depend on itself, trailers included.
+    if (f.priorityDependency() == stream.streamId()) {
       return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
     }
 

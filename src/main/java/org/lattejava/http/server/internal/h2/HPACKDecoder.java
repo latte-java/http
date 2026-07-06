@@ -43,6 +43,10 @@ public class HPACKDecoder {
         i = pair.nextIndex();
       } else if ((b & 0x20) != 0) {
         // Dynamic table size update — §6.3; first three bits 001
+        // RFC 7541 §4.2 — size updates must occur at the beginning of a header block, before any header field.
+        if (!fields.isEmpty()) {
+          throw new IOException("HPACK dynamic table size update after [" + fields.size() + "] header fields — only legal at the beginning of a header block");
+        }
         long r = decodeInt(block, i, 5);
         int newMax = (int) (r >>> 32);
         if (newMax > maxDynamicTableSize) {

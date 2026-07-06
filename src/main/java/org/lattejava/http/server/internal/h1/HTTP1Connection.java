@@ -273,8 +273,17 @@ public class HTTP1Connection implements HTTPConnection {
       logger.log(level, "[{0}] Closing socket [{1}]. {2}.", Thread.currentThread().threadId(), state, message);
       closeSocketOnly(reason);
     } catch (ParseException e) {
-      logger.log(Level.DEBUG, "[{0}] Closing socket with status [{1}]. Bad request, failed to parse request. Reason [{2}] Parser state [{3}]", Thread.currentThread().threadId(), HTTPValues.Status.BadRequest, e.getMessage(), e.getState());
-      closeSocketOnError(response, HTTPValues.Status.BadRequest);
+      // On a dual-protocol (h2c prior-knowledge) listener, first-request bytes that parse as neither an HTTP/2
+      // preface nor an HTTP/1.1 preamble come from a client whose protocol is unknown — an HTTP/1.1 400 would be
+      // gibberish to an HTTP/2-speaking client, so terminate silently (RFC 9113 §3.4 permits closing without a
+      // GOAWAY). Once a request has been handled the client has proven it speaks HTTP/1.1 and gets the 400.
+      if (listener.isH2cPriorKnowledgeEnabled() && handledRequests == 0) {
+        logger.log(Level.DEBUG, "[{0}] Closing socket. First bytes on a dual-protocol listener were neither an HTTP/2 preface nor a parseable HTTP/1.1 request. Reason [{1}] Parser state [{2}]", Thread.currentThread().threadId(), e.getMessage(), e.getState());
+        closeSocketOnly(CloseSocketReason.Unexpected);
+      } else {
+        logger.log(Level.DEBUG, "[{0}] Closing socket with status [{1}]. Bad request, failed to parse request. Reason [{2}] Parser state [{3}]", Thread.currentThread().threadId(), HTTPValues.Status.BadRequest, e.getMessage(), e.getState());
+        closeSocketOnError(response, HTTPValues.Status.BadRequest);
+      }
     } catch (SocketException e) {
       // When the HTTPServerAcceptorThread shuts down, we will interrupt each client thread, so debug log it accordingly.
       // - This will cause the socket to throw a SocketException, so log it.
@@ -325,11 +334,10 @@ public class HTTP1Connection implements HTTPConnection {
       // If the conditions are perfect, we can still write back a status code.
       // - If the response is committed, someone already wrote to the client so we can't affect the response status, headers, etc.
       if (response != null && !response.isCommitted()) {
-        // Note that we are intentionally not purging the InputStream prior to writing the response. In the most ideal sense, purging
-        // the input stream would allow the client to read this response more easily. However, most of the error conditions that would cause
-        // this path are malformed requests or potentially malicious payloads.
-        // It is still possible to read a response, the client simply needs to handle the socket reset, and reconnect to read the response.
-        // - Perhaps this is not common, but it is possible.
+        // Note that we are intentionally not purging the InputStream prior to writing the response — most of the error
+        // conditions that reach this path are malformed requests or potentially malicious payloads, so an unbounded
+        // purge here would be a DoS vector. closeSocketOnly performs a bounded drain after this response is written so
+        // that the close is a clean FIN and the client can read the response before EOF.
 
         // Note that reset() clears the Connection response header.
         response.reset();
@@ -349,6 +357,33 @@ public class HTTP1Connection implements HTTPConnection {
   private void closeSocketOnly(CloseSocketReason reason) {
     if (reason == CloseSocketReason.Unexpected && instrumenter != null) {
       instrumenter.connectionClosed();
+    }
+
+    // Error-path closes race unread request bytes: close() with data pending in the kernel receive buffer makes the
+    // OS emit a TCP RST instead of a clean FIN, and the RST can also destroy an error response before the client
+    // reads it. Send our FIN first, then drain a bounded amount so the close is clean. Expected closes (keep-alive
+    // expiry, deliberately abandoned drains) skip this — no response is in flight, and the drain would add latency
+    // or resume a drain that TooManyBytesToDrainException chose to abandon.
+    if (reason == CloseSocketReason.Unexpected) {
+      try {
+        socket.shutdownOutput();
+      } catch (Exception ignore) {
+        // Already closed, or an SSLSocket (shutdownOutput unsupported) — proceed to close.
+      }
+      try {
+        socket.setSoTimeout(50);
+        InputStream in = socket.getInputStream();
+        byte[] scrap = new byte[4096];
+        // Iteration-bounded (not byte-bounded) so a byte-at-a-time trickler cannot hold the drain open: at most
+        // 16 reads x 50 ms = 800 ms and 64 KB, whichever a hostile client hits first.
+        for (int i = 0; i < 16; i++) {
+          if (in.read(scrap) < 0) {
+            break;
+          }
+        }
+      } catch (IOException ignore) {
+        // Timed out waiting for more bytes, or the socket is already dead — either way, close now.
+      }
     }
 
     try {

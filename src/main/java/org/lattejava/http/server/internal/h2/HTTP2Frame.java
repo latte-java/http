@@ -66,7 +66,11 @@ public sealed interface HTTP2Frame {
     }
   }
 
-  record HeadersFrame(int streamId, int flags, byte[] data) implements HTTP2Frame {
+  record HeadersFrame(int streamId, int flags, byte[] data, int priorityDependency) implements HTTP2Frame {
+    /** Outbound frames and header blocks without the PRIORITY flag carry no stream dependency. */
+    public HeadersFrame(int streamId, int flags, byte[] data) {
+      this(streamId, flags, data, -1);
+    }
   }
 
   record PingFrame(int flags, byte[] data) implements HTTP2Frame {
@@ -75,7 +79,7 @@ public sealed interface HTTP2Frame {
     }
   }
 
-  record PriorityFrame(int streamId) implements HTTP2Frame {
+  record PriorityFrame(int streamId, int streamDependency) implements HTTP2Frame {
     public int flags() {
       return 0;
     }

@@ -21,17 +21,13 @@ import static org.testng.Assert.*;
 public class H2SpecHarnessTest extends BaseTest {
   private static final Path H2SPEC_BIN = Path.of("build/h2spec");
 
-  // Known failures as of 2026-05-21 — see docs/design/2026-05-05-HTTP2.md §"Bug ledger". Pinning the exact set so that:
+  // Known failures as of 2026-07-06 — see docs/design/2026-05-05-HTTP2.md §"Bug ledger". Pinning the exact set so that:
   //   - Any drift (a new failure or a fixed test that newly passes) breaks this assertion and forces an
   //     intentional update to both this set AND 2026-05-05-HTTP2.md's bug ledger.
   //   - Adversarial regressions on tests we currently pass also fail loudly.
   // Each entry is the section name as it appears in h2spec's JUnit report. Pattern is "<section> / <description>".
   // Specific descriptions can be found in build/h2spec-report.xml after a real run.
-  private static final Set<String> KNOWN_FAILING_SECTIONS = Set.of(
-      "6.5.3", // Settings Synchronization
-      "6.9.1", // The Flow-Control Window (mid-stream window=1)
-      "6.9.2"  // Initial Flow-Control Window Size (mid-stream INITIAL_WINDOW_SIZE decrease)
-  );
+  private static final Set<String> KNOWN_FAILING_SECTIONS = Set.of();
 
   @Test(groups = "h2spec")
   public void run_h2spec() throws Exception {

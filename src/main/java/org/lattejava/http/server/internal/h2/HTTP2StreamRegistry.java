@@ -11,9 +11,9 @@ import module java.base;
  * the MAX_CONCURRENT_STREAMS bound. The registry classifies stream IDs and materializes stream objects — it never
  * interprets frames; all frame policy lives in {@link HTTP2Stream}.
  *
- * <p>Threading: {@link #lookup}, {@link #open}, and {@link #close} are reader-thread-only. {@link #remove} may be
- * called from handler virtual-threads (completion cleanup). {@link #highestSeenStreamId()} is read by the acceptor
- * thread during shutdown.
+ * <p>Threading: {@link #lookup} and {@link #open} are reader-thread-only. {@link #remove} and {@link #close} may be
+ * called from handler virtual-threads (completion cleanup), so recently-closed memory is guarded by its own lock.
+ * {@link #highestSeenStreamId()} is read by the acceptor thread during shutdown.
  */
 public class HTTP2StreamRegistry {
   private static final int MAX_RECENTLY_CLOSED = 100;
@@ -37,14 +37,16 @@ public class HTTP2StreamRegistry {
   }
 
   /**
-   * Removes {@code streamId} from the roster and records it in recently-closed memory (reader thread only — the
-   * RST_STREAM path). Contrast with {@link #remove}, which leaves no memory.
+   * Removes {@code streamId} from the roster and records it in recently-closed memory (the RST_STREAM path and
+   * fully-closed handler completion). Contrast with {@link #remove}, which leaves no memory.
    */
   public void close(int streamId) {
     openStreams.remove(streamId);
-    recentlyClosed.addLast(streamId);
-    if (recentlyClosed.size() > MAX_RECENTLY_CLOSED) {
-      recentlyClosed.removeFirst();
+    synchronized (recentlyClosed) {
+      recentlyClosed.addLast(streamId);
+      if (recentlyClosed.size() > MAX_RECENTLY_CLOSED) {
+        recentlyClosed.removeFirst();
+      }
     }
   }
 
@@ -66,7 +68,11 @@ public class HTTP2StreamRegistry {
       return stream;
     }
 
-    if (recentlyClosed.contains(streamId)) {
+    boolean rememberedClosed;
+    synchronized (recentlyClosed) {
+      rememberedClosed = recentlyClosed.contains(streamId);
+    }
+    if (rememberedClosed) {
       return materialize(streamId, HTTP2Stream.State.CLOSED, true);
     }
 

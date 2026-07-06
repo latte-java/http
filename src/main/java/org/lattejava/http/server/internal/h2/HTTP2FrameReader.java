@@ -86,7 +86,7 @@ public class HTTP2FrameReader {
 
       if ((flags & FLAG_END_HEADERS) != 0) {
         byte[] finalBlock = accumulator.finalBytes();
-        return new HeadersFrame(headers.streamId(), headers.flags() | FLAG_END_HEADERS, finalBlock);
+        return new HeadersFrame(headers.streamId(), headers.flags() | FLAG_END_HEADERS, finalBlock, headers.priorityDependency());
       }
     }
   }
@@ -137,16 +137,24 @@ public class HTTP2FrameReader {
             throw new ProtocolException("HEADERS pad length exceeds frame payload length [" + length + "]");
           }
         }
+        int priorityDependency = -1;
         if ((flags & FLAG_PRIORITY) != 0) {
-          hdrOff += 5; // 4 bytes stream dependency + 1 byte weight
+          // RFC 9113 §6.2: exclusive bit + 31-bit stream dependency (4 bytes) + weight (1 byte).
+          if (hdrEnd - hdrOff < 5) {
+            throw new FrameSizeException("HEADERS with the PRIORITY flag requires 5 priority bytes; got [" + (hdrEnd - hdrOff) + "]");
+          }
+          priorityDependency = ((buffer[hdrOff] & 0x7F) << 24) | ((buffer[hdrOff + 1] & 0xFF) << 16) |
+              ((buffer[hdrOff + 2] & 0xFF) << 8) | (buffer[hdrOff + 3] & 0xFF);
+          hdrOff += 5;
         }
-        yield new HeadersFrame(streamId, flags, copyOfRange(buffer, hdrOff, Math.max(hdrOff, hdrEnd)));
+        yield new HeadersFrame(streamId, flags, copyOfRange(buffer, hdrOff, hdrEnd), priorityDependency);
       }
       case FRAME_TYPE_PRIORITY -> {
         if (length != 5) throw new FrameSizeException("PRIORITY payload must be 5; got [" + length + "]");
         // RFC 9113 §6.3: PRIORITY must have a non-zero stream ID.
         if (streamId == 0) throw new ProtocolException("PRIORITY frame with stream ID 0");
-        yield new PriorityFrame(streamId);
+        int dependency = ((buffer[0] & 0x7F) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
+        yield new PriorityFrame(streamId, dependency);
       }
       case FRAME_TYPE_RST_STREAM -> {
         if (length != 4) throw new FrameSizeException("RST_STREAM payload must be 4; got [" + length + "]");

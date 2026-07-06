@@ -90,7 +90,8 @@ public class HTTP2Stream implements HTTP2FrameHandler {
   }
 
   /**
-   * Removes this stream from the roster and records closed-stream memory. Reader thread only.
+   * Removes this stream from the roster and records closed-stream memory. Called from the reader thread (RST_STREAM
+   * path) and from handler virtual-threads (fully-closed completion path).
    */
   public void close() {
     registry.close(streamId);
@@ -123,7 +124,9 @@ public class HTTP2Stream implements HTTP2FrameHandler {
       case HTTP2Frame.DataFrame f -> handleData(f);
       case HTTP2Frame.WindowUpdateFrame f -> handleWindowUpdate(f);
       case HTTP2Frame.RSTStreamFrame f -> handleRST(f);
-      case HTTP2Frame.PriorityFrame ignored -> HTTP2Result.OK; // §5.3 advisory, legal in every state
+      case HTTP2Frame.PriorityFrame f -> f.streamDependency() == streamId
+          ? new HTTP2Result.StreamError(streamId, HTTP2ErrorCode.PROTOCOL_ERROR) // §5.3.1 — a stream cannot depend on itself
+          : HTTP2Result.OK;                                                      // §5.3 advisory, legal in every state
       case HTTP2Frame.PushPromiseFrame ignored -> new HTTP2Result.ConnectionError(HTTP2ErrorCode.PROTOCOL_ERROR);
       default -> HTTP2Result.OK; // UnknownFrame §5.5; SETTINGS/PING/GOAWAY never route here
     };
@@ -216,7 +219,7 @@ public class HTTP2Stream implements HTTP2FrameHandler {
           : new HTTP2Result.ConnectionError(HTTP2ErrorCode.PROTOCOL_ERROR); // §5.1.1 monotonicity
       case OPEN, HALF_CLOSED_LOCAL -> (f.flags() & HTTP2Frame.FLAG_END_STREAM) != 0
           ? handlers.headerHandler().handleTrailers(this, f)
-          : new HTTP2Result.StreamError(streamId, HTTP2ErrorCode.STREAM_CLOSED); // §8.1 — not trailers, not legal
+          : new HTTP2Result.StreamError(streamId, HTTP2ErrorCode.PROTOCOL_ERROR); // §8.1 — trailers without END_STREAM are malformed
       case HALF_CLOSED_REMOTE -> new HTTP2Result.StreamError(streamId, HTTP2ErrorCode.STREAM_CLOSED); // §5.1
     };
   }

@@ -76,7 +76,14 @@ public class HTTP2HandlerDelegate implements Runnable {
         // cancels it. Not an error — this is normal during graceful teardown or test probing.
       }
 
-      stream.deregister();
+      // A stream that closed in both directions (client END_STREAM + our END_STREAM) is remembered so a late frame
+      // on it raises STREAM_CLOSED (RFC 9113 §5.1). When the client half is still open (we responded early), the
+      // stream is forgotten instead — DATA still in flight from the client must be ignored, not treated as an error.
+      if (stream.state() == HTTP2Stream.State.CLOSED) {
+        stream.close();
+      } else {
+        stream.deregister();
+      }
     } catch (HTTPProcessingException e) {
       // Expected processing errors (e.g. ContentTooLargeException → 413). Send a proper HTTP error response
       // so the client receives the status code rather than a RST_STREAM(INTERNAL_ERROR).

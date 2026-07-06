@@ -883,11 +883,11 @@ public class HTTP2RawFrameTest extends BaseHTTP2RawTest {
   }
 
   /**
-   * RFC 9113 §8.1 — a second HEADERS on an open stream without END_STREAM is not trailers and must produce
-   * RST_STREAM(STREAM_CLOSED=0x5) on that stream, not a connection error.
+   * RFC 9113 §8.1 — a second HEADERS on an open stream without END_STREAM is not trailers and must produce a stream
+   * error of type PROTOCOL_ERROR on that stream (h2spec http2/8.1/1), not a connection error.
    */
   @Test
-  public void mid_stream_headers_without_end_stream_triggers_rst_stream_closed() throws Exception {
+  public void mid_stream_headers_without_end_stream_triggers_rst_stream_protocol_error() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
@@ -903,7 +903,7 @@ public class HTTP2RawFrameTest extends BaseHTTP2RawTest {
 
         sock.setSoTimeout(5000);
         int errorCode = readUntilRstStream(sock.getInputStream());
-        assertEquals(errorCode, 0x5, "Expected RST_STREAM(STREAM_CLOSED=0x5) for mid-stream HEADERS; got: " + errorCode);
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for mid-stream HEADERS; got: " + errorCode);
       }
     }
   }
