@@ -7,6 +7,8 @@ package org.lattejava.http.server.internal;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 /**
  * Runs on the per-connection virtual thread. Performs protocol selection (the TLS-ALPN handshake or the h2c preface
  * peek) off the accept thread, then delegates to the resolved
@@ -21,6 +23,8 @@ import module org.lattejava.http;
  * @author Brian Pontarelli
  */
 public class ConnectionDispatcher implements HTTPConnection {
+  private static final System.Logger logger = System.getLogger(ConnectionDispatcher.class.getName());
+
   private final HTTPServerConfiguration configuration;
 
   private final HTTPContext context;
@@ -28,8 +32,6 @@ public class ConnectionDispatcher implements HTTPConnection {
   private final Instrumenter instrumenter;
 
   private final HTTPListenerConfiguration listener;
-
-  private final Logger logger;
 
   private final Socket socket;
 
@@ -47,7 +49,6 @@ public class ConnectionDispatcher implements HTTPConnection {
     this.instrumenter = instrumenter;
     this.listener = listener;
     this.throughput = throughput;
-    this.logger = configuration.getLoggerFactory().getLogger(ConnectionDispatcher.class);
     this.startInstant = System.currentTimeMillis();
   }
 
@@ -80,7 +81,7 @@ public class ConnectionDispatcher implements HTTPConnection {
       // Protocol selection failed: TLS handshake error, h2c-preface peek error, or a slow-loris client that never
       // finished the handshake within the initial-read SO_TIMEOUT. Close the socket so the file descriptor does not
       // leak; the reaper removes this now-dead thread on its next pass.
-      logger.debug("Protocol selection failed; closing socket", e);
+      logger.log(Level.DEBUG, "Protocol selection failed; closing socket", e);
       try {
         socket.close();
       } catch (IOException ignore) {

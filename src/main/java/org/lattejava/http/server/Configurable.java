@@ -149,18 +149,6 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the logger factory that all the HTTP server classes use to retrieve specific loggers. Defaults to the
-   * {@link SystemOutLoggerFactory}.
-   *
-   * @param loggerFactory The factory.
-   * @return This.
-   */
-  default T withLoggerFactory(LoggerFactory loggerFactory) {
-    configuration().withLoggerFactory(loggerFactory);
-    return (T) this;
-  }
-
-  /**
    * Sets the maximum number of pending socket connections per HTTP listener.
    * <p>
    * This number represents how many pending socket connections are allowed to queue before they are rejected. Once the

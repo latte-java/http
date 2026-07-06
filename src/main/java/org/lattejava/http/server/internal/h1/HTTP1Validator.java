@@ -6,12 +6,16 @@ package org.lattejava.http.server.internal.h1;
 
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 /**
  * Validates HTTP/1.x requests.
  *
  * @author Brian Pontarelli
  */
 public final class HTTP1Validator {
+  private static final System.Logger logger = System.getLogger(HTTP1Validator.class.getName());
+
   private HTTP1Validator() {
   }
 
@@ -19,23 +23,22 @@ public final class HTTP1Validator {
    * Validates the preamble of an HTTP/1.x request.
    *
    * @param request The request to validate.
-   * @param logger The logger to use.
    * @return An error status if the request is invalid, otherwise {@code null}.
    */
-  static Integer validatePreamble(HTTPRequest request, Logger logger) {
-    var debugEnabled = logger.isDebugEnabled();
+  static Integer validatePreamble(HTTPRequest request) {
+    var debugEnabled = logger.isLoggable(Level.DEBUG);
 
     // Validate protocol. Protocol version is required.
     String protocol = request.getProtocol();
     if (protocol == null) {
-      logger.debug("Invalid request. Missing HTTP Protocol");
+      logger.log(Level.DEBUG, "Invalid request. Missing HTTP Protocol");
       return HTTPValues.Status.BadRequest;
     }
 
     // Only HTTP/ protocol is supported.
     if (!protocol.startsWith("HTTP/")) {
       if (debugEnabled) {
-        logger.debug("Invalid request. Invalid protocol [{}]. Supported versions [{}].", protocol, HTTPValues.Protocols.HTTTP1_1);
+        logger.log(Level.DEBUG, "Invalid request. Invalid protocol [{0}]. Supported versions [{1}].", protocol, HTTPValues.Protocols.HTTTP1_1);
       }
 
       return HTTPValues.Status.BadRequest;
@@ -44,7 +47,7 @@ public final class HTTP1Validator {
     // Minor versions less than 1 are allowed per spec. For example, HTTP/1.0 should be allowed and is considered to be compatible enough.
     if (!protocol.equals("HTTP/1.0") && !protocol.equals("HTTP/1.1")) {
       if (debugEnabled) {
-        logger.debug("Invalid request. Unsupported HTTP version [{}]. Supported versions [{}].", protocol, HTTPValues.Protocols.HTTTP1_1);
+        logger.log(Level.DEBUG, "Invalid request. Unsupported HTTP version [{0}]. Supported versions [{1}].", protocol, HTTPValues.Protocols.HTTTP1_1);
       }
 
       return HTTPValues.Status.HTTPVersionNotSupported;
@@ -53,14 +56,14 @@ public final class HTTP1Validator {
     // Host header is required
     var host = request.getRawHost();
     if (host == null) {
-      logger.debug("Invalid request. Missing Host header.");
+      logger.log(Level.DEBUG, "Invalid request. Missing Host header.");
       return HTTPValues.Status.BadRequest;
     }
 
     var hostHeaders = request.getHeaders(HTTPValues.Headers.Host);
     if (hostHeaders.size() != 1) {
       if (debugEnabled) {
-        logger.debug("Invalid request. Duplicate Host headers. [{}]", String.join(", ", hostHeaders));
+        logger.log(Level.DEBUG, "Invalid request. Duplicate Host headers. [{0}]", String.join(", ", hostHeaders));
       }
 
       return HTTPValues.Status.BadRequest;
@@ -75,7 +78,7 @@ public final class HTTP1Validator {
     if (transferEncodingHeaders != null && !transferEncodingHeaders.isEmpty()) {
       if (transferEncodingHeaders.size() != 1) {
         if (debugEnabled) {
-          logger.debug("Invalid request. Multiple Transfer-Encoding headers. [{}]", String.join(", ", transferEncodingHeaders));
+          logger.log(Level.DEBUG, "Invalid request. Multiple Transfer-Encoding headers. [{0}]", String.join(", ", transferEncodingHeaders));
         }
 
         return HTTPValues.Status.BadRequest;
@@ -84,7 +87,7 @@ public final class HTTP1Validator {
       String rawTransferEncoding = transferEncodingHeaders.getFirst();
       if (!HTTPValues.TransferEncodings.Chunked.equalsIgnoreCase(rawTransferEncoding.trim())) {
         if (debugEnabled) {
-          logger.debug("Invalid request. Unsupported Transfer-Encoding. [{}]", rawTransferEncoding);
+          logger.log(Level.DEBUG, "Invalid request. Unsupported Transfer-Encoding. [{0}]", rawTransferEncoding);
         }
 
         return HTTPValues.Status.BadRequest;
@@ -92,7 +95,7 @@ public final class HTTP1Validator {
 
       if (request.getHeader(HTTPValues.Headers.ContentLength) != null) {
         if (debugEnabled) {
-          logger.debug("Invalid request. Both Transfer-Encoding and Content-Length present. [{}] [{}]", rawTransferEncoding, request.getHeader(HTTPValues.Headers.ContentLength));
+          logger.log(Level.DEBUG, "Invalid request. Both Transfer-Encoding and Content-Length present. [{0}] [{1}]", rawTransferEncoding, request.getHeader(HTTPValues.Headers.ContentLength));
         }
 
         return HTTPValues.Status.BadRequest;
@@ -108,7 +111,7 @@ public final class HTTP1Validator {
       if (requestedContentLengthHeaders != null) {
         if (requestedContentLengthHeaders.size() != 1) {
           if (debugEnabled) {
-            logger.debug("Invalid request. Duplicate Content-Length headers. [{}]", String.join(", ", requestedContentLengthHeaders));
+            logger.log(Level.DEBUG, "Invalid request. Duplicate Content-Length headers. [{0}]", String.join(", ", requestedContentLengthHeaders));
           }
 
           // If we cannot trust the Content-Length it is unlikely we can correctly drain the InputStream in order for the client to read our response.
@@ -118,7 +121,7 @@ public final class HTTP1Validator {
         var contentLength = request.getContentLength();
         if (contentLength == null || contentLength < 0) {
           if (debugEnabled) {
-            logger.debug("Invalid request. The Content-Length must be >= 0 and <= 9,223,372,036,854,775,807. [{}]", requestedContentLengthHeaders.getFirst());
+            logger.log(Level.DEBUG, "Invalid request. The Content-Length must be >= 0 and <= 9,223,372,036,854,775,807. [{0}]", requestedContentLengthHeaders.getFirst());
           }
 
           // If we cannot trust the Content-Length it is unlikely we can correctly drain the InputStream in order for the client to read our response.
@@ -135,7 +138,7 @@ public final class HTTP1Validator {
         // Note that while we do not expect multiple Content-Encoding headers, the last one will be used. For good measure,
         // use the last one in the debug message as well.
         var contentEncodingHeader = request.getHeaders(HTTPValues.Headers.ContentEncoding).getLast();
-        logger.debug("Invalid request. The Content-Type header contains an un-supported value. [{}]", contentEncodingHeader);
+        logger.log(Level.DEBUG, "Invalid request. The Content-Type header contains an un-supported value. [{0}]", contentEncodingHeader);
         return HTTPValues.Status.UnsupportedMediaType;
       }
     }

@@ -16,13 +16,13 @@
 package org.lattejava.http.server.io;
 
 import java.io.*;
+import java.lang.System.Logger.Level;
 import java.util.zip.*;
 
 import org.lattejava.http.*;
 import org.lattejava.http.HTTPValues.*;
 import org.lattejava.http.io.*;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.log.*;
 import org.lattejava.http.server.*;
 
 /**
@@ -33,13 +33,13 @@ import org.lattejava.http.server.*;
  * @author Brian Pontarelli
  */
 public class HTTPInputStream extends InputStream {
+  private static final System.Logger logger = System.getLogger(HTTPInputStream.class.getName());
+
   private final byte[] b1 = new byte[1];
 
   private final int chunkedBufferSize;
 
   private final Instrumenter instrumenter;
-
-  private final Logger logger;
 
   private final int maxRequestChunkSize;
 
@@ -67,7 +67,6 @@ public class HTTPInputStream extends InputStream {
 
   public HTTPInputStream(HTTPServerConfiguration configuration, HTTPRequest request, PushbackInputStream pushbackInputStream,
                          long maximumContentLength) {
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPInputStream.class);
     this.instrumenter = configuration.getInstrumenter();
     this.request = request;
     this.delegate = pushbackInputStream;
@@ -84,7 +83,6 @@ public class HTTPInputStream extends InputStream {
    * method that would otherwise dereference them.
    */
   protected HTTPInputStream() {
-    this.logger = null;
     this.instrumenter = null;
     this.request = null;
     this.delegate = null;
@@ -208,7 +206,7 @@ public class HTTPInputStream extends InputStream {
       // Transfer-Encoding always takes precedence over Content-Length. In practice if they were to both be present on
       // the request we would have removed Content-Length during validation to remove ambiguity. See HTTP1Connection.validatePreamble.
       if (request.isChunked()) {
-        logger.trace("Client indicated it was sending an entity-body in the request. Handling body using chunked encoding.");
+        logger.log(Level.TRACE, "Client indicated it was sending an entity-body in the request. Handling body using chunked encoding.");
         ChunkedInputStream chunked = new ChunkedInputStream(pushbackInputStream, chunkedBufferSize, maxRequestChunkSize);
         chunkedDelegate = chunked;
         delegate = chunked;
@@ -222,7 +220,7 @@ public class HTTPInputStream extends InputStream {
         // delivered, breaking RFC 9113 §8.1 trailer semantics.
         delegate = pushbackInputStream;
       } else {
-        logger.trace("Client indicated it was sending an entity-body in the request. Handling body using Content-Length header {}.", contentLength);
+        logger.log(Level.TRACE, "Client indicated it was sending an entity-body in the request. Handling body using Content-Length header [{0}].", contentLength);
         delegate = new FixedLengthInputStream(pushbackInputStream, contentLength);
       }
 
@@ -256,7 +254,7 @@ public class HTTPInputStream extends InputStream {
       if (request.isHTTP2()) {
         delegate = pushbackInputStream;
       } else {
-        logger.trace("Client indicated it was NOT sending an entity-body in the request");
+        logger.log(Level.TRACE, "Client indicated it was NOT sending an entity-body in the request");
         delegate = InputStream.nullInputStream();
       }
     }

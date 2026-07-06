@@ -7,6 +7,8 @@ package org.lattejava.http.server.internal.h2;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 import org.lattejava.http.server.internal.*;
 
 /**
@@ -14,6 +16,8 @@ import org.lattejava.http.server.internal.*;
  * and HTTPRequest construction from a decoded header list. All methods are pure given their parameters.
  */
 public final class HTTP2Tools {
+  private static final System.Logger logger = System.getLogger(HTTP2Tools.class.getName());
+
   private HTTP2Tools() {
   }
 
@@ -26,7 +30,7 @@ public final class HTTP2Tools {
    */
   public static HTTP2Result negotiateSettings(HTTP2FrameReader reader, HTTP2FrameWriter frameWriter, OutputStream out,
                                               HTTP2Settings localSettings, HTTP2Settings peerSettings,
-                                              int connectionWindowSize, Logger logger)
+                                              int connectionWindowSize)
       throws IOException {
     frameWriter.writeFrame(new HTTP2Frame.SettingsFrame(0, localSettings.toPayload()));
     // RFC 9113 §6.9.2 — the connection window is only adjustable via WINDOW_UPDATE, and the grant is causally
@@ -41,24 +45,24 @@ public final class HTTP2Tools {
     try {
       firstFrame = reader.readFrame();
     } catch (HTTP2FrameReader.FrameSizeException e) {
-      logger.debug("Frame size violation before SETTINGS: [{}]", e.getMessage());
+      logger.log(Level.DEBUG, "Frame size violation before SETTINGS: [{0}]", e.getMessage());
       return new HTTP2Result.ConnectionError(HTTP2ErrorCode.FRAME_SIZE_ERROR);
     } catch (HTTP2FrameReader.HeaderListSizeException e) {
       return new HTTP2Result.ConnectionError(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
     } catch (HTTP2FrameReader.ProtocolException e) {
-      logger.debug("Protocol violation before SETTINGS: [{}]", e.getMessage());
+      logger.log(Level.DEBUG, "Protocol violation before SETTINGS: [{0}]", e.getMessage());
       return new HTTP2Result.ConnectionError(HTTP2ErrorCode.PROTOCOL_ERROR);
     }
 
     if (!(firstFrame instanceof HTTP2Frame.SettingsFrame(int flags, byte[] payload)) || (flags & HTTP2Frame.FLAG_ACK) != 0) {
-      logger.debug("Expected client SETTINGS frame after preface");
+      logger.log(Level.DEBUG, "Expected client SETTINGS frame after preface");
       return new HTTP2Result.ConnectionError(HTTP2ErrorCode.PROTOCOL_ERROR);
     }
 
     try {
       peerSettings.applyPayload(payload);
     } catch (HTTP2Settings.HTTP2SettingsException e) {
-      logger.debug("Invalid client SETTINGS: [{}]", e.getMessage());
+      logger.log(Level.DEBUG, "Invalid client SETTINGS: [{0}]", e.getMessage());
       return new HTTP2Result.ConnectionError(e.errorCode);
     }
 

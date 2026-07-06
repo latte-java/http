@@ -18,13 +18,15 @@ package org.lattejava.http.util;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
 
 public final class HTTPTools {
-  private static final boolean[] TOKEN_CHARS = buildTokenCharTable();
+  private static final System.Logger logger = System.getLogger(HTTPTools.class.getName());
 
-  private static Logger logger;
+  private static final boolean[] TOKEN_CHARS = buildTokenCharTable();
 
   /**
    * Lowercases an HTTP header-name-style string with no allocation when the input is already lowercase ASCII.
@@ -79,15 +81,6 @@ public final class HTTPTools {
     return maximumSize != null
         ? maximumSize
         : maxRequestBodySize.get("*");
-  }
-
-  /**
-   * Statically sets up the logger, mostly for trace logging.
-   *
-   * @param loggerFactory The logger factory.
-   */
-  public static void initialize(LoggerFactory loggerFactory) {
-    HTTPTools.logger = loggerFactory.getLogger(HTTPTools.class);
   }
 
   /**
@@ -467,7 +460,7 @@ public final class HTTPTools {
         throw new ConnectionClosedException(String.format("Read returned [%d] after waiting [%d] ms", read, waited));
       }
 
-      logger.trace("Read [{}] from client for preamble.", read);
+      logger.log(Level.TRACE, "Read [{0}] from client for preamble.", read);
 
       // Tell the callback that we've read at least one byte
       if (preambleLength == 0) {

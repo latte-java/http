@@ -6,7 +6,8 @@ package org.lattejava.http.server.internal.h2;
 
 import module java.base;
 
-import org.lattejava.http.log.Logger;
+import java.lang.System.Logger.Level;
+
 import org.lattejava.http.server.HTTP2Configuration;
 
 /**
@@ -14,19 +15,17 @@ import org.lattejava.http.server.HTTP2Configuration;
  * rejection, and idle/closed/half-closed-remote state checks; this handler processes only streams with a body pipe.
  */
 public class HTTP2DataFrameHandler {
+  private static final System.Logger logger = System.getLogger(HTTP2DataFrameHandler.class.getName());
+
   private final HTTP2Configuration http2Configuration;
 
   private final HTTP2Settings localSettings;
 
-  private final Logger logger;
-
   private final HTTP2WriterThread writer;
 
-  public HTTP2DataFrameHandler(HTTP2Configuration http2Configuration, HTTP2Settings localSettings, Logger logger,
-                               HTTP2WriterThread writer) {
+  public HTTP2DataFrameHandler(HTTP2Configuration http2Configuration, HTTP2Settings localSettings, HTTP2WriterThread writer) {
     this.http2Configuration = http2Configuration;
     this.localSettings = localSettings;
-    this.logger = logger;
     this.writer = writer;
   }
 
@@ -56,8 +55,7 @@ public class HTTP2DataFrameHandler {
             // RFC 9113 §5.2 flow control is the intended back-pressure mechanism — but if a handler is not consuming
             // its body at all (stuck or buggy), the per-stream pipe fills and blocking the reader thread would freeze
             // every other stream on this connection. Cancel the offending stream instead.
-            logger.debug("h2 handler on stream [{}] did not consume body within [{}ms]; sending RST_STREAM(CANCEL)",
-                stream.streamId(), timeoutMs);
+            logger.log(Level.DEBUG, "h2 handler on stream [{0}] did not consume body within [{1}ms]; sending RST_STREAM(CANCEL)", stream.streamId(), timeoutMs);
             stream.deregister();
             return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.CANCEL);
           }

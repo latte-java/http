@@ -18,6 +18,8 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 import org.lattejava.http.io.MultipartConfiguration;
 import org.lattejava.http.io.MultipartFileUploadPolicy;
 import org.lattejava.http.server.internal.*;
@@ -29,19 +31,19 @@ import org.lattejava.http.server.internal.*;
  */
 @SuppressWarnings("unused")
 public class HTTPServer implements Closeable, Configurable<HTTPServer> {
+  private static final System.Logger logger = System.getLogger(HTTPServer.class.getName());
+
   private final List<HTTPServerAcceptorThread> servers = new ArrayList<>();
 
   private HTTPServerConfiguration configuration = new HTTPServerConfiguration();
 
   private volatile HTTPContext context;
 
-  private Logger logger;
-
   @Override
   public void close() {
     long start = System.currentTimeMillis();
     long shutdownDuration = configuration.getShutdownDuration().toMillis();
-    logger.info("HTTP server shutdown requested. Attempting to close each listener. Wait up to [{}] ms.", shutdownDuration);
+    logger.log(Level.INFO, "HTTP server shutdown requested. Attempting to close each listener. Wait up to [{0}] ms.", shutdownDuration);
 
     // First, shutdown all the threads
     for (HTTPServerAcceptorThread thread : servers) {
@@ -62,7 +64,7 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
       }
     }
 
-    logger.info("HTTP server shutdown successfully.");
+    logger.log(Level.INFO, "HTTP server shutdown successfully.");
   }
 
   @Override
@@ -95,11 +97,7 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
 
     validateConfiguration();
 
-    // Set up the server logger and the static loggers
-    logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
-    HTTPTools.initialize(configuration().getLoggerFactory());
-
-    logger.info("Starting the HTTP server. Buckle up!");
+    logger.log(Level.INFO, "Starting the HTTP server. Buckle up!");
 
     context = new HTTPContext(configuration.getBaseDir());
 
@@ -108,12 +106,12 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
         HTTPServerAcceptorThread server = new HTTPServerAcceptorThread(configuration, context, listener);
         servers.add(server);
         server.start();
-        logger.info("HTTP server listening on port [{}]", listener.getPort());
+        logger.log(Level.INFO, "HTTP server listening on port [{0}]", listener.getPort());
       }
 
-      logger.info("HTTP server started successfully");
+      logger.log(Level.INFO, "HTTP server started successfully");
     } catch (Exception e) {
-      logger.error("Unable to start the HTTP server because one of the listeners threw an exception.", e);
+      logger.log(Level.ERROR, "Unable to start the HTTP server because one of the listeners threw an exception.", e);
 
       // Clean up the threads that did start
       close();
@@ -132,7 +130,6 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
    */
   public HTTPServer withConfiguration(HTTPServerConfiguration configuration) {
     this.configuration = configuration;
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
     return this;
   }
 

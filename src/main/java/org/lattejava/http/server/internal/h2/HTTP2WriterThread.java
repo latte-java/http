@@ -7,6 +7,8 @@ package org.lattejava.http.server.internal.h2;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 /**
  * Owns the single virtual thread that serializes every outbound HTTP/2 frame for one connection. Producers — the reader
  * thread (PING acks, WINDOW_UPDATE, RST_STREAM, SETTINGS ack, GOAWAY) and the per-request handler threads (response
@@ -22,6 +24,8 @@ import module org.lattejava.http;
  * @author Daniel DeGroff
  */
 public class HTTP2WriterThread implements Runnable {
+  private static final System.Logger logger = System.getLogger(HTTP2WriterThread.class.getName());
+
   // Maximum number of frames the writer drains per loop iteration. The blocking head-take is unchanged; this caps the
   // opportunistic drainTo that follows. 32 chosen so that even at peerMaxFrameSize=16384 a full batch is ~512KB, inside
   // one TCP-window worth of data on a typical link; smaller batches reduce per-frame queue contention without holding
@@ -31,8 +35,6 @@ public class HTTP2WriterThread implements Runnable {
   // The writer-shutdown sentinel: a GOAWAY whose lastStreamId is -1 (negative, never valid for a real GOAWAY). Its
   // encoding is private to this class — callers request shutdown via requestStop(), never by building this frame.
   private static final HTTP2Frame SHUTDOWN_SENTINEL = new HTTP2Frame.GoawayFrame(-1, 0, new byte[0]);
-
-  private final Logger logger;
 
   private final BlockingQueue<HTTP2Frame> queue;
 
@@ -49,33 +51,31 @@ public class HTTP2WriterThread implements Runnable {
    *
    * @param writer       the wire-frame encoder.
    * @param readerThread the connection reader thread, interrupted when this writer closes.
-   * @param logger       the connection logger.
    */
-  public HTTP2WriterThread(HTTP2FrameWriter writer, Thread readerThread, Logger logger) {
-    this(writer, readerThread, logger, new LinkedBlockingQueue<>(128));
+  public HTTP2WriterThread(HTTP2FrameWriter writer, Thread readerThread) {
+    this(writer, readerThread, new LinkedBlockingQueue<>(128));
   }
 
   /**
    * Queue-injecting constructor for tests that need to pre-load frames and drive {@link #run()} directly. Production
-   * code uses the four-argument constructor.
+   * code uses the two-argument constructor.
    */
-  public HTTP2WriterThread(HTTP2FrameWriter writer, Thread readerThread, Logger logger, BlockingQueue<HTTP2Frame> queue) {
+  public HTTP2WriterThread(HTTP2FrameWriter writer, Thread readerThread, BlockingQueue<HTTP2Frame> queue) {
     this.writer = writer;
     this.readerThread = readerThread;
-    this.logger = logger;
     this.queue = queue;
   }
 
   /**
    * Test seam — wraps a caller-supplied queue so a test can inject frames via {@link #enqueueBlocking} and drain them
    * for assertions, with no socket or thread. Only the enqueue methods are valid on the returned instance; the frame
-   * writer, reader thread, and logger are {@code null}.
+   * writer and reader thread are {@code null}.
    *
    * @param queue the queue to expose through the enqueue methods.
    * @return a writer backed by {@code queue}.
    */
   public static HTTP2WriterThread forQueue(BlockingQueue<HTTP2Frame> queue) {
-    return new HTTP2WriterThread(null, null, null, queue);
+    return new HTTP2WriterThread(null, null, queue);
   }
 
   /**
@@ -104,13 +104,13 @@ public class HTTP2WriterThread implements Runnable {
    */
   public boolean enqueueOrCloseWriter(HTTP2Frame frame) {
     if (closed) {
-      logger.debug("Dropping frame [{}] — writer thread already closed", frame);
+      logger.log(Level.DEBUG, "Dropping frame [{0}] — writer thread already closed", frame);
       return false;
     }
 
     try {
       if (!queue.offer(frame, 5, TimeUnit.SECONDS)) {
-        logger.debug("Writer queue full for [5s]; declaring writer closed and dropping frame [{}]", frame);
+        logger.log(Level.DEBUG, "Writer queue full for [5s]; declaring writer closed and dropping frame [{0}]", frame);
         closed = true;
         return false;
       }
@@ -183,7 +183,7 @@ public class HTTP2WriterThread implements Runnable {
         batch.clear();
       }
     } catch (Exception e) {
-      logger.debug("Writer thread ended unexpectedly; signaling reader", e);
+      logger.log(Level.DEBUG, "Writer thread ended unexpectedly; signaling reader", e);
     } finally {
       closed = true;
       readerThread.interrupt();

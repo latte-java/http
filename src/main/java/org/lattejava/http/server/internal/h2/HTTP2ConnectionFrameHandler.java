@@ -4,16 +4,16 @@
  */
 package org.lattejava.http.server.internal.h2;
 
-import org.lattejava.http.log.Logger;
+import java.lang.System.Logger.Level;
 
 /**
  * Handles every frame the dispatch loop routes to stream 0: SETTINGS, PING, connection-window WINDOW_UPDATE, and
  * GOAWAY. Stream-addressed frame types arriving with stream ID 0 are connection errors here.
  */
 public class HTTP2ConnectionFrameHandler implements HTTP2FrameHandler {
-  private final HTTP2Window connectionSendWindow;
+  private static final System.Logger logger = System.getLogger(HTTP2ConnectionFrameHandler.class.getName());
 
-  private final Logger logger;
+  private final HTTP2Window connectionSendWindow;
 
   private final HTTP2Settings peerSettings;
 
@@ -23,10 +23,9 @@ public class HTTP2ConnectionFrameHandler implements HTTP2FrameHandler {
 
   private final HTTP2WriterThread writer;
 
-  public HTTP2ConnectionFrameHandler(HTTP2Window connectionSendWindow, Logger logger, HTTP2Settings peerSettings,
+  public HTTP2ConnectionFrameHandler(HTTP2Window connectionSendWindow, HTTP2Settings peerSettings,
                                      HTTP2RateLimitsTracker rateLimits, HTTP2StreamRegistry registry, HTTP2WriterThread writer) {
     this.connectionSendWindow = connectionSendWindow;
-    this.logger = logger;
     this.peerSettings = peerSettings;
     this.rateLimits = rateLimits;
     this.registry = registry;
@@ -67,7 +66,7 @@ public class HTTP2ConnectionFrameHandler implements HTTP2FrameHandler {
     try {
       peerSettings.applyPayload(f.data());
     } catch (HTTP2Settings.HTTP2SettingsException e) {
-      logger.debug("Invalid SETTINGS from peer: [{}]", e.getMessage());
+      logger.log(Level.DEBUG, "Invalid SETTINGS from peer: [{0}]", e.getMessage());
       return new HTTP2Result.ConnectionError(e.errorCode);
     }
     int delta = peerSettings.initialWindowSize() - oldInitialWindow;

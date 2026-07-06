@@ -7,6 +7,8 @@ package org.lattejava.http.server.internal.h2;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 import org.lattejava.http.server.internal.*;
 
 /**
@@ -17,11 +19,11 @@ import org.lattejava.http.server.internal.*;
  * <p>RFC 9113 §8.1 — HEADERS must precede DATA. This class enforces that invariant.
  */
 public class HTTP2OutputProtocol implements HTTPOutputProtocol {
+  private static final System.Logger logger = System.getLogger(HTTP2OutputProtocol.class.getName());
+
   private final HTTP2Window connectionSendWindow;
 
   private final HPACKEncoder encoder;
-
-  private final Logger logger;
 
   private final HTTP2Settings peerSettings;
 
@@ -38,14 +40,13 @@ public class HTTP2OutputProtocol implements HTTPOutputProtocol {
   private boolean wroteToClient;
 
   HTTP2OutputProtocol(HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder, HTTP2WriterThread writer,
-                      HTTP2Window connectionSendWindow, HTTP2Settings peerSettings, Logger logger) {
+                      HTTP2Window connectionSendWindow, HTTP2Settings peerSettings) {
     this.response = response;
     this.stream = stream;
     this.encoder = encoder;
     this.writer = writer;
     this.connectionSendWindow = connectionSendWindow;
     this.peerSettings = peerSettings;
-    this.logger = logger;
   }
 
   @Override
@@ -56,7 +57,7 @@ public class HTTP2OutputProtocol implements HTTPOutputProtocol {
     for (var entry : response.getHeadersMap().entrySet()) {
       String lowerKey = entry.getKey().toLowerCase(Locale.ROOT);
       if (HTTPValues.Headers.ConnectionSpecificHeaders.contains(lowerKey)) {
-        logger.debug("Stripping h1.1-only response header [{}] on h2 emission", entry.getKey());
+        logger.log(Level.DEBUG, "Stripping h1.1-only response header [{0}] on h2 emission", entry.getKey());
         continue;
       }
       for (String v : entry.getValue()) {

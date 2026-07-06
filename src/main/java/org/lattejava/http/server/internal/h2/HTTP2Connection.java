@@ -7,6 +7,8 @@ package org.lattejava.http.server.internal.h2;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 import org.lattejava.http.server.internal.*;
 
 /**
@@ -30,6 +32,8 @@ import org.lattejava.http.server.internal.*;
  * @author Daniel DeGroff
  */
 public class HTTP2Connection implements HTTPConnection, Runnable {
+  private static final System.Logger logger = System.getLogger(HTTP2Connection.class.getName());
+
   private final HTTPBuffers buffers;
 
   private final HTTPServerConfiguration configuration;
@@ -56,8 +60,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   private final HTTPListenerConfiguration listener;
 
   private final HTTP2Settings localSettings;
-
-  private final Logger logger;
 
   private final HTTP2Settings peerSettings = HTTP2Settings.defaults();
 
@@ -93,7 +95,6 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     this.throughput = throughput;
     this.inputStream = inputStream;
     this.buffers = new HTTPBuffers(configuration);
-    this.logger = configuration.getLoggerFactory().getLogger(HTTP2Connection.class);
     this.localSettings = HTTP2Settings.fromConfiguration(configuration.getHTTP2Configuration(), configuration.getMaxRequestHeaderSize());
     this.rateLimits = new HTTP2RateLimitsTracker(configuration.getHTTP2Configuration().getRateLimits());
     this.startInstant = System.currentTimeMillis();
@@ -139,7 +140,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       // The connection-window advertisement rides the same first flight as our SETTINGS (RFC 9113 §6.9.2).
       int connectionWindowSize = configuration.getHTTP2Configuration().getConnectionWindowSize();
       HTTP2Result negotiation = HTTP2Tools.negotiateSettings(reader, frameWriter, out, localSettings, peerSettings,
-          connectionWindowSize, logger);
+          connectionWindowSize);
       if (negotiation instanceof HTTP2Result.ConnectionError(HTTP2ErrorCode code)) {
         // The writer thread does not exist yet, so the GOAWAY is written directly, then the output side is half-closed
         // so the kernel sends FIN — h2spec keeps writing preface bytes and a plain close would race into an OS RST.
@@ -161,7 +162,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       // Start the writer: it drains its private queue and serializes frames to the socket, exiting on the
       // writer-shutdown sentinel (requestStop). It is stored in a field so the reader can join it before closing
       // the socket, guaranteeing GOAWAY frames are flushed before teardown, and so shutdown() can reach it.
-      writer = new HTTP2WriterThread(frameWriter, readerThread, logger);
+      writer = new HTTP2WriterThread(frameWriter, readerThread);
       writer.start();
 
       var connectionFlowControl = new HTTP2ConnectionFlowControl(connectionWindowSize, writer);
@@ -170,13 +171,13 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       HPACKEncoder encoder = new HPACKEncoder(new HPACKDynamicTable(peerSettings.headerTableSize()));
 
       var headerHandler = new HTTP2HeaderFrameHandler(configuration, connectionSendWindow, context, decoder, encoder,
-          handledRequests, handlerThreads, instrumenter, listener, logger, peerSettings, socket, writer);
+          handledRequests, handlerThreads, instrumenter, listener, peerSettings, socket, writer);
       var handlers = new HTTP2StreamFrameHandlers(
           connectionFlowControl,
-          new HTTP2DataFrameHandler(configuration.getHTTP2Configuration(), localSettings, logger, writer),
-          headerHandler, rateLimits, new HTTP2RSTStreamFrameHandler(logger), new HTTP2WindowUpdateFrameHandler());
+          new HTTP2DataFrameHandler(configuration.getHTTP2Configuration(), localSettings, writer),
+          headerHandler, rateLimits, new HTTP2RSTStreamFrameHandler(), new HTTP2WindowUpdateFrameHandler());
       registry = new HTTP2StreamRegistry(localSettings, peerSettings, handlers);
-      var connectionFrameHandler = new HTTP2ConnectionFrameHandler(connectionSendWindow, logger, peerSettings, rateLimits,
+      var connectionFrameHandler = new HTTP2ConnectionFrameHandler(connectionSendWindow, peerSettings, rateLimits,
           registry, writer);
 
       try {
@@ -184,7 +185,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
         while (true) {
           state = HTTPConnection.State.Read;
           if (writer.isClosed()) {
-            logger.debug("Writer thread closed; reader exiting");
+            logger.log(Level.DEBUG, "Writer thread closed; reader exiting");
             break;
           }
 
@@ -219,14 +220,14 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
           }
         }
       } catch (Throwable t) {
-        logger.error("Unhandled exception in HTTP/2 reader; emitting GOAWAY(INTERNAL_ERROR)", t);
+        logger.log(Level.ERROR, "Unhandled exception in HTTP/2 reader; emitting GOAWAY(INTERNAL_ERROR)", t);
         goAway(HTTP2ErrorCode.INTERNAL_ERROR);
       } finally {
         // Signal the writer thread to exit cleanly. If the writer has already closed, this is a no-op.
         writer.requestStop();
       }
     } catch (Exception e) {
-      logger.debug("HTTP/2 connection ended", e);
+      logger.log(Level.DEBUG, "HTTP/2 connection ended", e);
     } finally {
       // Wait for the writer to flush its queue (including any GOAWAY) before closing the socket. join() is a no-op if
       // the writer was never started (e.g. a failure before the SETTINGS exchange).

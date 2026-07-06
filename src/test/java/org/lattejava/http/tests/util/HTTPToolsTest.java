@@ -225,7 +225,6 @@ public class HTTPToolsTest extends BaseTest {
     HTTPRequest httpRequest = new HTTPRequest();
     byte[] requestBuffer = new byte[configuration.getRequestBufferSize()];
 
-    HTTPTools.initialize(configuration.getLoggerFactory());
     HTTPTools.parseRequestPreamble(pushbackInputStream, 128 * 1024, httpRequest, requestBuffer, () -> {
     });
 

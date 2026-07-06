@@ -18,6 +18,8 @@ package org.lattejava.http.server.internal;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 /**
  * A thread that manages the accept process for a single server socket. Once a connection is accepted, the socket is
  * passed to a virtual thread for processing.
@@ -25,6 +27,8 @@ import module org.lattejava.http;
  * @author Brian Pontarelli
  */
 public class HTTPServerAcceptorThread extends Thread {
+  private static final System.Logger logger = System.getLogger(HTTPServerAcceptorThread.class.getName());
+
   private final ConnectionReaperThread reaperThread;
 
   private final Deque<ClientConnection> clients = new ConcurrentLinkedDeque<>();
@@ -36,8 +40,6 @@ public class HTTPServerAcceptorThread extends Thread {
   private final Instrumenter instrumenter;
 
   private final HTTPListenerConfiguration listener;
-
-  private final Logger logger;
 
   private final long minimumReadThroughput;
 
@@ -55,7 +57,6 @@ public class HTTPServerAcceptorThread extends Thread {
     this.context = context;
     this.listener = listener;
     this.instrumenter = configuration.getInstrumenter();
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPServerAcceptorThread.class);
     this.minimumReadThroughput = configuration.getMinimumReadThroughput();
     this.minimumWriteThroughput = configuration.getMinimumWriteThroughput();
     this.reaperThread = new ConnectionReaperThread();
@@ -88,9 +89,9 @@ public class HTTPServerAcceptorThread extends Thread {
         //   the server socket and fire up an HTTP worker, then we could consider seeing if we can improve performance here.
         Socket clientSocket = socket.accept();
         clientSocket.setSoTimeout((int) configuration.getInitialReadTimeoutDuration().toMillis());
-        if (logger.isTraceEnabled()) {
+        if (logger.isLoggable(Level.TRACE)) {
           String listenerAddress = listener.getBindAddress().toString() + ":" + listener.getPort();
-          logger.trace("[{}] Accepted inbound connection. [{}] existing connections.", listenerAddress, clients.size());
+          logger.log(Level.TRACE, "[{0}] Accepted inbound connection. [{1}] existing connections.", listenerAddress, clients.size());
         }
 
         if (instrumenter != null) {
@@ -110,20 +111,20 @@ public class HTTPServerAcceptorThread extends Thread {
         client.start();
       } catch (SocketTimeoutException ignore) {
         // Completely smother since this is expected with the SO_TIMEOUT setting in the constructor
-        logger.debug("Nothing accepted. Cleaning up existing connections.");
+        logger.log(Level.DEBUG, "Nothing accepted. Cleaning up existing connections.");
       } catch (SocketException e) {
         // This should only happen when the server is shutdown
         if (socket.isClosed()) {
           running = false;
-          logger.debug("The server socket was closed. Shutting down the server.");
+          logger.log(Level.DEBUG, "The server socket was closed. Shutting down the server.");
         } else {
-          logger.error("An exception was thrown while accepting incoming connections.", e);
+          logger.log(Level.ERROR, "An exception was thrown while accepting incoming connections.", e);
         }
       } catch (IOException ignore) {
         // Completely smother since most IO exceptions are common during the connection phase
-        logger.debug("IO exception. Likely a fuzzer or a bad client or a TLS issue, all of which are common and can mostly be ignored.");
+        logger.log(Level.DEBUG, "IO exception. Likely a fuzzer or a bad client or a TLS issue, all of which are common and can mostly be ignored.");
       } catch (Throwable t) {
-        logger.error("An exception was thrown during server processing. This is a fatal issue and we need to shutdown the server.", t);
+        logger.log(Level.ERROR, "An exception was thrown during server processing. This is a fatal issue and we need to shutdown the server.", t);
         break;
       }
     }
@@ -181,7 +182,7 @@ public class HTTPServerAcceptorThread extends Thread {
 
         int currentClientCount = clients.size();
         int removedClientCount = 0;
-        logger.trace("Wake up. Review [{}] client worker threads for cleanup.", currentClientCount);
+        logger.log(Level.TRACE, "Wake up. Review [{0}] client worker threads for cleanup.", currentClientCount);
 
         Iterator<ClientConnection> iterator = clients.iterator();
         while (iterator.hasNext()) {
@@ -189,7 +190,7 @@ public class HTTPServerAcceptorThread extends Thread {
           Thread thread = client.thread();
           long threadId = thread.threadId();
           if (!thread.isAlive()) {
-            logger.trace("[{}] Remove dead client worker. Born [{}]. Died at age [{}] ms. Requests handled [{}].", threadId, client.getStartInstant(), client.getAge(), client.getHandledRequests());
+            logger.log(Level.TRACE, "[{0}] Remove dead client worker. Born [{1}]. Died at age [{2}] ms. Requests handled [{3}].", threadId, client.getStartInstant(), client.getAge(), client.getHandledRequests());
             iterator.remove();
             removedClientCount++;
             continue;
@@ -232,19 +233,19 @@ public class HTTPServerAcceptorThread extends Thread {
           }
 
           if (!badClient) {
-            logger.trace("[{}] Check worker in state [{}]", threadId, state);
+            logger.log(Level.TRACE, "[{0}] Check worker in state [{1}]", threadId, state);
             continue;
           }
 
           // If the client was bad, debug log it.
-          logger.debug(badClientReason);
+          logger.log(Level.DEBUG, badClientReason);
 
           // Bad client, first things first, remove the client from the list
           iterator.remove();
           removedClientCount++;
 
           String message = "";
-          if (logger.isDebugEnabled()) {
+          if (logger.isLoggable(Level.DEBUG)) {
 
             if (readingSlow) {
               message += String.format(" Min read throughput [%s], actual throughput [%s].", minimumReadThroughput, readThroughput);
@@ -258,11 +259,11 @@ public class HTTPServerAcceptorThread extends Thread {
               message += String.format(" Connection timed out while processing. Last used [%s]ms ago. Configured client timeout [%s]ms.", (now - workerLastUsed), configuration.getProcessingTimeoutDuration().toMillis());
             }
 
-            logger.debug("[{}] Closing connection readingSlow=[{}] writingSlow=[{}] timedOut=[{}] {}", threadId, readingSlow, writingSlow, timedOut, message);
-            logger.debug("[{}] Closing client connection [{}] due to inactivity", threadId, worker.getSocket().getRemoteSocketAddress());
+            logger.log(Level.DEBUG, "[{0}] Closing connection readingSlow=[{1}] writingSlow=[{2}] timedOut=[{3}] {4}", threadId, readingSlow, writingSlow, timedOut, message);
+            logger.log(Level.DEBUG, "[{0}] Closing client connection [{1}] due to inactivity", threadId, worker.getSocket().getRemoteSocketAddress());
           }
 
-          if (logger.isTraceEnabled()) {
+          if (logger.isLoggable(Level.TRACE)) {
             StringBuilder threadDump = new StringBuilder();
             for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
               threadDump.append(entry.getKey()).append(" ").append(entry.getKey().getState()).append("\n");
@@ -272,7 +273,7 @@ public class HTTPServerAcceptorThread extends Thread {
               threadDump.append("\n");
             }
 
-            logger.trace("Thread dump from server side.\n" + threadDump);
+            logger.log(Level.TRACE, "Thread dump from server side.\n{0}", threadDump);
           }
 
           try {
@@ -284,13 +285,13 @@ public class HTTPServerAcceptorThread extends Thread {
             }
           } catch (IOException e) {
             // Log but ignore
-            logger.debug(String.format("[%s] Unable to close connection to client. [{}]", threadId), e);
+            logger.log(Level.DEBUG, MessageFormat.format("[{0}] Unable to close connection to client.", threadId), e);
           }
         }
 
         // Only bother tracing this if we started with greater than 0
         if (currentClientCount > 0) {
-          logger.trace("Cleanup removed [{}] clients", removedClientCount);
+          logger.log(Level.TRACE, "Cleanup removed [{0}] clients", removedClientCount);
         }
 
         // Take a break

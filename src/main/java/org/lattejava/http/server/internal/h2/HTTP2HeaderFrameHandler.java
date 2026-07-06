@@ -7,9 +7,11 @@ package org.lattejava.http.server.internal.h2;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+import java.text.MessageFormat;
+
 import org.lattejava.http.io.MultipartConfiguration;
 import org.lattejava.http.io.PushbackInputStream;
-import org.lattejava.http.log.Logger;
 import org.lattejava.http.server.HTTPContext;
 import org.lattejava.http.server.Instrumenter;
 import org.lattejava.http.util.HTTPTools;
@@ -19,6 +21,8 @@ import org.lattejava.http.util.HTTPTools;
  * whole block). Two entry points: a new stream's request headers, and trailers on an existing stream.
  */
 public class HTTP2HeaderFrameHandler {
+  private static final System.Logger logger = System.getLogger(HTTP2HeaderFrameHandler.class.getName());
+
   private final HTTPServerConfiguration configuration;
 
   private final HTTP2Window connectionSendWindow;
@@ -37,8 +41,6 @@ public class HTTP2HeaderFrameHandler {
 
   private final HTTPListenerConfiguration listener;
 
-  private final Logger logger;
-
   private final HTTP2Settings peerSettings;
 
   private final Socket socket;
@@ -48,7 +50,7 @@ public class HTTP2HeaderFrameHandler {
   public HTTP2HeaderFrameHandler(HTTPServerConfiguration configuration, HTTP2Window connectionSendWindow,
                                  HTTPContext context, HPACKDecoder decoder, HPACKEncoder encoder,
                                  AtomicLong handledRequests, Set<Thread> handlerThreads, Instrumenter instrumenter,
-                                 HTTPListenerConfiguration listener, Logger logger, HTTP2Settings peerSettings,
+                                 HTTPListenerConfiguration listener, HTTP2Settings peerSettings,
                                  Socket socket, HTTP2WriterThread writer) {
     this.configuration = configuration;
     this.connectionSendWindow = connectionSendWindow;
@@ -59,7 +61,6 @@ public class HTTP2HeaderFrameHandler {
     this.handlerThreads = handlerThreads;
     this.instrumenter = instrumenter;
     this.listener = listener;
-    this.logger = logger;
     this.peerSettings = peerSettings;
     this.socket = socket;
     this.writer = writer;
@@ -73,7 +74,7 @@ public class HTTP2HeaderFrameHandler {
       fields = decoder.decode(f.data());
     } catch (IOException e) {
       // RFC 7541 §2.1 / RFC 9113 §4.3 — HPACK decode failure is a connection error, refused stream or not.
-      logger.debug("HPACK decode failed on stream [{}]: [{}]", stream.streamId(), e.getMessage());
+      logger.log(Level.DEBUG, "HPACK decode failed on stream [{0}]: [{1}]", stream.streamId(), e.getMessage());
       return new HTTP2Result.ConnectionError(HTTP2ErrorCode.COMPRESSION_ERROR);
     }
 
@@ -100,14 +101,14 @@ public class HTTP2HeaderFrameHandler {
           long cl = Long.parseLong(field.value());
           if (cl < 0) {
             // RFC 9113 §8.1.2.6 — negative content-length is malformed; stream error PROTOCOL_ERROR.
-            logger.debug("Negative content-length [{}] on stream [{}]", cl, stream.streamId());
+            logger.log(Level.DEBUG, "Negative content-length [{0}] on stream [{1}]", cl, stream.streamId());
             stream.deregister();
             return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
           }
           stream.setDeclaredContentLength(cl);
         } catch (NumberFormatException e) {
           // RFC 9113 §8.1.2.6 — unparseable content-length is a stream error of type PROTOCOL_ERROR.
-          logger.debug("Malformed content-length [{}] on stream [{}]", field.value(), stream.streamId());
+          logger.log(Level.DEBUG, "Malformed content-length [{0}] on stream [{1}]", field.value(), stream.streamId());
           stream.deregister();
           return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR);
         }
@@ -147,7 +148,7 @@ public class HTTP2HeaderFrameHandler {
 
     HTTPResponse response = new HTTPResponse();
     Thread.ofVirtual().name("h2-handler-" + stream.streamId()).start(new HTTP2HandlerDelegate(configuration,
-        connectionSendWindow, encoder, handlerThreads, logger, peerSettings, request, response, stream, writer));
+        connectionSendWindow, encoder, handlerThreads, peerSettings, request, response, stream, writer));
     handledRequests.incrementAndGet();
     return HTTP2Result.OK;
   }
@@ -158,7 +159,7 @@ public class HTTP2HeaderFrameHandler {
       fields = decoder.decode(f.data());
     } catch (IOException e) {
       // RFC 7541 §2.1 / RFC 9113 §4.3 — HPACK decode failure is a connection error.
-      logger.debug("HPACK decode failed on stream [{}]: [{}]", stream.streamId(), e.getMessage());
+      logger.log(Level.DEBUG, "HPACK decode failed on stream [{0}]: [{1}]", stream.streamId(), e.getMessage());
       return new HTTP2Result.ConnectionError(HTTP2ErrorCode.COMPRESSION_ERROR);
     }
 
@@ -188,7 +189,7 @@ public class HTTP2HeaderFrameHandler {
     } catch (IllegalStateException e) {
       // Race with concurrent RST_STREAM — stream is already closed; trailers harmless. Log so unexpected
       // state-machine transitions in future refactors are visible.
-      logger.debug("Trailers HEADERS ignored on stream [{}] in state [{}]", stream.streamId(), stream.state(), e);
+      logger.log(Level.DEBUG, MessageFormat.format("Trailers HEADERS ignored on stream [{0}] in state [{1}]", stream.streamId(), stream.state()), e);
     }
     return HTTP2Result.OK;
   }

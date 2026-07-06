@@ -91,7 +91,6 @@ public class AcceptorDispatchTest extends BaseTest {
         .withMinimumWriteThroughput(200 * 1024)
         .withReadThroughputCalculationDelayDuration(Duration.ofSeconds(1))
         .withWriteThroughputCalculationDelayDuration(Duration.ofSeconds(1))
-        .withLoggerFactory(FileLoggerFactory.FACTORY)
         .withListener(listener);
     server.start();
     return server;

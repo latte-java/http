@@ -49,8 +49,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   private Instrumenter instrumenter;
 
-  private LoggerFactory loggerFactory = SystemOutLoggerFactory.FACTORY;
-
   private int maxBytesToDrain = 256 * 1024; // 256 Kilobytes
 
   private int maxPendingSocketConnections = 4096;
@@ -142,13 +140,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public List<HTTPListenerConfiguration> getListeners() {
     return listeners;
-  }
-
-  /**
-   * @return The logger factory.
-   */
-  public LoggerFactory getLoggerFactory() {
-    return loggerFactory;
   }
 
   /**
@@ -394,16 +385,6 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   public HTTPServerConfiguration withListener(HTTPListenerConfiguration listener) {
     Objects.requireNonNull(listener, "You cannot add a null HTTPListenerConfiguration");
     this.listeners.add(listener);
-    return this;
-  }
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public HTTPServerConfiguration withLoggerFactory(LoggerFactory loggerFactory) {
-    Objects.requireNonNull(loggerFactory, "You cannot set the logger factory to null");
-    this.loggerFactory = loggerFactory;
     return this;
   }
 

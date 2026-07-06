@@ -12,6 +12,7 @@ module org.lattejava.http.tests {
   requires io.netty.handler;
   requires jackson5;
   requires java.compiler;
+  requires java.logging;
   requires java.net.http;
   requires org.lattejava.http;
   requires org.testng;

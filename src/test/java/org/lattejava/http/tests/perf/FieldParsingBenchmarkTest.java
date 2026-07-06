@@ -23,7 +23,6 @@ public class FieldParsingBenchmarkTest {
 
   @Test(groups = "performance")
   public void benchmark() throws Exception {
-    HTTPTools.initialize(SystemOutLoggerFactory.FACTORY);
     benchPreamble();
     benchMultipartHeaders();
     benchTrailers();

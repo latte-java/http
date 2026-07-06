@@ -578,18 +578,6 @@ public class CoreTest extends BaseTest {
     }
   }
 
-  @Test
-  public void logger() {
-    // Test replacement values and ensure we are handling special regex characters.
-    AccumulatingLogger logger = new AccumulatingLogger();
-    logger.setLevel(Level.Debug);
-    logger.info("Class name: [{}]", "org.lattejava.http.Test$InnerClass");
-
-    // Expect that we do not encounter an exception.
-    String output = logger.toString();
-    assertTrue(output.endsWith("Class name: [org.lattejava.http.Test$InnerClass]"));
-  }
-
   @Test(dataProvider = "schemes")
   public void partialWriteThenException(String scheme) throws Exception {
     HTTPHandler handler = (_, res) -> {
@@ -935,7 +923,6 @@ public class CoreTest extends BaseTest {
                                       .withListener(new HTTPListenerConfiguration(4242))
                                       .withListener(new HTTPListenerConfiguration(4243))
                                       .withListener(new HTTPListenerConfiguration(4244, certChain, keyPair.getPrivate()))
-                                      .withLoggerFactory(AccumulatingLoggerFactory.FACTORY)
                                       .start()) {
       URI uri = URI.create("http://localhost:4242/api/system/version?foo=bar");
       HttpRequest request = HttpRequest.newBuilder().uri(uri).GET().build();

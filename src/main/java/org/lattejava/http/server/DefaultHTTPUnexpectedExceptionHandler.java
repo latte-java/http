@@ -15,18 +15,22 @@
  */
 package org.lattejava.http.server;
 
+import java.lang.System.Logger.Level;
+import java.text.MessageFormat;
+
 /**
  * THe default HTTP unexpected exception handler.
  *
  * @author Daniel DeGroff
  */
 public class DefaultHTTPUnexpectedExceptionHandler implements HTTPUnexpectedExceptionHandler {
+  private static final System.Logger logger = System.getLogger(DefaultHTTPUnexpectedExceptionHandler.class.getName());
+
   @Override
   public void handle(ExceptionHandlerContext context) {
-    context.getLogger()
-           .error(String.format("[%s] Closing socket with status [%d]. An HTTP worker threw an exception while processing a request.",
-                   Thread.currentThread().threadId(),
-                   context.getStatusCode()),
-               context.getThrowable());
+    logger.log(Level.ERROR,
+        MessageFormat.format("[{0}] Closing socket with status [{1}]. An HTTP worker threw an exception while processing a request.",
+            Thread.currentThread().threadId(), context.getStatusCode()),
+        context.getThrowable());
   }
 }

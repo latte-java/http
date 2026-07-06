@@ -7,6 +7,7 @@ package org.lattejava.http.server.internal;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
 import javax.net.ssl.SSLSocket;
 
 import org.lattejava.http.io.PushbackInputStream;
@@ -33,6 +34,8 @@ import org.lattejava.http.server.internal.h2.*;
  * @author Daniel DeGroff
  */
 public class ProtocolSelector {
+  private static final System.Logger logger = System.getLogger(ProtocolSelector.class.getName());
+
   /**
    * Selects the appropriate connection handler for the given socket, or closes the socket and returns {@code null} when
    * the negotiated and spoken protocols disagree.
@@ -79,9 +82,7 @@ public class ProtocolSelector {
     }
 
     // Negotiated one protocol, spoke another — a broken or malicious client. Drop it.
-    configuration.getLoggerFactory()
-                 .getLogger(ProtocolSelector.class)
-                 .debug("Closing connection: client negotiated [{}] but spoke [{}].", negotiated, spoken);
+    logger.log(Level.DEBUG, "Closing connection: client negotiated [{0}] but spoke [{1}].", negotiated, spoken);
     socket.close();
     return null;
   }

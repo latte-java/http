@@ -7,7 +7,9 @@ package org.lattejava.http.server.internal.h2;
 import module java.base;
 import module org.lattejava.http;
 
-import org.lattejava.http.log.Logger;
+import java.lang.System.Logger.Level;
+import java.text.MessageFormat;
+
 import org.lattejava.http.server.internal.*;
 
 /**
@@ -15,6 +17,8 @@ import org.lattejava.http.server.internal.*;
  * application handler, and handles the three exit paths: clean completion, processing exception, and unexpected error.
  */
 public class HTTP2HandlerDelegate implements Runnable {
+  private static final System.Logger logger = System.getLogger(HTTP2HandlerDelegate.class.getName());
+
   private final HTTPServerConfiguration configuration;
 
   private final HTTP2Window connectionSendWindow;
@@ -22,8 +26,6 @@ public class HTTP2HandlerDelegate implements Runnable {
   private final HPACKEncoder encoder;
 
   private final Set<Thread> handlerThreads;
-
-  private final Logger logger;
 
   private final HTTP2Settings peerSettings;
 
@@ -36,13 +38,12 @@ public class HTTP2HandlerDelegate implements Runnable {
   private final HTTP2WriterThread writer;
 
   public HTTP2HandlerDelegate(HTTPServerConfiguration configuration, HTTP2Window connectionSendWindow,
-                              HPACKEncoder encoder, Set<Thread> handlerThreads, Logger logger, HTTP2Settings peerSettings,
+                              HPACKEncoder encoder, Set<Thread> handlerThreads, HTTP2Settings peerSettings,
                               HTTPRequest request, HTTPResponse response, HTTP2Stream stream, HTTP2WriterThread writer) {
     this.configuration = configuration;
     this.connectionSendWindow = connectionSendWindow;
     this.encoder = encoder;
     this.handlerThreads = handlerThreads;
-    this.logger = logger;
     this.peerSettings = peerSettings;
     this.request = request;
     this.response = response;
@@ -58,7 +59,7 @@ public class HTTP2HandlerDelegate implements Runnable {
       // Use a lazy-header output stream: HEADERS are emitted on the first write or flush so that the
       // handler can interleave request reads and response writes (required for bidi-streaming).
       // RFC 9113 §8.1 requires HEADERS to precede DATA frames — the HTTP2OutputProtocol enforces this.
-      var protocol = new HTTP2OutputProtocol(response, stream, encoder, writer, connectionSendWindow, peerSettings, logger);
+      var protocol = new HTTP2OutputProtocol(response, stream, encoder, writer, connectionSendWindow, peerSettings);
       HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, response, protocol);
       response.setOutputStream(outputStream);
 
@@ -79,14 +80,14 @@ public class HTTP2HandlerDelegate implements Runnable {
     } catch (HTTPProcessingException e) {
       // Expected processing errors (e.g. ContentTooLargeException → 413). Send a proper HTTP error response
       // so the client receives the status code rather than a RST_STREAM(INTERNAL_ERROR).
-      logger.debug("h2 handler processing exception on stream [{}]: [{}]", stream.streamId(), e.getMessage());
+      logger.log(Level.DEBUG, "h2 handler processing exception on stream [{0}]: [{1}]", stream.streamId(), e.getMessage());
       try {
         response.setStatus(e.getStatus());
-        var errorProtocol = new HTTP2OutputProtocol(response, stream, encoder, writer, connectionSendWindow, peerSettings, logger);
+        var errorProtocol = new HTTP2OutputProtocol(response, stream, encoder, writer, connectionSendWindow, peerSettings);
         response.setOutputStream(new HTTPOutputStream(configuration, request, response, errorProtocol));
         response.getOutputStream().close();
       } catch (Exception writeEx) {
-        logger.debug("Failed to write error response for stream [{}]", stream.streamId(), writeEx);
+        logger.log(Level.DEBUG, MessageFormat.format("Failed to write error response for stream [{0}]", stream.streamId()), writeEx);
       }
       // RFC 9113 §8.1: after a complete response, the server MAY send RST_STREAM(NO_ERROR) to ask the client to
       // stop uploading the rest of the request body. Without this, the client keeps sending DATA frames that we
@@ -97,14 +98,14 @@ public class HTTP2HandlerDelegate implements Runnable {
       }
       stream.deregister();
     } catch (Exception e) {
-      logger.error("h2 handler exception on stream [" + stream.streamId() + "]", e);
+      logger.log(Level.ERROR, MessageFormat.format("h2 handler exception on stream [{0}]", stream.streamId()), e);
       // offer with short timeout — the writer may already be dead and the queue full during connection teardown.
       // We don't want this cleanup path to block, but a silently dropped RST_STREAM is worth a debug log so that
       // backed-up writer-queue scenarios are visible.
       try {
         if (!writer.tryEnqueue(new HTTP2Frame.RSTStreamFrame(stream.streamId(), HTTP2ErrorCode.INTERNAL_ERROR.value),
             100, TimeUnit.MILLISECONDS)) {
-          logger.debug("Dropped RST_STREAM(INTERNAL_ERROR) for stream [{}] — writer queue full or dead", stream.streamId());
+          logger.log(Level.DEBUG, "Dropped RST_STREAM(INTERNAL_ERROR) for stream [{0}] — writer queue full or dead", stream.streamId());
         }
       } catch (InterruptedException ie) {
         Thread.currentThread().interrupt();
