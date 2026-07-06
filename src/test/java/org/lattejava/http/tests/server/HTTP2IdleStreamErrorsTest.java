@@ -24,7 +24,7 @@ import static org.testng.Assert.*;
  *
  * @author Daniel DeGroff
  */
-public class HTTP2IdleStreamErrorsTest extends BaseTest {
+public class HTTP2IdleStreamErrorsTest extends BaseHTTP2RawTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
   // §5.1/1 — DATA on idle stream
   // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -72,7 +72,7 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -171,81 +171,6 @@ public class HTTP2IdleStreamErrorsTest extends BaseTest {
         assertFalse(socketReset, "Server sent RST instead of FIN after invalid preface — GOAWAY was not readable");
         assertTrue(sawGoaway, "Server must send GOAWAY before closing on invalid preface");
         assertEquals(goawayErrorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1); got: " + goawayErrorCode);
-      }
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Opens an h2c prior-knowledge connection and drains the server's initial handshake frames until SETTINGS ACK is
-   * observed. The loop is robust to additional connection-level frames the server may interleave (e.g.
-   * WINDOW_UPDATE).
-   */
-  private Socket openH2cConnection(int port) throws Exception {
-    var sock = new Socket("127.0.0.1", port);
-    var out = sock.getOutputStream();
-    out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes());
-    out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0}); // empty SETTINGS
-    out.flush();
-
-    // Drain server frames until we have observed the server's SETTINGS ACK.
-    // Robust to additional connection-level frames the server may interleave (e.g. WINDOW_UPDATE).
-    var in = sock.getInputStream();
-    while (true) {
-      byte[] header = in.readNBytes(9);
-      if (header.length != 9) {
-        throw new IOException("Unexpected EOF while draining server handshake frames");
-      }
-      int length = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
-      int type = header[3] & 0xFF;
-      int flags = header[4] & 0xFF;
-      if (length > 0) {
-        in.readNBytes(length);
-      }
-      if (type == 0x4 && (flags & 0x1) != 0) {
-        break; // saw SETTINGS ACK — handshake complete
-      }
-    }
-    return sock;
-  }
-
-  /**
-   * Writes a 9-byte HTTP/2 frame header.
-   */
-  private void writeFrameHeader(OutputStream out, int length, int type, int flags, int streamId) throws Exception {
-    out.write(new byte[]{
-        (byte) ((length >> 16) & 0xFF), (byte) ((length >> 8) & 0xFF), (byte) (length & 0xFF),
-        (byte) type, (byte) flags,
-        (byte) ((streamId >> 24) & 0x7F), (byte) ((streamId >> 16) & 0xFF),
-        (byte) ((streamId >> 8) & 0xFF), (byte) (streamId & 0xFF)
-    });
-  }
-
-  /**
-   * Drains inbound frames until GOAWAY (type {@code 0x7}) arrives or EOF. Returns the GOAWAY error code, or {@code -1}
-   * on EOF.
-   */
-  private int readUntilGoaway(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      if (in.readNBytes(rest, 0, 8) != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      byte[] payload = in.readNBytes(length);
-      if (type == 0x7) {
-        if (payload.length < 8) {
-          return -1;
-        }
-        return ((payload[4] & 0xFF) << 24) | ((payload[5] & 0xFF) << 16) | ((payload[6] & 0xFF) << 8) | (payload[7] & 0xFF);
       }
     }
   }

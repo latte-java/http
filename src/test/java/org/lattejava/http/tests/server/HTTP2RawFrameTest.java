@@ -16,12 +16,11 @@ import static org.testng.Assert.*;
  * Raw frame conformance tests for HTTP/2. Each test sends specific frame sequences over a raw h2c socket and asserts
  * RFC 9113 conformance at the connection level: correct GOAWAY error codes or correct transparent-ignore behavior.
  *
- * <p>Frame helpers are inlined for self-containment (rather than relying on a shared base class that does not yet
- * expose these utilities).
+ * <p>Frame helpers live in {@link BaseHTTP2RawTest}, shared by all raw-frame HTTP/2 suites.
  *
  * @author Daniel DeGroff
  */
-public class HTTP2RawFrameTest extends BaseTest {
+public class HTTP2RawFrameTest extends BaseHTTP2RawTest {
   /**
    * Minimal HPACK block representing a valid GET / request over HTTP/2. Uses only indexed header field representations
    * from the static table (RFC 7541 §6.1):
@@ -42,6 +41,105 @@ public class HTTP2RawFrameTest extends BaseTest {
       (byte) 0x41, 0x09,
       'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
   };
+
+  /**
+   * Design §2.2 — the default 1 MB connection window is advertised in the server's FIRST flight, coalesced with the
+   * server preface SETTINGS and ahead of the SETTINGS ACK (RFC 9113 §6.9.2: a stream-0 WINDOW_UPDATE is the only
+   * mechanism; the grant is causally independent of the peer's SETTINGS, so it need not wait — Go/nginx/browser
+   * practice). Uses a raw socket because openH2CConnection deliberately drains the advertisement.
+   */
+  @Test
+  public void connection_window_advertised_at_default_one_megabyte() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = new Socket("127.0.0.1", server.getActualPort())) {
+        var out = sock.getOutputStream();
+        out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes());
+        out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0}); // empty client SETTINGS
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        int[] settings = readFrameHeader(in);
+        assertEquals(settings[0], 0x4, "Expected the server preface SETTINGS first; got type: " + settings[0]);
+        in.readNBytes(settings[3]);
+
+        int[] windowUpdate = readFrameHeader(in);
+        assertEquals(windowUpdate[0], 0x8, "Expected the first-flight WINDOW_UPDATE before the ACK; got type: " + windowUpdate[0]);
+        assertEquals(windowUpdate[2], 0, "Expected stream 0; got: " + windowUpdate[2]);
+        byte[] payload = in.readNBytes(4);
+        int increment = ((payload[0] & 0x7F) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+        assertEquals(increment, 1_048_576 - 65_535, "Expected the default 1MB advertisement delta; got: " + increment);
+
+        int[] ack = readFrameHeader(in);
+        assertEquals(ack[0], 0x4, "Expected the SETTINGS ACK after the advertisement; got type: " + ack[0]);
+        assertEquals(ack[1] & 0x1, 0x1, "Expected the ACK flag on the trailing SETTINGS frame");
+      }
+    }
+  }
+
+  /** Design §2.2 — configured to exactly 65,535, no stream-0 WINDOW_UPDATE is advertised. */
+  @Test
+  public void connection_window_at_minimum_advertises_nothing() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withConnectionWindowSize(65_535)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Send a request; the FIRST server frame must be its response HEADERS, not a WINDOW_UPDATE.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+        sock.setSoTimeout(5000);
+        int[] frame = readFrameHeader(sock.getInputStream());
+        assertEquals(frame[0], 0x1, "Expected response HEADERS as the first frame (no advertisement); got type: " + frame[0]);
+      }
+    }
+  }
+
+  /** Design §2.2 replenish-at-half — far fewer stream-0 WINDOW_UPDATEs than one per DATA frame. */
+  @Test
+  public void connection_window_replenishes_at_half_not_per_frame() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withConnectionWindowSize(131_072).withInitialWindowSize(1 << 20)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, 1);
+        out.write(MINIMAL_HPACK_GET);
+        byte[] chunk = new byte[16_384];
+        for (int i = 0; i < 16; i++) { // 262,144 bytes = 2x the connection window
+          boolean last = i == 15;
+          writeFrameHeader(out, chunk.length, 0x0, last ? 0x1 : 0x0, 1);
+          out.write(chunk);
+        }
+        out.flush();
+        sock.setSoTimeout(5000);
+        // Count stream-0 WINDOW_UPDATEs until the response HEADERS arrives.
+        var in = sock.getInputStream();
+        int connectionWindowUpdates = 0;
+        while (true) {
+          int[] frame = readFrameHeader(in);
+          byte[] payload = in.readNBytes(frame[3]);
+          assertEquals(payload.length, frame[3]);
+          if (frame[0] == 0x8 && frame[2] == 0) {
+            connectionWindowUpdates++;
+          }
+          if (frame[0] == 0x1) {
+            break; // response HEADERS
+          }
+        }
+        // 262,144 bytes / (131,072/2 per replenish) + 1 slack = at most 5; the old per-frame echo would emit 16.
+        assertTrue(connectionWindowUpdates <= 5,
+            "Expected replenish-at-half (<=5 stream-0 WINDOW_UPDATEs); got: " + connectionWindowUpdates);
+      }
+    }
+  }
 
   /**
    * RFC 9113 §6.10 — CONTINUATION frame with no preceding HEADERS (no active header block) must trigger
@@ -86,6 +184,65 @@ public class HTTP2RawFrameTest extends BaseTest {
         sock.setSoTimeout(5000);
         int errorCode = readUntilGoaway(sock.getInputStream());
         assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for CONTINUATION on wrong stream; got: " + errorCode);
+      }
+    }
+  }
+
+  /** Design §2.2 enforcement — one frame larger than the connection window's available credit. Only reachable by
+   * config: large advertised MAX_FRAME_SIZE, minimum connection window, large stream windows so the connection debit
+   * (which runs first) trips. */
+  @Test
+  public void data_exceeding_connection_window_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withMaxFrameSize(1 << 20).withConnectionWindowSize(65_535).withInitialWindowSize(1 << 20))
+        .start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 70,000 bytes in ONE frame (legal against our advertised 1MB MAX_FRAME_SIZE) > 65,535 connection window.
+        writeFrameHeader(out, 70_000, 0x0, 0x1, 1);
+        out.write(new byte[70_000]);
+        out.flush();
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected GOAWAY(FLOW_CONTROL_ERROR=0x3) for connection window overrun; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.9.1 — a DATA frame larger than the stream's available receive window is a stream error of type
+   * FLOW_CONTROL_ERROR. Today the underflow throws internally and surfaces as GOAWAY(INTERNAL_ERROR); the HTTP2Window
+   * migration maps it correctly. Debit and replenish run inline on the reader thread, so the only reachable overrun is
+   * a single frame exceeding available credit — hence the tiny configured window.
+   */
+  @Test
+  public void data_exceeding_stream_window_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withInitialWindowSize(1024)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 with a body pending.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 2048-byte DATA against a 1024-byte stream window — overruns in one frame.
+        writeFrameHeader(out, 2048, 0x0 /* DATA */, 0x1 /* END_STREAM */, 1);
+        out.write(new byte[2048]);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected RST_STREAM(FLOW_CONTROL_ERROR=0x3) for stream window overrun; got: " + errorCode);
       }
     }
   }
@@ -481,6 +638,69 @@ public class HTTP2RawFrameTest extends BaseTest {
     }
   }
 
+  /** Design §2.1 bug 4 / §2.5 — DATA at a forgotten stream debits AND replenishes; the connection window no longer
+   * leaks. Evicts stream 1 from recently-closed memory (101 RSTs, like data_on_forgotten_closed_stream_is_ignored),
+   * then pushes a full window of ignored DATA on the forgotten stream before a normal upload. */
+  @Test
+  public void ignored_data_does_not_leak_connection_window() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withConnectionWindowSize(65_535).withInitialWindowSize(1 << 20)
+                           .withRateLimits(rl -> rl.withRstStreamMax(1000))).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open and reset 101 streams (IDs 1..201) — stream 1 falls out of the recently-closed memory.
+        for (int id = 1; id <= 201; id += 2) {
+          writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, id);
+          out.write(MINIMAL_HPACK_GET);
+          writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, id);
+          out.write(new byte[]{0, 0, 0, 0x8}); // CANCEL
+        }
+        // A full connection window of DATA at the evicted (forgotten) stream 1: 4 x 16,384 = 65,536 > 65,535.
+        // Without debit+replenish for ignored frames, the peer-visible window would be exhausted and stream 203
+        // would stall waiting for a WINDOW_UPDATE that never arrives.
+        byte[] chunk = new byte[16_384];
+        for (int i = 0; i < 4; i++) {
+          writeFrameHeader(out, chunk.length, 0x0, 0x0, 1);
+          out.write(chunk);
+        }
+        // Pin: flush and verify the server emits at least one stream-0 WINDOW_UPDATE for the ignored DATA before
+        // sending the follow-up request. Pre-fix, ignored DATA produced ZERO stream-0 WINDOW_UPDATEs (the old echo
+        // lived in the data handler, unreachable for forgotten streams), so this assertion discriminates the fix.
+        // At a 65,535 window the burst produces exactly one replenish; reading until it arrives is timing-safe
+        // because the replenish is written before any follow-up request is sent.
+        out.flush();
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        boolean sawStream0WindowUpdate = false;
+        while (!sawStream0WindowUpdate) {
+          int[] frame = readFrameHeader(in);
+          byte[] payload = in.readNBytes(frame[3]);
+          if (frame[0] == 0x8 /* WINDOW_UPDATE */ && frame[2] == 0 /* stream 0 */) {
+            int increment = ((payload[0] & 0x7F) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+            assertTrue(increment > 0, "Stream-0 WINDOW_UPDATE must carry a positive increment; got: " + increment);
+            sawStream0WindowUpdate = true;
+          }
+        }
+        assertTrue(sawStream0WindowUpdate, "Expected at least one stream-0 WINDOW_UPDATE for ignored DATA frames");
+        // Now a real upload on stream 203.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, 203);
+        out.write(MINIMAL_HPACK_GET);
+        for (int i = 0; i < 4; i++) {
+          boolean last = i == 3;
+          writeFrameHeader(out, chunk.length, 0x0, last ? 0x1 : 0x0, 203);
+          out.write(chunk);
+        }
+        out.flush();
+        assertEquals(readUntilResponseHeaders(in), 203, "Upload after ignored DATA must complete");
+      }
+    }
+  }
+
   /**
    * RFC 9113 §6.9.1 — after the peer sets SETTINGS_INITIAL_WINDOW_SIZE=1, a stream opened afterward must not send a
    * DATA frame larger than the 1-octet send window. Frames on one connection are processed in order, so sending
@@ -684,6 +904,39 @@ public class HTTP2RawFrameTest extends BaseTest {
         sock.setSoTimeout(5000);
         int errorCode = readUntilRstStream(sock.getInputStream());
         assertEquals(errorCode, 0x5, "Expected RST_STREAM(STREAM_CLOSED=0x5) for mid-stream HEADERS; got: " + errorCode);
+      }
+    }
+  }
+
+  /** Design §2.1 bug 3 — padding is flow-controlled but not data; using flowControlledLength for debit ensures padded
+   * uploads do not exhaust the connection window. */
+  @Test
+  public void padded_upload_completes_without_window_leak() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    AtomicInteger received = new AtomicInteger();
+    HTTPHandler handler = (req, res) -> {
+      received.set(req.getInputStream().readAllBytes().length);
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 20 padded DATA frames: 1 pad-length byte + 16,183 data bytes + 200 pad bytes = 16,384 frame payload.
+        // flags: PADDED (0x8) for first 19 frames, PADDED|END_STREAM (0x8|0x1) for last.
+        byte[] payload = new byte[16_384];
+        payload[0] = (byte) 200; // pad-length byte
+        // data bytes are zero (bytes 1..16183); padding bytes are zero (bytes 16184..16383)
+        for (int i = 0; i < 20; i++) {
+          boolean last = i == 19;
+          writeFrameHeader(out, payload.length, 0x0, last ? (0x1 | 0x8) : 0x8, 1);
+          out.write(payload);
+        }
+        out.flush();
+        sock.setSoTimeout(5000);
+        assertEquals(readUntilResponseHeaders(sock.getInputStream()), 1);
+        assertEquals(received.get(), 20 * 16_183, "Handler must receive the full unpadded body");
       }
     }
   }
@@ -1191,6 +1444,44 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
+   * RFC 9113 §6.9.2 — a SETTINGS_INITIAL_WINDOW_SIZE increase that pushes an open stream's send window past 2^31-1 is
+   * a connection error FLOW_CONTROL_ERROR. The window must first be raised above its initial value via WINDOW_UPDATE,
+   * because the SETTINGS delta alone can only reach exactly 2^31-1.
+   */
+  @Test
+  public void settings_increase_overflowing_stream_window_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    CountDownLatch release = new CountDownLatch(1);
+    HTTPHandler handler = (req, res) -> {
+      try {
+        release.await(10, TimeUnit.SECONDS);
+      } catch (InterruptedException ignore) {
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 (handler parks, keeping the stream live).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // Raise stream 1's send window 1000 above the 65535 baseline.
+        writeFrameHeader(out, 4, 0x8 /* WINDOW_UPDATE */, 0, 1);
+        out.write(new byte[]{0, 0, 0x3, (byte) 0xe8}); // increment = 1000
+        // SETTINGS INITIAL_WINDOW_SIZE = 2^31-1: delta pushes stream 1 to 66535 + (2^31-1 - 65535) > 2^31-1.
+        writeFrameHeader(out, 6, 0x4 /* SETTINGS */, 0, 0);
+        out.write(new byte[]{0x0, 0x4, (byte) 0x7f, (byte) 0xff, (byte) 0xff, (byte) 0xff});
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected GOAWAY(FLOW_CONTROL_ERROR=0x3) for SETTINGS-induced window overflow; got: " + errorCode);
+        release.countDown();
+      }
+    }
+  }
+
+  /**
    * RFC 9113 §6.5.2 — SETTINGS INITIAL_WINDOW_SIZE exceeding 2^31-1 must trigger GOAWAY(FLOW_CONTROL_ERROR).
    */
   @Test
@@ -1284,6 +1575,35 @@ public class HTTP2RawFrameTest extends BaseTest {
     }
   }
 
+  /** Design §2.1 bug 1 / §2.5 — an upload burst beyond the old 64 KB connection window completes under the default. */
+  @Test
+  public void upload_beyond_old_connection_window_completes() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
+    AtomicInteger received = new AtomicInteger();
+    HTTPHandler handler = (req, res) -> {
+      received.set(req.getInputStream().readAllBytes().length);
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 20 DATA frames x 16384 = 327,680 bytes — 5x the old connection window, blasted without reading credit.
+        byte[] chunk = new byte[16_384];
+        for (int i = 0; i < 20; i++) {
+          boolean last = i == 19;
+          writeFrameHeader(out, chunk.length, 0x0, last ? 0x1 : 0x0, 1);
+          out.write(chunk);
+        }
+        out.flush();
+        sock.setSoTimeout(5000);
+        assertEquals(readUntilResponseHeaders(sock.getInputStream()), 1);
+        assertEquals(received.get(), 20 * 16_384, "Handler must receive the full body");
+      }
+    }
+  }
+
   /**
    * RFC 9113 §6.9 — WINDOW_UPDATE with increment 0 on the connection (stream 0) must trigger GOAWAY(PROTOCOL_ERROR).
    */
@@ -1341,27 +1661,6 @@ public class HTTP2RawFrameTest extends BaseTest {
   }
 
   /**
-   * Open an h2c prior-knowledge connection and return the socket after the handshake is complete (server SETTINGS and
-   * SETTINGS ACK have been drained).
-   */
-  private Socket openH2CConnection(int port) throws Exception {
-    var sock = new Socket("127.0.0.1", port);
-    var out = sock.getOutputStream();
-    out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes());
-    out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0});  // empty SETTINGS
-    out.flush();
-
-    var in = sock.getInputStream();
-    // Drain server SETTINGS.
-    byte[] header = in.readNBytes(9);
-    int length = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
-    in.readNBytes(length);
-    // Drain SETTINGS ACK.
-    in.readNBytes(9);
-    return sock;
-  }
-
-  /**
    * Read and discard frames until a DATA frame (type {@code 0x0}) arrives. Returns its payload length, or {@code -1} on
    * EOF.
    */
@@ -1385,97 +1684,4 @@ public class HTTP2RawFrameTest extends BaseTest {
     }
   }
 
-  /**
-   * Drain inbound frames until GOAWAY (type {@code 0x7}) arrives or the connection closes. Returns the GOAWAY error
-   * code, or {@code -1} if EOF arrived first.
-   */
-  private int readUntilGoaway(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      int read = in.readNBytes(rest, 0, 8);
-      if (read != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      byte[] payload = in.readNBytes(length);
-      if (type == 0x7) {  // GOAWAY
-        if (payload.length < 8) {
-          return -1;
-        }
-        return ((payload[4] & 0xFF) << 24) | ((payload[5] & 0xFF) << 16) | ((payload[6] & 0xFF) << 8) | (payload[7] & 0xFF);
-      }
-    }
-  }
-
-  /**
-   * Read and discard frames until a HEADERS frame (type {@code 0x1}) arrives. Returns the stream-id of the response
-   * HEADERS frame, or {@code -1} on EOF.
-   */
-  private int readUntilResponseHeaders(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      int read = in.readNBytes(rest, 0, 8);
-      if (read != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      int streamId = ((rest[4] & 0x7F) << 24) | ((rest[5] & 0xFF) << 16) | ((rest[6] & 0xFF) << 8) | (rest[7] & 0xFF);
-      in.readNBytes(length);
-      if (type == 0x1) {  // HEADERS
-        return streamId;
-      }
-    }
-  }
-
-  /**
-   * Drain inbound frames until RST_STREAM (type {@code 0x3}) arrives or the connection closes. Returns the RST_STREAM
-   * error code, or {@code -1} if EOF or GOAWAY arrived first.
-   */
-  private int readUntilRstStream(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      int read = in.readNBytes(rest, 0, 8);
-      if (read != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      byte[] payload = in.readNBytes(length);
-      if (type == 0x3) { // RST_STREAM
-        if (payload.length < 4) {
-          return -1;
-        }
-        return ((payload[0] & 0xFF) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
-      }
-      if (type == 0x7) { // GOAWAY — connection error instead
-        return -1;
-      }
-    }
-  }
-
-  /**
-   * Write a 9-byte frame header.
-   */
-  private void writeFrameHeader(OutputStream out, int length, int type, int flags, int streamId) throws Exception {
-    out.write(new byte[]{
-        (byte) ((length >> 16) & 0xFF), (byte) ((length >> 8) & 0xFF), (byte) (length & 0xFF),
-        (byte) type, (byte) flags,
-        (byte) ((streamId >> 24) & 0x7F), (byte) ((streamId >> 16) & 0xFF),
-        (byte) ((streamId >> 8) & 0xFF), (byte) (streamId & 0xFF)
-    });
-  }
 }

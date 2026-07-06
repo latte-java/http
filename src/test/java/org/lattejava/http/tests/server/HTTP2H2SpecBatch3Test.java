@@ -25,7 +25,7 @@ import static org.testng.Assert.*;
  *
  * @author Daniel DeGroff
  */
-public class HTTP2H2SpecBatch3Test extends BaseTest {
+public class HTTP2H2SpecBatch3Test extends BaseHTTP2RawTest {
   /**
    * Minimal HPACK block for a GET / request (static-table indexed only).
    */
@@ -61,7 +61,7 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
       res.setStatus(200);
     };
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -99,7 +99,7 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
       res.setStatus(200);
     };
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -136,7 +136,7 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -164,7 +164,7 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -210,7 +210,7 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
     // Set a very small concurrent stream cap so the test triggers quickly.
     server.configuration().withHTTP2(h2 -> h2.withMaxConcurrentStreams(2));
     try (var ignored = server.start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -236,91 +236,6 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Opens an h2c prior-knowledge connection and drains the server's initial SETTINGS + SETTINGS ACK.
-   */
-  private Socket openH2cConnection(int port) throws Exception {
-    var sock = new Socket("127.0.0.1", port);
-    var out = sock.getOutputStream();
-    out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes());
-    out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0}); // empty SETTINGS
-    out.flush();
-
-    var in = sock.getInputStream();
-    byte[] header = in.readNBytes(9);
-    int length = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
-    in.readNBytes(length);
-    in.readNBytes(9); // SETTINGS ACK
-    return sock;
-  }
-
-  /**
-   * Writes a 9-byte HTTP/2 frame header.
-   */
-  private void writeFrameHeader(OutputStream out, int length, int type, int flags, int streamId) throws Exception {
-    out.write(new byte[]{
-        (byte) ((length >> 16) & 0xFF), (byte) ((length >> 8) & 0xFF), (byte) (length & 0xFF),
-        (byte) type, (byte) flags,
-        (byte) ((streamId >> 24) & 0x7F), (byte) ((streamId >> 16) & 0xFF),
-        (byte) ((streamId >> 8) & 0xFF), (byte) (streamId & 0xFF)
-    });
-  }
-
-  /**
-   * Drains inbound frames until GOAWAY (type {@code 0x7}) arrives or EOF. Returns the GOAWAY error code, or {@code -1}
-   * on EOF.
-   */
-  private int readUntilGoaway(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      if (in.readNBytes(rest, 0, 8) != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      byte[] payload = in.readNBytes(length);
-      if (type == 0x7) {
-        if (payload.length < 8) {
-          return -1;
-        }
-        return ((payload[4] & 0xFF) << 24) | ((payload[5] & 0xFF) << 16) | ((payload[6] & 0xFF) << 8) | (payload[7] & 0xFF);
-      }
-    }
-  }
-
-  /**
-   * Drains inbound frames until RST_STREAM (type {@code 0x3}) arrives or EOF/GOAWAY. Returns the RST_STREAM error code,
-   * or {@code -1} if EOF or GOAWAY arrived first.
-   */
-  private int readUntilRstStream(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      if (in.readNBytes(rest, 0, 8) != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      byte[] payload = in.readNBytes(length);
-      if (type == 0x3) {
-        if (payload.length < 4) {
-          return -1;
-        }
-        return ((payload[0] & 0xFF) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
-      }
-      if (type == 0x7) { // GOAWAY — connection error, not a stream error
-        return -1;
-      }
-    }
-  }
-
-  /**
    * Drains inbound frames until a HEADERS frame (type {@code 0x1}) on the specified {@code targetStreamId} arrives.
    * Returns {@code targetStreamId} on match, or {@code -1} on EOF.
    */
@@ -339,30 +254,6 @@ public class HTTP2H2SpecBatch3Test extends BaseTest {
       int streamId = ((rest[4] & 0x7F) << 24) | ((rest[5] & 0xFF) << 16) | ((rest[6] & 0xFF) << 8) | (rest[7] & 0xFF);
       in.readNBytes(length);
       if (type == 0x1 && streamId == targetStreamId) {
-        return streamId;
-      }
-    }
-  }
-
-  /**
-   * Drains inbound frames until a HEADERS frame (type {@code 0x1}) arrives. Returns the stream ID of the response
-   * HEADERS frame, or {@code -1} on EOF.
-   */
-  private int readUntilResponseHeaders(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      if (in.readNBytes(rest, 0, 8) != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      int streamId = ((rest[4] & 0x7F) << 24) | ((rest[5] & 0xFF) << 16) | ((rest[6] & 0xFF) << 8) | (rest[7] & 0xFF);
-      in.readNBytes(length);
-      if (type == 0x1) {
         return streamId;
       }
     }

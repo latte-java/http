@@ -8,8 +8,8 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
-import org.lattejava.http.server.internal.h2.HTTP2ConnectionWindow;
 import org.lattejava.http.server.internal.h2.HTTP2Frame;
+import org.lattejava.http.server.internal.h2.HTTP2Window;
 import org.lattejava.http.server.internal.h2.HTTP2OutputStream;
 import org.lattejava.http.server.internal.h2.HTTP2Stream;
 import org.lattejava.http.server.internal.h2.HTTP2WriterThread;
@@ -27,7 +27,7 @@ public class HTTP2OutputStreamFragmentationTest {
   public void connection_window_caps_chunk_and_blocks_when_exhausted() throws Exception {
     var queue = new LinkedBlockingQueue<HTTP2Frame>(128);
     var stream = new HTTP2Stream(1, HTTP2Stream.State.IDLE, false, 65535, 65535, null, null);
-    var connectionWindow = new HTTP2ConnectionWindow(10);
+    var connectionWindow = new HTTP2Window(10);
     var os = new HTTP2OutputStream(stream, HTTP2WriterThread.forQueue(queue), connectionWindow, 16);
 
     Thread.ofVirtual().start(() -> {
@@ -126,10 +126,7 @@ public class HTTP2OutputStreamFragmentationTest {
     Thread.ofVirtual().start(() -> {
       try {
         Thread.sleep(50);
-        stream.incrementSendWindow(1);
-        synchronized (stream) {
-          stream.notifyAll();
-        }
+        stream.sendWindow().increment(1);
       } catch (InterruptedException ignore) {
         Thread.currentThread().interrupt();
       }

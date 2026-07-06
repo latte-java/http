@@ -25,7 +25,7 @@ import static org.testng.Assert.*;
  *
  * @author Daniel DeGroff
  */
-public class HTTP2H2SpecBatch4Test extends BaseTest {
+public class HTTP2H2SpecBatch4Test extends BaseHTTP2RawTest {
   /**
    * Minimal HPACK block for a GET / request (static-table indexed only).
    */
@@ -58,7 +58,7 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
       }
     };
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -106,7 +106,7 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
       }
     };
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -193,7 +193,7 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         sock.setSoTimeout(5000);
 
@@ -236,39 +236,5 @@ public class HTTP2H2SpecBatch4Test extends BaseTest {
         assertTrue(sawEof, "Server must close connection cleanly (FIN) after GOAWAY");
       }
     }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Opens an h2c prior-knowledge connection and drains the server's initial SETTINGS + SETTINGS ACK.
-   */
-  private Socket openH2cConnection(int port) throws Exception {
-    var sock = new Socket("127.0.0.1", port);
-    var out = sock.getOutputStream();
-    out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes());
-    out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0}); // empty SETTINGS
-    out.flush();
-
-    var in = sock.getInputStream();
-    byte[] header = in.readNBytes(9);
-    int length = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
-    in.readNBytes(length);
-    in.readNBytes(9); // SETTINGS ACK
-    return sock;
-  }
-
-  /**
-   * Writes a 9-byte HTTP/2 frame header.
-   */
-  private void writeFrameHeader(OutputStream out, int length, int type, int flags, int streamId) throws Exception {
-    out.write(new byte[]{
-        (byte) ((length >> 16) & 0xFF), (byte) ((length >> 8) & 0xFF), (byte) (length & 0xFF),
-        (byte) type, (byte) flags,
-        (byte) ((streamId >> 24) & 0x7F), (byte) ((streamId >> 16) & 0xFF),
-        (byte) ((streamId >> 8) & 0xFF), (byte) (streamId & 0xFF)
-    });
   }
 }

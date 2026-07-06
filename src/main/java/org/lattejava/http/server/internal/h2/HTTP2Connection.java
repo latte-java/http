@@ -36,7 +36,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
 
   // Connection-level send window (RFC 9113 §6.9). Shared by every per-stream writer; replenished by the reader thread
   // on a stream-0 WINDOW_UPDATE. Starts at the HTTP/2 default of 65535 octets.
-  private final HTTP2ConnectionWindow connectionSendWindow = new HTTP2ConnectionWindow(65535);
+  private final HTTP2Window connectionSendWindow = new HTTP2Window(65535);
 
   private final HTTPContext context;
 
@@ -136,7 +136,10 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       var reader = new HTTP2FrameReader(inputStream, buffers.frameReadBuffer(), localSettings.maxHeaderListSize());
 
       // Perform the SETTINGS exchange. The client connection preface was already read and validated by ProtocolSelector.
-      HTTP2Result negotiation = HTTP2Tools.negotiateSettings(reader, frameWriter, out, localSettings, peerSettings, logger);
+      // The connection-window advertisement rides the same first flight as our SETTINGS (RFC 9113 §6.9.2).
+      int connectionWindowSize = configuration.getHTTP2Configuration().getConnectionWindowSize();
+      HTTP2Result negotiation = HTTP2Tools.negotiateSettings(reader, frameWriter, out, localSettings, peerSettings,
+          connectionWindowSize, logger);
       if (negotiation instanceof HTTP2Result.ConnectionError(HTTP2ErrorCode code)) {
         // The writer thread does not exist yet, so the GOAWAY is written directly, then the output side is half-closed
         // so the kernel sends FIN — h2spec keeps writing preface bytes and a plain close would race into an OS RST.
@@ -161,12 +164,15 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       writer = new HTTP2WriterThread(frameWriter, readerThread, logger);
       writer.start();
 
+      var connectionFlowControl = new HTTP2ConnectionFlowControl(connectionWindowSize, writer);
+
       HPACKDecoder decoder = new HPACKDecoder(new HPACKDynamicTable(localSettings.headerTableSize()));
       HPACKEncoder encoder = new HPACKEncoder(new HPACKDynamicTable(peerSettings.headerTableSize()));
 
       var headerHandler = new HTTP2HeaderFrameHandler(configuration, connectionSendWindow, context, decoder, encoder,
           handledRequests, handlerThreads, instrumenter, listener, logger, peerSettings, socket, writer);
       var handlers = new HTTP2StreamFrameHandlers(
+          connectionFlowControl,
           new HTTP2DataFrameHandler(configuration.getHTTP2Configuration(), localSettings, logger, writer),
           headerHandler, rateLimits, new HTTP2RSTStreamFrameHandler(logger), new HTTP2WindowUpdateFrameHandler());
       registry = new HTTP2StreamRegistry(localSettings, peerSettings, handlers);

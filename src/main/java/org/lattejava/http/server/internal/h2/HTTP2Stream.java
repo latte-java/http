@@ -9,17 +9,22 @@ import module org.lattejava.http;
 
 /**
  * Per-stream state — RFC 9113 §5.1 state machine plus send/receive window counters. Synchronized for cross-thread
- * safety: the connection reader updates state via applyEvent, the writer thread checks/consumes the send window, the
- * handler thread reads the receive window.
+ * safety: the connection reader updates state via applyEvent. Window state lives in two {@link HTTP2Window} fields:
+ * handler threads acquire from the send window; the reader thread debits and replenishes the receive window and
+ * updates state.
  *
  * @author Daniel DeGroff
  */
 public class HTTP2Stream implements HTTP2FrameHandler {
   private final HTTP2StreamFrameHandlers handlers;
 
+  private final HTTP2Window receiveWindow;
+
   private final HTTP2StreamRegistry registry;
 
   private final boolean remembered;
+
+  private final HTTP2Window sendWindow;
 
   private final int streamId;
 
@@ -27,16 +32,12 @@ public class HTTP2Stream implements HTTP2FrameHandler {
 
   private volatile BlockingQueue<byte[]> pipe;
 
-  private long receiveWindow;
-
   private long receivedDataBytes;
 
   // The HTTPRequest associated with this stream. Set by the connection reader once the initial HEADERS block has been
   // decoded and the request constructed. Used by the trailers path so the reader can deliver request trailers to the
   // same HTTPRequest the handler thread is processing (RFC 9113 §8.1).
   private volatile HTTPRequest request;
-
-  private long sendWindow;
 
   private State state;
 
@@ -48,8 +49,8 @@ public class HTTP2Stream implements HTTP2FrameHandler {
     this.streamId = streamId;
     this.state = initialState;
     this.remembered = remembered;
-    this.receiveWindow = initialReceiveWindow;
-    this.sendWindow = initialSendWindow;
+    this.receiveWindow = new HTTP2Window(initialReceiveWindow);
+    this.sendWindow = new HTTP2Window(initialSendWindow);
     this.handlers = handlers;
     this.registry = registry;
   }
@@ -84,21 +85,6 @@ public class HTTP2Stream implements HTTP2FrameHandler {
     };
   }
 
-  /**
-   * Atomically waits until the send window is positive, then consumes {@code min(want, available)} octets and returns
-   * the amount consumed. Used by the per-stream writer so the window check and the `consume` are a single synchronized
-   * step: a concurrent SETTINGS-induced INITIAL_WINDOW_SIZE change cannot wedge between them and force a spurious
-   * underflow. {@code timeoutMillis} bounds each wait so the caller stays responsive to interruption and teardown.
-   */
-  public synchronized int acquireSendWindow(int want, long timeoutMillis) throws InterruptedException {
-    while (sendWindow <= 0) {
-      wait(timeoutMillis);
-    }
-    int grant = (int) Math.min(want, sendWindow);
-    sendWindow -= grant;
-    return grant;
-  }
-
   public synchronized void applyEvent(Event event) {
     state = transition(state, event);
   }
@@ -108,20 +94,6 @@ public class HTTP2Stream implements HTTP2FrameHandler {
    */
   public void close() {
     registry.close(streamId);
-  }
-
-  public synchronized void consumeReceiveWindow(int bytes) {
-    if (bytes > receiveWindow) {
-      throw new IllegalStateException("Stream [" + streamId + "] receive-window underflow: needed [" + bytes + "], have [" + receiveWindow + "]");
-    }
-    receiveWindow -= bytes;
-  }
-
-  public synchronized void consumeSendWindow(int bytes) {
-    if (bytes > sendWindow) {
-      throw new IllegalStateException("Stream [" + streamId + "] send-window underflow: needed [" + bytes + "], have [" + sendWindow + "]");
-    }
-    sendWindow -= bytes;
   }
 
   /**
@@ -167,18 +139,6 @@ public class HTTP2Stream implements HTTP2FrameHandler {
     return declaredContentLength == -1 || receivedDataBytes <= declaredContentLength;
   }
 
-  public synchronized void incrementReceiveWindow(int delta) {
-    receiveWindow += delta;
-  }
-
-  public synchronized void incrementSendWindow(int delta) {
-    long next = sendWindow + delta;
-    if (next > Integer.MAX_VALUE) {
-      throw new IllegalStateException("Stream [" + streamId + "] send-window overflow past 2^31-1");
-    }
-    sendWindow = next;
-  }
-
   /**
    * Registers this stream with the roster; false means the MAX_CONCURRENT_STREAMS cap refused it.
    */
@@ -190,23 +150,15 @@ public class HTTP2Stream implements HTTP2FrameHandler {
     return pipe;
   }
 
-  public synchronized long receiveWindow() {
+  public HTTP2Window receiveWindow() {
     return receiveWindow;
-  }
-
-  /**
-   * Returns send-window credit that was acquired but not used — for example when the connection-level window was the
-   * tighter constraint and granted fewer octets than this stream's window did.
-   */
-  public synchronized void releaseSendWindow(int bytes) {
-    sendWindow += bytes;
   }
 
   public HTTPRequest request() {
     return request;
   }
 
-  public synchronized long sendWindow() {
+  public HTTP2Window sendWindow() {
     return sendWindow;
   }
 
@@ -230,22 +182,15 @@ public class HTTP2Stream implements HTTP2FrameHandler {
     return streamId;
   }
 
-  /**
-   * Non-blocking, all-or-nothing send-window acquire: consumes {@code want} octets and returns {@code true} only if the
-   * full amount is available; otherwise consumes nothing and returns {@code false}. Backs the single-frame fast path in
-   * {@link HTTP2OutputStream}.
-   */
-  public synchronized boolean tryAcquireSendWindow(int want) {
-    if (sendWindow < want) {
-      return false;
+  private HTTP2Result handleData(HTTP2Frame.DataFrame frame) {
+    // RFC 9113 §6.9 — connection-level flow control applies to every DATA frame regardless of stream state.
+    HTTP2Result connectionResult = handlers.connectionFlowControl().onData(frame.flowControlledLength());
+    if (!(connectionResult instanceof HTTP2Result.Ok)) {
+      return connectionResult;
     }
-    sendWindow -= want;
-    return true;
-  }
 
-  private HTTP2Result handleData(HTTP2Frame.DataFrame f) {
     // Empty-DATA flood guard runs before state checks, as today.
-    if (f.data().length == 0 && (f.flags() & HTTP2Frame.FLAG_END_STREAM) == 0 && handlers.rateLimits().recordEmptyData()) {
+    if (frame.data().length == 0 && (frame.flags() & HTTP2Frame.FLAG_END_STREAM) == 0 && handlers.rateLimits().recordEmptyData()) {
       return new HTTP2Result.ConnectionError(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
     }
 
@@ -257,7 +202,7 @@ public class HTTP2Stream implements HTTP2FrameHandler {
           ? new HTTP2Result.ConnectionError(HTTP2ErrorCode.STREAM_CLOSED)   // §5.1 — recently closed
           : HTTP2Result.OK;                                                 // forgotten: ignore per §6.1
       case HALF_CLOSED_REMOTE -> new HTTP2Result.StreamError(streamId, HTTP2ErrorCode.STREAM_CLOSED); // §5.1
-      case OPEN, HALF_CLOSED_LOCAL -> handlers.dataHandler().handle(this, f);
+      case OPEN, HALF_CLOSED_LOCAL -> handlers.dataHandler().handle(this, frame);
     };
   }
 

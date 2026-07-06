@@ -18,15 +18,23 @@ public final class HTTP2Tools {
   }
 
   /**
-   * Runs the server side of the SETTINGS exchange: sends the local SETTINGS, requires the peer's first frame to be a
-   * non-ACK SETTINGS, applies it, and ACKs. Never emits error frames and never touches the socket — a
+   * Runs the server side of the SETTINGS exchange: sends the local SETTINGS (with the connection-window advertisement
+   * coalesced into the same flight when {@code connectionWindowSize > 65_535}), requires the peer's first frame to be
+   * a non-ACK SETTINGS, applies it, and ACKs. Never emits error frames and never touches the socket — a
    * {@link HTTP2Result.ConnectionError} tells the caller which GOAWAY to send. IOExceptions from a dead peer
    * propagate; there is nobody to send a GOAWAY to.
    */
   public static HTTP2Result negotiateSettings(HTTP2FrameReader reader, HTTP2FrameWriter frameWriter, OutputStream out,
-                                              HTTP2Settings localSettings, HTTP2Settings peerSettings, Logger logger)
+                                              HTTP2Settings localSettings, HTTP2Settings peerSettings,
+                                              int connectionWindowSize, Logger logger)
       throws IOException {
     frameWriter.writeFrame(new HTTP2Frame.SettingsFrame(0, localSettings.toPayload()));
+    // RFC 9113 §6.9.2 — the connection window is only adjustable via WINDOW_UPDATE, and the grant is causally
+    // independent of the peer's SETTINGS, so it rides the first flight coalesced with the server preface. Go, nginx,
+    // and browsers all advertise the same way.
+    if (connectionWindowSize > 65_535) {
+      frameWriter.writeFrame(new HTTP2Frame.WindowUpdateFrame(0, connectionWindowSize - 65_535));
+    }
     out.flush();
 
     HTTP2Frame firstFrame;

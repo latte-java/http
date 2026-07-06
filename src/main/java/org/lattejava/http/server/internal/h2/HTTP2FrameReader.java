@@ -120,9 +120,9 @@ public class HTTP2FrameReader {
           if (dataLen < 0) {
             throw new ProtocolException("DATA pad length [" + padLen + "] exceeds frame payload length [" + length + "]");
           }
-          yield new DataFrame(streamId, flags, copyOfRange(buffer, 1, 1 + dataLen));
+          yield new DataFrame(streamId, flags, copyOfRange(buffer, 1, 1 + dataLen), length);
         }
-        yield new DataFrame(streamId, flags, copyOf(buffer, length));
+        yield new DataFrame(streamId, flags, copyOf(buffer, length), length);
       }
       case FRAME_TYPE_HEADERS -> {
         // RFC 9113 §6.2: HEADERS frame may have PADDED and/or PRIORITY prefix bytes before the fragment.

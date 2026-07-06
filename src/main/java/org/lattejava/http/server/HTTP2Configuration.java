@@ -18,6 +18,8 @@ import module java.base;
 public class HTTP2Configuration {
   private final HTTP2RateLimits rateLimits = new HTTP2RateLimits();
 
+  private int connectionWindowSize = 1_048_576;
+
   private Duration handlerReadTimeout = Duration.ofSeconds(10);
 
   private int headerTableSize = 4096;
@@ -27,6 +29,13 @@ public class HTTP2Configuration {
   private int maxConcurrentStreams = 100;
 
   private int maxFrameSize = 16384;
+
+  /**
+   * @return The connection-level receive flow-control window advertised to the client. Defaults to 1 MB.
+   */
+  public int getConnectionWindowSize() {
+    return connectionWindowSize;
+  }
 
   /**
    * @return The duration the reader waits for a handler to drain a DATA frame from its per-stream pipe before
@@ -69,6 +78,22 @@ public class HTTP2Configuration {
    */
   public HTTP2RateLimits getRateLimits() {
     return rateLimits;
+  }
+
+  /**
+   * Sets the connection-level receive flow-control window advertised to the client (RFC 9113 §6.9). Bounds the
+   * unacknowledged request-body bytes in flight across all streams on one connection; raise it for high-throughput
+   * uploads over high-latency links. Defaults to 1 MB.
+   *
+   * @param connectionWindowSize the window in octets, in [65535, 2^31-1].
+   * @return this.
+   */
+  public HTTP2Configuration withConnectionWindowSize(int connectionWindowSize) {
+    if (connectionWindowSize < 65_535) {
+      throw new IllegalArgumentException("connectionWindowSize must be in [65535, " + Integer.MAX_VALUE + "]. The protocol cannot shrink the connection window below its initial default. Got [" + connectionWindowSize + "]");
+    }
+    this.connectionWindowSize = connectionWindowSize;
+    return this;
   }
 
   /**

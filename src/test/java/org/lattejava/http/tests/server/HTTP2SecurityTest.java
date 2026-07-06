@@ -17,7 +17,7 @@ import static org.testng.Assert.*;
  * asserts that the server responds with {@code GOAWAY(ENHANCE_YOUR_CALM)} (error code {@code 0xb}) when the threshold
  * is exceeded.
  *
- * <p>All tests use raw sockets over h2c prior-knowledge. The {@code openH2cConnection} helper establishes a
+ * <p>All tests use raw sockets over h2c prior-knowledge. The {@code openH2CConnection} helper establishes a
  * compliant handshake, and the {@code readUntilGoaway} helper drains frames until GOAWAY arrives.
  *
  * <p>Empty-DATA flood: intentionally omitted. A meaningful DATA flood test requires an open, half-open stream to
@@ -27,70 +27,7 @@ import static org.testng.Assert.*;
  *
  * @author Daniel DeGroff
  */
-public class HTTP2SecurityTest extends BaseTest {
-  /**
-   * Open an h2c prior-knowledge connection. Returns the socket after the handshake is complete (server SETTINGS and
-   * SETTINGS ACK have been drained).
-   */
-  private Socket openH2cConnection(int port) throws Exception {
-    var sock = new Socket("127.0.0.1", port);
-    var out = sock.getOutputStream();
-    // Connection preface
-    out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes());
-    // Empty SETTINGS (length=0, type=0x4, flags=0, stream=0)
-    out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0});
-    out.flush();
-
-    var in = sock.getInputStream();
-    // Drain server SETTINGS frame.
-    byte[] header = in.readNBytes(9);
-    int length = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
-    in.readNBytes(length);
-    // Drain SETTINGS ACK (9 bytes, zero payload).
-    in.readNBytes(9);
-    return sock;
-  }
-
-  /**
-   * Write a 9-byte frame header (big-endian length + type + flags + stream-id).
-   */
-  private void writeFrameHeader(OutputStream out, int length, int type, int flags, int streamId) throws Exception {
-    out.write(new byte[]{
-        (byte) ((length >> 16) & 0xFF), (byte) ((length >> 8) & 0xFF), (byte) (length & 0xFF),
-        (byte) type, (byte) flags,
-        (byte) ((streamId >> 24) & 0x7F), (byte) ((streamId >> 16) & 0xFF),
-        (byte) ((streamId >> 8) & 0xFF), (byte) (streamId & 0xFF)
-    });
-  }
-
-  /**
-   * Drain inbound frames until a GOAWAY (type {@code 0x7}) is seen or the connection is closed. Returns the GOAWAY
-   * error code, or {@code -1} if EOF arrived first.
-   */
-  private int readUntilGoaway(InputStream in) throws Exception {
-    while (true) {
-      int b0 = in.read();
-      if (b0 == -1) {
-        return -1;
-      }
-      byte[] rest = new byte[8];
-      int read = in.readNBytes(rest, 0, 8);
-      if (read != 8) {
-        return -1;
-      }
-      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
-      int type = rest[2] & 0xFF;
-      byte[] payload = in.readNBytes(length);
-      if (type == 0x7) {
-        // Payload: [last-stream-id (4)] [error-code (4)] [debug-data (variable)]
-        if (payload.length < 8) {
-          return -1;
-        }
-        return ((payload[4] & 0xFF) << 24) | ((payload[5] & 0xFF) << 16) | ((payload[6] & 0xFF) << 8) | (payload[7] & 0xFF);
-      }
-    }
-  }
-
+public class HTTP2SecurityTest extends BaseHTTP2RawTest {
   @Test
   public void continuation_flood_triggers_goaway() throws Exception {
     // CVE-2024-27316: many CONTINUATION frames whose cumulative size exceeds MAX_HEADER_LIST_SIZE.
@@ -100,7 +37,7 @@ public class HTTP2SecurityTest extends BaseTest {
     // Set a small MAX_HEADER_LIST_SIZE so the test triggers quickly with modest data.
     server.configuration().withMaxRequestHeaderSize(2048);
     try (var ignored = server.start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         // HEADERS with no END_HEADERS — 1024 bytes of header block fragment, no flags.
         writeFrameHeader(out, 1024, 0x1, 0x0, 1);
@@ -128,7 +65,7 @@ public class HTTP2SecurityTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         // HEADERS payload = 0x80 (indexed header field, index 0 — invalid per RFC 7541 §2.1).
         writeFrameHeader(out, 1, 0x1 /* HEADERS */, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
@@ -152,7 +89,7 @@ public class HTTP2SecurityTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         // POST with content-length: "abc". HPACK encoding:
         //   :method POST       (static idx 3)
@@ -202,7 +139,7 @@ public class HTTP2SecurityTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         // PING flood: send 15 (default threshold is 10/s).
         for (int i = 0; i < 15; i++) {
@@ -222,7 +159,7 @@ public class HTTP2SecurityTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         // Rapid Reset (CVE-2023-44487): send HEADERS immediately followed by RST_STREAM, repeating with
         // monotonically increasing stream IDs. This models the real attack pattern where each RST targets
@@ -257,7 +194,7 @@ public class HTTP2SecurityTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         // SETTINGS flood: 15 within 1s (default threshold is 10/s).
         for (int i = 0; i < 15; i++) {
@@ -276,7 +213,7 @@ public class HTTP2SecurityTest extends BaseTest {
     var listener = new HTTPListenerConfiguration(0).withH2cPriorKnowledgeEnabled(true);
     HTTPHandler handler = (req, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
-      try (var sock = openH2cConnection(server.getActualPort())) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
         // WINDOW_UPDATE flood: 110 within 1s (default threshold is 100/s).
         for (int i = 0; i < 110; i++) {

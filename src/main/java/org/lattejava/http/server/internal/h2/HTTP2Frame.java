@@ -48,7 +48,12 @@ public sealed interface HTTP2Frame {
   record ContinuationFrame(int streamId, int flags, byte[] data) implements HTTP2Frame {
   }
 
-  record DataFrame(int streamId, int flags, byte[] data) implements HTTP2Frame {
+  record DataFrame(int streamId, int flags, byte[] data, int flowControlledLength) implements HTTP2Frame {
+    /** Outbound frames: the flow-controlled length is the payload length (the server never pads). Public because
+        test-package callers construct outbound frames with this form. */
+    public DataFrame(int streamId, int flags, byte[] data) {
+      this(streamId, flags, data, data.length);
+    }
   }
 
   record GoawayFrame(int lastStreamId, int errorCode, byte[] debugData) implements HTTP2Frame {

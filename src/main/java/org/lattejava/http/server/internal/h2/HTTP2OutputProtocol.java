@@ -17,7 +17,7 @@ import org.lattejava.http.server.internal.*;
  * <p>RFC 9113 §8.1 — HEADERS must precede DATA. This class enforces that invariant.
  */
 public class HTTP2OutputProtocol implements HTTPOutputProtocol {
-  private final HTTP2ConnectionWindow connectionSendWindow;
+  private final HTTP2Window connectionSendWindow;
 
   private final HPACKEncoder encoder;
 
@@ -38,7 +38,7 @@ public class HTTP2OutputProtocol implements HTTPOutputProtocol {
   private boolean wroteToClient;
 
   HTTP2OutputProtocol(HTTPResponse response, HTTP2Stream stream, HPACKEncoder encoder, HTTP2WriterThread writer,
-                      HTTP2ConnectionWindow connectionSendWindow, HTTP2Settings peerSettings, Logger logger) {
+                      HTTP2Window connectionSendWindow, HTTP2Settings peerSettings, Logger logger) {
     this.response = response;
     this.stream = stream;
     this.encoder = encoder;

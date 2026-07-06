@@ -9,7 +9,7 @@ import module java.base;
 /**
  * Per-stream output. Buffers writes locally; on flush/close, fragments against the peer-negotiated MAX_FRAME_SIZE and
  * enqueues DATA frames to the connection writer queue. Blocks on the stream's send-window when out of credits; the
- * connection reader thread signals via the per-stream monitor on WINDOW_UPDATE.
+ * connection reader thread signals via the send-window's monitor on WINDOW_UPDATE.
  *
  * <p>When the response carries trailers, the caller must invoke {@link #setTrailersFollow(boolean)} with {@code true}
  * before calling {@link #close()}. This causes the final DATA frame to omit END_STREAM so that the subsequent HEADERS
@@ -20,7 +20,7 @@ import module java.base;
 public class HTTP2OutputStream extends OutputStream {
   private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 
-  private final HTTP2ConnectionWindow connectionWindow;
+  private final HTTP2Window connectionWindow;
 
   private final int peerMaxFrameSize;
 
@@ -35,13 +35,13 @@ public class HTTP2OutputStream extends OutputStream {
   /**
    * Test/standalone constructor with no connection-level flow control. Uses an effectively unbounded connection window,
    * so only the per-stream window throttles output. Production code must use the
-   * {@link #HTTP2OutputStream(HTTP2Stream, HTTP2WriterThread, HTTP2ConnectionWindow, int)} overload.
+   * {@link #HTTP2OutputStream(HTTP2Stream, HTTP2WriterThread, HTTP2Window, int)} overload.
    */
   public HTTP2OutputStream(HTTP2Stream stream, HTTP2WriterThread writer, int peerMaxFrameSize) {
-    this(stream, writer, new HTTP2ConnectionWindow(Integer.MAX_VALUE), peerMaxFrameSize);
+    this(stream, writer, new HTTP2Window(Integer.MAX_VALUE), peerMaxFrameSize);
   }
 
-  public HTTP2OutputStream(HTTP2Stream stream, HTTP2WriterThread writer, HTTP2ConnectionWindow connectionWindow, int peerMaxFrameSize) {
+  public HTTP2OutputStream(HTTP2Stream stream, HTTP2WriterThread writer, HTTP2Window connectionWindow, int peerMaxFrameSize) {
     this.stream = stream;
     this.writer = writer;
     this.connectionWindow = connectionWindow;
@@ -94,7 +94,7 @@ public class HTTP2OutputStream extends OutputStream {
     // so a concurrent SETTINGS-induced window decrease (RFC 9113 §6.9.2) cannot wedge between them and force a
     // spurious underflow. Avoids the byte[]-per-chunk copy in the loop below; hot for streaming handlers that
     // write+flush in chunks already sized to a single frame.
-    if (size > 0 && size <= peerMaxFrameSize && stream.tryAcquireSendWindow(size)) {
+    if (size > 0 && size <= peerMaxFrameSize && stream.sendWindow().tryAcquire(size)) {
       if (connectionWindow.tryAcquire(size)) {
         byte[] piece = buffer.toByteArray();
         buffer.reset();
@@ -103,7 +103,7 @@ public class HTTP2OutputStream extends OutputStream {
       }
 
       // Connection window can't cover the whole frame right now; return the stream credit and fall to the slow path.
-      stream.releaseSendWindow(size);
+      stream.sendWindow().increment(size);
     }
 
     byte[] all = buffer.toByteArray();
@@ -112,14 +112,14 @@ public class HTTP2OutputStream extends OutputStream {
     while (off < all.length) {
       // RFC 9113 §6.9.1: outbound DATA must fit within BOTH the stream and connection send windows, so each frame is
       // capped at min(streamWindow, connectionWindow, maxFrameSize, remaining). Acquire stream credit first (waiting
-      // on the per-stream monitor blocks no other stream), then connection credit for that grant. Each acquire is an
+      // on this stream's send-window monitor blocks no other stream), then connection credit for that grant. Each acquire is an
       // atomic wait+consume, closing the lost-wakeup (WINDOW_UPDATE notify racing an unlocked read+wait; fixed in
       // commit 2829cc4) and the consume-underflow race. If the connection window is the tighter bound, return the
       // surplus stream credit so accounting stays exact.
       int want = Math.min(peerMaxFrameSize, all.length - off);
       int streamGrant;
       try {
-        streamGrant = stream.acquireSendWindow(want, 100);
+        streamGrant = stream.sendWindow().acquire(want, 100);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         throw new InterruptedIOException();
@@ -129,13 +129,13 @@ public class HTTP2OutputStream extends OutputStream {
       try {
         chunk = connectionWindow.acquire(streamGrant, 100);
       } catch (InterruptedException e) {
-        stream.releaseSendWindow(streamGrant);
+        stream.sendWindow().increment(streamGrant);
         Thread.currentThread().interrupt();
         throw new InterruptedIOException();
       }
 
       if (chunk < streamGrant) {
-        stream.releaseSendWindow(streamGrant - chunk);
+        stream.sendWindow().increment(streamGrant - chunk);
       }
 
       byte[] piece = new byte[chunk];

@@ -13,13 +13,10 @@ public class HTTP2WindowUpdateFrameHandler {
     if (f.windowSizeIncrement() == 0) {
       return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.PROTOCOL_ERROR); // §6.9
     }
-    if (stream.sendWindow() + f.windowSizeIncrement() > Integer.MAX_VALUE) {
+    if (stream.sendWindow().available() + f.windowSizeIncrement() > Integer.MAX_VALUE) {
       return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.FLOW_CONTROL_ERROR); // §6.9.1
     }
-    stream.incrementSendWindow(f.windowSizeIncrement());
-    synchronized (stream) {
-      stream.notifyAll();
-    }
+    stream.sendWindow().increment(f.windowSizeIncrement());
     return HTTP2Result.OK;
   }
 }

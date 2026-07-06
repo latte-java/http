@@ -21,7 +21,7 @@ import org.lattejava.http.util.HTTPTools;
 public class HTTP2HeaderFrameHandler {
   private final HTTPServerConfiguration configuration;
 
-  private final HTTP2ConnectionWindow connectionSendWindow;
+  private final HTTP2Window connectionSendWindow;
 
   private final HTTPContext context;
 
@@ -45,7 +45,7 @@ public class HTTP2HeaderFrameHandler {
 
   private final HTTP2WriterThread writer;
 
-  public HTTP2HeaderFrameHandler(HTTPServerConfiguration configuration, HTTP2ConnectionWindow connectionSendWindow,
+  public HTTP2HeaderFrameHandler(HTTPServerConfiguration configuration, HTTP2Window connectionSendWindow,
                                  HTTPContext context, HPACKDecoder decoder, HPACKEncoder encoder,
                                  AtomicLong handledRequests, Set<Thread> handlerThreads, Instrumenter instrumenter,
                                  HTTPListenerConfiguration listener, Logger logger, HTTP2Settings peerSettings,

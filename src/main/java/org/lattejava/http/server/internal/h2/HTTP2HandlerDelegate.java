@@ -17,7 +17,7 @@ import org.lattejava.http.server.internal.*;
 public class HTTP2HandlerDelegate implements Runnable {
   private final HTTPServerConfiguration configuration;
 
-  private final HTTP2ConnectionWindow connectionSendWindow;
+  private final HTTP2Window connectionSendWindow;
 
   private final HPACKEncoder encoder;
 
@@ -35,7 +35,7 @@ public class HTTP2HandlerDelegate implements Runnable {
 
   private final HTTP2WriterThread writer;
 
-  public HTTP2HandlerDelegate(HTTPServerConfiguration configuration, HTTP2ConnectionWindow connectionSendWindow,
+  public HTTP2HandlerDelegate(HTTPServerConfiguration configuration, HTTP2Window connectionSendWindow,
                               HPACKEncoder encoder, Set<Thread> handlerThreads, Logger logger, HTTP2Settings peerSettings,
                               HTTPRequest request, HTTPResponse response, HTTP2Stream stream, HTTP2WriterThread writer) {
     this.configuration = configuration;

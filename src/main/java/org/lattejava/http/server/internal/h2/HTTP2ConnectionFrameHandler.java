@@ -11,7 +11,7 @@ import org.lattejava.http.log.Logger;
  * GOAWAY. Stream-addressed frame types arriving with stream ID 0 are connection errors here.
  */
 public class HTTP2ConnectionFrameHandler implements HTTP2FrameHandler {
-  private final HTTP2ConnectionWindow connectionSendWindow;
+  private final HTTP2Window connectionSendWindow;
 
   private final Logger logger;
 
@@ -23,7 +23,7 @@ public class HTTP2ConnectionFrameHandler implements HTTP2FrameHandler {
 
   private final HTTP2WriterThread writer;
 
-  public HTTP2ConnectionFrameHandler(HTTP2ConnectionWindow connectionSendWindow, Logger logger, HTTP2Settings peerSettings,
+  public HTTP2ConnectionFrameHandler(HTTP2Window connectionSendWindow, Logger logger, HTTP2Settings peerSettings,
                                      HTTP2RateLimitsTracker rateLimits, HTTP2StreamRegistry registry, HTTP2WriterThread writer) {
     this.connectionSendWindow = connectionSendWindow;
     this.logger = logger;
@@ -74,10 +74,11 @@ public class HTTP2ConnectionFrameHandler implements HTTP2FrameHandler {
     if (delta != 0) {
       // RFC 9113 §6.9.2 — adjust open streams' send-windows by the delta and wake blocked writers.
       for (HTTP2Stream s : registry.liveStreams()) {
-        s.incrementSendWindow(delta);
-        synchronized (s) {
-          s.notifyAll();
+        // RFC 9113 §6.9.2 — an increase that would push a stream window past 2^31-1 is a connection error.
+        if (s.sendWindow().available() + delta > Integer.MAX_VALUE) {
+          return new HTTP2Result.ConnectionError(HTTP2ErrorCode.FLOW_CONTROL_ERROR);
         }
+        s.sendWindow().increment(delta);
       }
     }
     writer.enqueueOrCloseWriter(new HTTP2Frame.SettingsFrame(HTTP2Frame.FLAG_ACK, new byte[0]));

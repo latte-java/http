@@ -8,6 +8,7 @@ package org.lattejava.http.server.internal.h2;
  * Per-connection stream-frame collaborators, shared by every stream the registry materializes.
  */
 public record HTTP2StreamFrameHandlers(
+    HTTP2ConnectionFlowControl connectionFlowControl,
     HTTP2DataFrameHandler dataHandler,
     HTTP2HeaderFrameHandler headerHandler,
     HTTP2RateLimitsTracker rateLimits,
