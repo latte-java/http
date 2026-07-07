@@ -13,22 +13,25 @@ Automated benchmarking framework for comparing java-http against other Java HTTP
 ## Quick Start
 
 ```bash
+# Set the JAVA_HOME (this assumes you have the javaenv shell helper installed)
+javaenv shell 25
+
 # Run all servers, all scenarios, default 30s duration
-JAVA_HOME=/opt/homebrew/opt/openjdk@25 ./run-benchmarks.sh
+./run-benchmarks.sh
 
 # Quick smoke test
-JAVA_HOME=/opt/homebrew/opt/openjdk@25 ./run-benchmarks.sh --servers self --scenarios hello --duration 5s
+./run-benchmarks.sh --servers self --scenarios hello --duration 5s
 ```
 
 ## Servers Under Test
 
-| Server | Directory | Description |
-|--------|-----------|-------------|
-| `self` | `self/` | java-http (the project being benchmarked) |
+| Server           | Directory         | Description                                      |
+|------------------|-------------------|--------------------------------------------------|
+| `self`           | `self/`           | java-http (the project being benchmarked)        |
 | `jdk-httpserver` | `jdk-httpserver/` | JDK built-in `com.sun.net.httpserver.HttpServer` |
-| `jetty` | `jetty/` | Eclipse Jetty 12.0.x embedded server |
-| `netty` | `netty/` | Netty 4.1.x with HTTP codec |
-| `tomcat` | `tomcat/` | Apache Tomcat 11.0.x embedded |
+| `jetty`          | `jetty/`          | Eclipse Jetty 12.0.x embedded server             |
+| `netty`          | `netty/`          | Netty 4.1.x with HTTP codec                      |
+| `tomcat`         | `tomcat/`         | Apache Tomcat 11.0.x embedded                    |
 
 All servers implement the same endpoints on port 8080:
 - `GET /` - No-op (reads body, returns empty 200 response)
@@ -71,29 +74,29 @@ Options:
 
 ### HTTP/1.1 (wrk)
 
-| Scenario | Endpoint | Threads | Connections | Purpose |
-|----------|----------|---------|-------------|---------|
-| `baseline` | `GET /` | 12 | 100 | No-op throughput ceiling |
-| `hello` | `GET /hello` | 12 | 100 | Small response body |
-| `post-load` | `POST /load` | 12 | 100 | POST with body, Base64 response |
-| `large-file` | `GET /file?size=1048576` | 4 | 10 | 1MB response throughput |
-| `high-concurrency` | `GET /` | 12 | 1000 | Connection pressure |
-| `mixed` | Rotates endpoints | 12 | 100 | Real-world mix |
-| `browser-headers` | `GET /` | 12 | 100 | Realistic browser header set |
+| Scenario           | Endpoint                 | Threads | Connections | Purpose                         |
+|--------------------|--------------------------|---------|-------------|---------------------------------|
+| `baseline`         | `GET /`                  | 12      | 100         | No-op throughput ceiling        |
+| `hello`            | `GET /hello`             | 12      | 100         | Small response body             |
+| `post-load`        | `POST /load`             | 12      | 100         | POST with body, Base64 response |
+| `large-file`       | `GET /file?size=1048576` | 4       | 10          | 1MB response throughput         |
+| `high-concurrency` | `GET /`                  | 12      | 1000        | Connection pressure             |
+| `mixed`            | Rotates endpoints        | 12      | 100         | Real-world mix                  |
+| `browser-headers`  | `GET /`                  | 12      | 100         | Realistic browser header set    |
 
 ### HTTP/2 (h2load — requires `brew install nghttp2`)
 
 h2load uses h2c prior-knowledge (plaintext HTTP/2 without an upgrade handshake). The canonical h2 workload is *few TCP connections × many concurrent streams*, which has no direct h1.1 equivalent.
 
-| Scenario | Endpoint | Threads | TCP Connections | Streams/conn | Total in-flight | Purpose |
-|----------|----------|---------|-----------------|--------------|-----------------|---------|
-| `h2-hello` | `GET /hello` | 1 | 1 | 100 | 100 | Baseline h2 throughput — single connection, many streams |
-| `h2-high-stream-concurrency` | `GET /hello` | 4 | 10 | 100 | 1000 | Many-streams-per-conn (backend / proxy shape) — favors event-loop demux |
-| `h2-high-connection-concurrency` | `GET /hello` | 4 | 500 | 2 | 1000 | Many-conns-few-streams (browser / CDN shape) — same in-flight, different topology |
-| `h2-compute` | `GET /compute?rounds=5000` | 4 | 10 | 100 | 1000 | CPU-bound — chained SHA-256 ~500us–1ms/req; protocol becomes <20% of cost |
-| `h2-io` | `GET /io?ms=10` | 4 | 10 | 100 | 1000 | Blocking-IO simulation — 10ms sleep per request; tests thread/IO model under wait |
-| `h2-stream` | `GET /stream?size=131072` | 4 | 10 | 100 | 1000 | 128KB response, handler forces per-8KB flush — tests honor-flush wire path |
-| `h2-large-response` | `GET /large-response?size=131072` | 4 | 10 | 100 | 1000 | 128KB response, handler writes once — server chooses framing |
+| Scenario                         | Endpoint                          | Threads | TCP Connections | Streams/conn | Total in-flight | Purpose                                                                           |
+|----------------------------------|-----------------------------------|---------|-----------------|--------------|-----------------|-----------------------------------------------------------------------------------|
+| `h2-hello`                       | `GET /hello`                      | 1       | 1               | 100          | 100             | Baseline h2 throughput — single connection, many streams                          |
+| `h2-high-stream-concurrency`     | `GET /hello`                      | 4       | 10              | 100          | 1000            | Many-streams-per-conn (backend / proxy shape) — favors event-loop demux           |
+| `h2-high-connection-concurrency` | `GET /hello`                      | 4       | 500             | 2            | 1000            | Many-conns-few-streams (browser / CDN shape) — same in-flight, different topology |
+| `h2-compute`                     | `GET /compute?rounds=5000`        | 4       | 10              | 100          | 1000            | CPU-bound — chained SHA-256 ~500us–1ms/req; protocol becomes <20% of cost         |
+| `h2-io`                          | `GET /io?ms=10`                   | 4       | 10              | 100          | 1000            | Blocking-IO simulation — 10ms sleep per request; tests thread/IO model under wait |
+| `h2-stream`                      | `GET /stream?size=131072`         | 4       | 10              | 100          | 1000            | 128KB response, handler forces per-8KB flush — tests honor-flush wire path        |
+| `h2-large-response`              | `GET /large-response?size=131072` | 4       | 10              | 100          | 1000            | 128KB response, handler writes once — server chooses framing                      |
 
 #### Scenario design notes
 
@@ -129,13 +132,13 @@ The benchmark `LoadHandler` is implemented separately for each server (in `bench
 
 Per-vendor h2c support:
 
-| Server | HTTP/2 support | Notes |
-|--------|----------------|-------|
-| `self` (Latte) | h2c prior-knowledge on port 8080 | Enabled in the HTTP/2 implementation branch |
-| `jetty` | h2c prior-knowledge on port 8080 | `HTTP2CServerConnectionFactory` alongside `HttpConnectionFactory` on the same `ServerConnector` |
-| `tomcat` | h2c prior-knowledge + Upgrade on port 8080 | `<UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol"/>` in `server.xml`; Tomcat 11 handles both the `PRI *` preface and the `Upgrade: h2c` header |
-| `netty` | h2c prior-knowledge + Upgrade on port 8080 | `CleartextHttp2ServerUpgradeHandler` detects h2c preface, h1.1 Upgrade, or plain h1.1 — all on one port |
-| `jdk-httpserver` | HTTP/1.1 only — h2-* scenarios skipped | `com.sun.net.httpserver.HttpServer` has no HTTP/2 support; `run-benchmarks.sh` skips h2-* scenarios for this server |
+| Server           | HTTP/2 support                             | Notes                                                                                                                                                            |
+|------------------|--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `self` (Latte)   | h2c prior-knowledge on port 8080           | Enabled in the HTTP/2 implementation branch                                                                                                                      |
+| `jetty`          | h2c prior-knowledge on port 8080           | `HTTP2CServerConnectionFactory` alongside `HttpConnectionFactory` on the same `ServerConnector`                                                                  |
+| `tomcat`         | h2c prior-knowledge + Upgrade on port 8080 | `<UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol"/>` in `server.xml`; Tomcat 11 handles both the `PRI *` preface and the `Upgrade: h2c` header |
+| `netty`          | h2c prior-knowledge + Upgrade on port 8080 | `CleartextHttp2ServerUpgradeHandler` detects h2c preface, h1.1 Upgrade, or plain h1.1 — all on one port                                                          |
+| `jdk-httpserver` | HTTP/1.1 only — h2-* scenarios skipped     | `com.sun.net.httpserver.HttpServer` has no HTTP/2 support; `run-benchmarks.sh` skips h2-* scenarios for this server                                              |
 
 ## Results
 
@@ -208,17 +211,17 @@ Each run produces `perf-results/<timestamp>[-label].json` with this shape:
 
 ### What the metrics mean
 
-| Metric                 | Direction       | What it tells you |
-|------------------------|-----------------|-------------------|
-| `rps`                  | higher = better | Observable throughput at the wrk client. The headline. |
-| `avg_latency_us`       | lower = better  | Mean per-request latency at the wrk client. |
-| `p99_us`               | lower = better  | Tail latency. More sensitive to GC pauses than `avg_latency_us`. |
-| `errors`               | lower = better  | Sum of wrk's connect/read/write/timeout error buckets. Should be 0 on a healthy run. |
-| `alloc_bytes_per_req`  | lower = better  | The closest proxy for "did this change reduce allocations." Normalises by load, so it's stable across runs at slightly different RPS. |
-| `alloc_bytes_per_sec`  | lower = better  | Raw allocation rate. Useful sanity-check; biased by RPS. |
-| `gc_pause_ms_total`    | lower = better  | Total time the JVM spent in GC during the recording. Drops when allocation pressure drops. |
-| `gc_count`             | lower = better  | Number of collections. |
-| `heap_peak_mb`         | lower = better  | Worst-case heap (max `heap_before_gc`). Catches regressions that grow working set even when alloc rate stays flat. |
+| Metric                | Direction       | What it tells you                                                                                                                     |
+|-----------------------|-----------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `rps`                 | higher = better | Observable throughput at the wrk client. The headline.                                                                                |
+| `avg_latency_us`      | lower = better  | Mean per-request latency at the wrk client.                                                                                           |
+| `p99_us`              | lower = better  | Tail latency. More sensitive to GC pauses than `avg_latency_us`.                                                                      |
+| `errors`              | lower = better  | Sum of wrk's connect/read/write/timeout error buckets. Should be 0 on a healthy run.                                                  |
+| `alloc_bytes_per_req` | lower = better  | The closest proxy for "did this change reduce allocations." Normalises by load, so it's stable across runs at slightly different RPS. |
+| `alloc_bytes_per_sec` | lower = better  | Raw allocation rate. Useful sanity-check; biased by RPS.                                                                              |
+| `gc_pause_ms_total`   | lower = better  | Total time the JVM spent in GC during the recording. Drops when allocation pressure drops.                                            |
+| `gc_count`            | lower = better  | Number of collections.                                                                                                                |
+| `heap_peak_mb`        | lower = better  | Worst-case heap (max `heap_before_gc`). Catches regressions that grow working set even when alloc rate stays flat.                    |
 
 Direction notes:
 - A good change typically moves `alloc_bytes_per_req` and `gc_pause_ms_total`

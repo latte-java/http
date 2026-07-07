@@ -81,6 +81,7 @@ public class HTTP2HeaderFrameHandler {
     if (!opened) {
       // MAX_CONCURRENT_STREAMS refusal. The block was still HPACK-decoded above — RFC 9113 §4.3 requires processing
       // every header block to keep the shared dynamic table synchronized — but the fields are discarded.
+      logger.log(Level.DEBUG, "Refusing stream [{0}] — MAX_CONCURRENT_STREAMS cap reached", stream.streamId());
       return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.REFUSED_STREAM);
     }
 

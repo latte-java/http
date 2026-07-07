@@ -98,6 +98,9 @@ public class HTTP2OutputStream extends OutputStream {
       if (connectionWindow.tryAcquire(size)) {
         byte[] piece = buffer.toByteArray();
         buffer.reset();
+        if (endStream) {
+          stream.applySendEndStream(HTTP2Stream.Event.SEND_DATA_END_STREAM);
+        }
         enqueue(new HTTP2Frame.DataFrame(stream.streamId(), endStream ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
         return;
       }
@@ -142,11 +145,15 @@ public class HTTP2OutputStream extends OutputStream {
       System.arraycopy(all, off, piece, 0, chunk);
       off += chunk;
       boolean last = (off >= all.length) && endStream;
+      if (last) {
+        stream.applySendEndStream(HTTP2Stream.Event.SEND_DATA_END_STREAM);
+      }
       enqueue(new HTTP2Frame.DataFrame(stream.streamId(), last ? HTTP2Frame.FLAG_END_STREAM : 0, piece));
     }
 
     // If endStream and the buffer was empty, still emit a zero-length DATA frame with END_STREAM.
     if (endStream && all.length == 0) {
+      stream.applySendEndStream(HTTP2Stream.Event.SEND_DATA_END_STREAM);
       enqueue(new HTTP2Frame.DataFrame(stream.streamId(), HTTP2Frame.FLAG_END_STREAM, new byte[0]));
     }
   }

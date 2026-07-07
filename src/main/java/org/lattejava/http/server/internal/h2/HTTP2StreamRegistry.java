@@ -43,6 +43,11 @@ public class HTTP2StreamRegistry {
   public void close(int streamId) {
     openStreams.remove(streamId);
     synchronized (recentlyClosed) {
+      // Idempotent: the send path releases the slot when END_STREAM is enqueued and the handler-thread cleanup runs
+      // afterward as the fallback for the still-open-client-half path, so a stream can be closed twice.
+      if (recentlyClosed.contains(streamId)) {
+        return;
+      }
       recentlyClosed.addLast(streamId);
       if (recentlyClosed.size() > MAX_RECENTLY_CLOSED) {
         recentlyClosed.removeFirst();

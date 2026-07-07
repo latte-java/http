@@ -90,6 +90,25 @@ public class HTTP2Stream implements HTTP2FrameHandler {
   }
 
   /**
+   * Applies a SEND_*_END_STREAM {@code event} at the moment the END_STREAM-bearing frame is handed to the writer, and
+   * releases this stream's MAX_CONCURRENT_STREAMS slot when that send closes the stream entirely. RFC 9113 §5.1.2 —
+   * the peer counts the stream as closed as soon as the frame arrives and may immediately open a replacement, so
+   * delaying the roster release until handler-thread cleanup causes spurious REFUSED_STREAM at the cap. A no-op when
+   * the stream is already closed (e.g. reset by the client) — the RST path owns that cleanup.
+   */
+  public synchronized void applySendEndStream(Event event) {
+    try {
+      applyEvent(event);
+    } catch (IllegalStateException ignored) {
+      return;
+    }
+
+    if (state == State.CLOSED) {
+      close();
+    }
+  }
+
+  /**
    * Removes this stream from the roster and records closed-stream memory. Called from the reader thread (RST_STREAM
    * path) and from handler virtual-threads (fully-closed completion path).
    */

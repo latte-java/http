@@ -71,14 +71,15 @@ public class HTTP2HandlerDelegate implements Runnable {
       try {
         stream.applyEvent(HTTP2Stream.Event.SEND_DATA_END_STREAM);
       } catch (IllegalStateException ignored) {
-        // Stream was reset by the client (RECV_RST_STREAM) between our last write and now.
-        // The DATA frame is already in the writer queue; the RST_STREAM from the client implicitly
-        // cancels it. Not an error — this is normal during graceful teardown or test probing.
+        // Already transitioned: the output path applied SEND_*_END_STREAM when it enqueued the final frame
+        // (releasing the MAX_CONCURRENT_STREAMS slot at that instant — RFC 9113 §5.1.2), or the client reset the
+        // stream between our last write and now. Either way this is not an error.
       }
 
-      // A stream that closed in both directions (client END_STREAM + our END_STREAM) is remembered so a late frame
-      // on it raises STREAM_CLOSED (RFC 9113 §5.1). When the client half is still open (we responded early), the
-      // stream is forgotten instead — DATA still in flight from the client must be ignored, not treated as an error.
+      // Fallback roster cleanup. Normally the output path already released the slot when END_STREAM was enqueued;
+      // registry.close() is idempotent so re-closing is harmless. This pass matters for the paths the output side
+      // cannot see: a client half still open when we responded early (forgotten, so late client DATA is ignored)
+      // and a client END_STREAM that arrived after our response closed the local half (remembered).
       if (stream.state() == HTTP2Stream.State.CLOSED) {
         stream.close();
       } else {

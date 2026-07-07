@@ -111,6 +111,7 @@ public class HTTP2OutputProtocol implements HTTPOutputProtocol {
     synchronized (encoder) {
       trailerBlock = encoder.encode(trailerFields);
     }
+    stream.applySendEndStream(HTTP2Stream.Event.SEND_HEADERS_END_STREAM);
     writer.enqueueOrCloseWriter(new HTTP2Frame.HeadersFrame(stream.streamId(),
         HTTP2Frame.FLAG_END_HEADERS | HTTP2Frame.FLAG_END_STREAM, trailerBlock));
   }
