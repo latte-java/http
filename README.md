@@ -165,38 +165,46 @@ A key purpose for this project is to obtain screaming performance. Here are benc
 
 These benchmarks ensure `http` stays near the top in raw throughput, and we'll be working on claiming the top position -- even if only for bragging rights, since in practice your database and application code will be the bottleneck long before the HTTP server.
 
-All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over plain HTTP (no TLS) to isolate server performance.
+All servers implement the same request handler that reads the request body and returns a `200`.
 
 <!-- PERF-SUMMARY-START -->
 Latte HTTP is competitive with the fastest production HTTP servers across most workloads. Where it pulls clearly ahead is the **blocking-IO scenario**, which simulates a handler waiting on a database, cache, or downstream HTTP call — the most common shape for real web apps. Virtual threads park for free; worker-pool servers (Tomcat, Jetty) are bottlenecked by their default thread-pool size.
+
+**HTTP/2 scenario: `h2-hello`** (baseline h2 throughput — 1 connection × 100 concurrent streams)
+
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |      292,400 |      0 |              0.33 |              0.61 |        100.0% |
+| Jetty         |       14,085 | 8704553 |              0.30 |              0.49 |          4.8% |
+| Netty         |      286,653 |      0 |              0.34 |              0.77 |         98.0% |
+| Apache Tomcat |       57,475 |      0 |              1.76 |              3.27 |         19.6% |
+| Undertow      |      125,668 |      0 |              0.80 |              1.21 |         42.9% |
 
 **Headline scenario: `h2-io`** (handler does `Thread.sleep(10ms)` per request, 10 conns × 100 streams = 1000 in-flight)
 
 | Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
-| Latte http    |       70,676 |    125 |             13.94 |             19.41 |        100.0% |
-| Latte http    |       67,159 |    122 |             14.39 |             27.60 |         95.0% |
-| Latte http    |       69,337 |     52 |             14.22 |             25.88 |         98.1% |
-| Helidon       |       70,915 |      0 |             13.97 |             26.44 |        100.3% |
-| Helidon       |       69,149 |      0 |             14.15 |             32.11 |         97.8% |
-| Helidon       |       72,902 |      0 |             13.52 |             29.75 |        103.1% |
-| Jetty         |       11,249 |  84764 |             68.82 |            238.04 |         15.9% |
-| Jetty         |       11,305 |  85573 |             68.63 |            233.18 |         15.9% |
-| Jetty         |       10,530 |  81843 |             72.77 |            236.41 |         14.8% |
-| Netty         |       78,023 |      0 |             12.76 |             28.17 |        110.3% |
-| Netty         |       78,059 |      0 |             12.70 |             27.47 |        110.4% |
-| Netty         |       78,021 |      0 |             12.80 |             34.93 |        110.3% |
-| Apache Tomcat |       14,966 |      0 |             66.66 |            125.24 |         21.1% |
-| Apache Tomcat |       14,962 |      0 |             66.71 |            124.59 |         21.1% |
-| Apache Tomcat |       14,761 |      0 |             67.62 |            147.34 |         20.8% |
-| Undertow      |        6,826 |      0 |            146.11 |            182.30 |          9.6% |
-| Undertow      |        6,792 |      0 |            146.83 |            184.29 |          9.6% |
-| Undertow      |        6,778 |      0 |            147.13 |            191.21 |          9.5% |
+| Latte http    |       62,700 |      0 |             15.78 |             18.58 |        100.0% |
+| Jetty         |       10,946 |  86567 |             69.60 |            190.60 |         17.4% |
+| Netty         |       77,834 |      0 |             12.85 |             14.44 |        124.1% |
+| Apache Tomcat |       15,257 |      0 |             65.45 |             71.33 |         24.3% |
+| Undertow      |        5,812 |      0 |            171.55 |            190.78 |          9.2% |
+
+**HTTP/1.1 scenario: `baseline`** (`wrk`, `GET /`, 12 threads × 100 connections, plain HTTP)
+
+| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
+| Latte http     |      111,296 |            0 |              0.87 |              1.45 |        100.0% |
+| JDK HttpServer |      103,969 |            0 |              0.90 |              1.43 |         93.4% |
+| Jetty          |      106,228 |            0 |              1.07 |              2.63 |         95.4% |
+| Netty          |      115,679 |            0 |              0.91 |              1.74 |        103.9% |
+| Apache Tomcat  |      104,615 |            0 |              0.90 |              1.64 |         93.9% |
+| Undertow       |      106,162 |            0 |              1.07 |              4.06 |         95.3% |
 
 **See [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** for the full 6-scenario breakdown across self / jetty / tomcat / netty — including HTTP/1, CPU-bound, multiplexed stream concurrency, browser-shape connection concurrency, large-response throughput, and per-scenario rationale on what each scenario was designed to expose.
 
-_Benchmark performed 2026-05-21 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
-_OS: macOS 15.7.3._
+_Benchmark performed 2026-07-07 on Darwin, arm64, 10 cores, Apple M4, 32GB RAM (MacBook Air)._
+_OS: macOS 26.5.1._
 _Java: openjdk version "25.0.2" 2026-01-20 LTS._
 <!-- PERF-SUMMARY-END -->
 

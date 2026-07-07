@@ -361,13 +361,45 @@ if jq -e '.results[] | select(.scenario == "h2-io" and .tool == "h2load")' "${LA
   IO_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-io" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1)"
   [[ -z "${IO_SELF_RPS}" || "${IO_SELF_RPS}" == "null" ]] && IO_SELF_RPS="0"
 
+  HAS_H2_HELLO=false
+  H2_HELLO_SELF_RPS="0"
+  if jq -e '.results[] | select(.scenario == "h2-hello" and .tool == "h2load")' "${LATEST}" &>/dev/null; then
+    HAS_H2_HELLO=true
+    H2_HELLO_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "h2-hello" and .tool == "h2load") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+    [[ -z "${H2_HELLO_SELF_RPS}" || "${H2_HELLO_SELF_RPS}" == "null" ]] && H2_HELLO_SELF_RPS="0"
+  fi
+
+  HAS_BASELINE=false
+  BASELINE_SELF_RPS="0"
+  if jq -e '.results[] | select(.scenario == "baseline" and .tool == "wrk")' "${LATEST}" &>/dev/null; then
+    HAS_BASELINE=true
+    BASELINE_SELF_RPS="$(jq -r '.results[] | select(.server == "self" and .scenario == "baseline" and .tool == "wrk") | .metrics.rps' "${LATEST}" 2>/dev/null | head -1 || echo "0")"
+    [[ -z "${BASELINE_SELF_RPS}" || "${BASELINE_SELF_RPS}" == "null" ]] && BASELINE_SELF_RPS="0"
+  fi
+
   {
     echo "Latte HTTP is competitive with the fastest production HTTP servers across most workloads. Where it pulls clearly ahead is the **blocking-IO scenario**, which simulates a handler waiting on a database, cache, or downstream HTTP call — the most common shape for real web apps. Virtual threads park for free; worker-pool servers (Tomcat, Jetty) are bottlenecked by their default thread-pool size."
     echo ""
+
+    if [[ "${HAS_H2_HELLO}" == "true" ]]; then
+      echo "**HTTP/2 scenario: \`h2-hello\`** (baseline h2 throughput — 1 connection × 100 concurrent streams)"
+      echo ""
+      generate_h2_table "h2-hello" "${H2_HELLO_SELF_RPS}"
+      echo ""
+    fi
+
     echo "**Headline scenario: \`h2-io\`** (handler does \`Thread.sleep(10ms)\` per request, 10 conns × 100 streams = 1000 in-flight)"
     echo ""
     generate_h2_table "h2-io" "${IO_SELF_RPS}"
     echo ""
+
+    if [[ "${HAS_BASELINE}" == "true" ]]; then
+      echo "**HTTP/1.1 scenario: \`baseline\`** (\`wrk\`, \`GET /\`, 12 threads × 100 connections, plain HTTP)"
+      echo ""
+      generate_h1_table "baseline" "wrk" "${BASELINE_SELF_RPS}"
+      echo ""
+    fi
+
     echo "**See [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** for the full 6-scenario breakdown across self / jetty / tomcat / netty — including HTTP/1, CPU-bound, multiplexed stream concurrency, browser-shape connection concurrency, large-response throughput, and per-scenario rationale on what each scenario was designed to expose."
     echo ""
     printf "_Benchmark performed %s on %s, %sGB RAM%s._%s\n" \
