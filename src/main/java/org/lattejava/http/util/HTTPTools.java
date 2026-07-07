@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2022-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,38 @@ package org.lattejava.http.util;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
 import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
 
 public final class HTTPTools {
+  private static final System.Logger logger = System.getLogger(HTTPTools.class.getName());
+
   private static final boolean[] TOKEN_CHARS = buildTokenCharTable();
 
-  private static Logger logger;
+  /**
+   * Lowercases an HTTP header-name-style string with no allocation when the input is already lowercase ASCII.
+   * {@link String#toLowerCase(Locale)} always copies, even when no transformation is needed; this scan-once helper
+   * returns the input unchanged in the common case.
+   *
+   * <p>Falls back to {@code String.toLowerCase(Locale.ROOT)} when any uppercase ASCII or non-ASCII
+   * character is present, so observable behavior is identical to the existing code for both well-formed and malformed
+   * inputs.
+   *
+   * @param s The header name (or any ASCII-token string) to lowercase.
+   * @return {@code s} unchanged when it is already lowercase ASCII; otherwise the lowercased form.
+   */
+  public static String asciiLowerCase(String s) {
+    int len = s.length();
+    for (int i = 0; i < len; i++) {
+      char c = s.charAt(i);
+      if ((c >= 'A' && c <= 'Z') || c > 0x7F) {
+        return s.toLowerCase(Locale.ROOT);
+      }
+    }
+    return s;
+  }
 
   /**
    * Return the maximum request body size for the requested content type.
@@ -33,14 +58,14 @@ public final class HTTPTools {
    * @param maxRequestBodySize the maximum request size configuration
    * @return the maximum request size, or -1 if no limit should be enforced.
    */
-  public static int getMaxRequestBodySize(String contentType, Map<String, Integer> maxRequestBodySize) {
+  public static long getMaxRequestBodySize(String contentType, Map<String, Long> maxRequestBodySize) {
     if (contentType == null) {
       return maxRequestBodySize.get("*");
     }
 
     // Exact match
     contentType = contentType.toLowerCase(Locale.ROOT);
-    Integer maximumSize = maxRequestBodySize.get(contentType);
+    Long maximumSize = maxRequestBodySize.get(contentType);
     if (maximumSize != null) {
       return maximumSize;
     }
@@ -56,15 +81,6 @@ public final class HTTPTools {
     return maximumSize != null
         ? maximumSize
         : maxRequestBodySize.get("*");
-  }
-
-  /**
-   * Statically sets up the logger, mostly for trace logging.
-   *
-   * @param loggerFactory The logger factory.
-   */
-  public static void initialize(LoggerFactory loggerFactory) {
-    HTTPTools.logger = loggerFactory.getLogger(HTTPTools.class);
   }
 
   /**
@@ -122,7 +138,7 @@ public final class HTTPTools {
 
   // RFC 9110 §5.5 field-content = field-vchar [ 1*( SP / HTAB / field-vchar ) field-vchar ], where field-vchar = VCHAR / obs-text. Bare
   // CR and bare LF are excluded — accepting LF here would let an attacker splice a second header into a field value, and a front-end proxy
-  // that splits on LF would disagree with us on header boundaries. See docs/security/audit-2026-04-20.md Vuln 3.
+  // that splits on LF would disagree with us on header boundaries. See docs/design/2026-04-20-audit.md Vuln 3.
   public static boolean isValueCharacter(byte ch) {
     int intVal = ch & 0xFF;  // Convert the value into an integer without extending the sign bit.
     return isURICharacter(ch) || intVal == ' ' || intVal == '\t' || intVal >= 0x80;
@@ -142,6 +158,121 @@ public final class HTTPTools {
         ? "Unexpected character. Dec [" + b + "] Hex [" + hex + "]"
         : "Unexpected character. Dec [" + b + "] Hex [" + hex + "] Symbol [" + ((char) b) + "]";
     return new ParseException(message + " Parse state [" + state + "]", state.name());
+  }
+
+  /**
+   * Parse an Accept-Encoding header value into the list of encodings ordered by RFC 9110 priority — q-value descending,
+   * original-position ascending for ties. Walks the input with indexOf() instead of {@link String#split(String)} +
+   * {@link java.util.TreeSet} + a stream pipeline. The previous implementation showed up at ~17% of CPU and was the top
+   * single-source allocator in JFR profiling. Browsers send 1–4 entries with no q-values in the common case; for that
+   * path the insertion sort is O(N) over already-sorted weights.
+   *
+   * @param value the raw header value, e.g. {@code "gzip, deflate, br;q=0.5"}
+   * @return the encodings in priority order, never null
+   */
+  public static List<String> parseAcceptEncoding(String value) {
+    int cap = 4;
+    String[] encodings = new String[cap];
+    double[] weights = new double[cap];
+    int count = 0;
+    int len = value.length();
+    int from = 0;
+
+    while (from < len) {
+      int comma = value.indexOf(',', from);
+      int segmentEnd = comma < 0 ? len : comma;
+
+      // Trim OWS (RFC 9110 §5.6.3 allows space and HTAB) from both ends of the segment.
+      int start = from;
+      while (start < segmentEnd && (value.charAt(start) == ' ' || value.charAt(start) == '\t')) {
+        start++;
+      }
+      int end = segmentEnd;
+      while (end > start && (value.charAt(end - 1) == ' ' || value.charAt(end - 1) == '\t')) {
+        end--;
+      }
+
+      if (start < end) {
+        // Locate the optional ';q=...' parameter. Other parameters (rare for Accept-Encoding) are skipped over.
+        int semi = value.indexOf(';', start);
+        if (semi < 0 || semi >= end) {
+          semi = -1;
+        }
+
+        double weight = 1.0;
+        int encEnd = end;
+        if (semi >= 0) {
+          encEnd = semi;
+          while (encEnd > start && (value.charAt(encEnd - 1) == ' ' || value.charAt(encEnd - 1) == '\t')) {
+            encEnd--;
+          }
+
+          int p = semi + 1;
+          while (p < end) {
+            while (p < end && (value.charAt(p) == ' ' || value.charAt(p) == '\t')) {
+              p++;
+            }
+            if (p + 1 < end && (value.charAt(p) == 'q' || value.charAt(p) == 'Q') && value.charAt(p + 1) == '=') {
+              int qStart = p + 2;
+              int qEnd = value.indexOf(';', qStart);
+              if (qEnd < 0 || qEnd > end) {
+                qEnd = end;
+              }
+              try {
+                weight = Double.parseDouble(value.substring(qStart, qEnd).trim());
+              } catch (NumberFormatException ignored) {
+                // Malformed q-value — leave weight at default 1.0.
+              }
+              break;
+            }
+            int next = value.indexOf(';', p);
+            if (next < 0 || next >= end) {
+              break;
+            }
+            p = next + 1;
+          }
+        }
+
+        if (count == cap) {
+          cap *= 2;
+          encodings = Arrays.copyOf(encodings, cap);
+          weights = Arrays.copyOf(weights, cap);
+        }
+        encodings[count] = value.substring(start, encEnd);
+        weights[count] = weight;
+        count++;
+      }
+
+      if (comma < 0) {
+        break;
+      }
+      from = comma + 1;
+    }
+
+    if (count == 0) {
+      return List.of();
+    }
+
+    // Insertion sort: weight DESC, original index ASC. Stable on equal weights because we only swap on strict less-than. O(N) on the common
+    // browser case where every weight is 1.0 and the input is already in priority order.
+    for (int i = 1; i < count; i++) {
+      String e = encodings[i];
+      double w = weights[i];
+      int j = i - 1;
+      while (j >= 0 && weights[j] < w) {
+        encodings[j + 1] = encodings[j];
+        weights[j + 1] = weights[j];
+        j--;
+      }
+      encodings[j + 1] = e;
+      weights[j + 1] = w;
+    }
+
+    List<String> result = new ArrayList<>(count);
+    for (int i = 0; i < count; i++) {
+      result.add(encodings[i]);
+    }
+    return result;
   }
 
   /**
@@ -234,7 +365,7 @@ public final class HTTPTools {
   }
 
   /**
-   * Parses an HTTP header value that is a standard semicolon separated list of values.
+   * Parses an HTTP header value that is a standard semicolon-separated list of values.
    *
    * @param value The header value.
    * @return The HeaderValue record.
@@ -307,18 +438,19 @@ public final class HTTPTools {
                                           byte[] requestBuffer, Runnable readObserver)
       throws IOException {
     RequestPreambleState state = RequestPreambleState.RequestMethod;
-    // Local byte[]+int instead of ByteArrayOutputStream. Same per-request allocation pattern (one byte[] backing the value buffer) but
-    // without the wrapper object's synchronized write(int) and method-dispatch overhead. JFR profiling showed BAOS.write(int) at ~12% of
-    // parseRequestPreamble's CPU time. Capacity grows by doubling on overflow, mirroring BAOS behavior.
+    // Local byte[]+int for the request-line tokens (method, path, protocol). The header block is accumulated separately
+    // by the HTTPFieldParser below.
     byte[] valueBuffer = new byte[512];
     int valueLen = 0;
-    String headerName = null;
+
+    HTTPFieldParser fieldParser = null;
+    FieldConsumer consumer = request::addHeader;
 
     int read = 0;
     int index = 0;
-    int premableLength = 0;
+    int preambleLength = 0;
 
-    while (state != RequestPreambleState.Complete) {
+    while (fieldParser == null || !fieldParser.isComplete()) {
       long start = System.currentTimeMillis();
       read = inputStream.read(requestBuffer);
 
@@ -328,51 +460,65 @@ public final class HTTPTools {
         throw new ConnectionClosedException(String.format("Read returned [%d] after waiting [%d] ms", read, waited));
       }
 
-      logger.trace("Read [{}] from client for preamble.", read);
+      logger.log(Level.TRACE, "Read [{0}] from client for preamble.", read);
 
       // Tell the callback that we've read at least one byte
-      if (premableLength == 0) {
+      if (preambleLength == 0) {
         readObserver.run();
       }
 
-      for (index = 0; index < read && state != RequestPreambleState.Complete; index++) {
-        // If there is a state transition, store the value properly and reset the buffer (if needed)
-        byte ch = requestBuffer[index];
-        RequestPreambleState nextState = state.next(ch);
-        if (nextState != state) {
-          switch (state) {
-            case RequestMethod ->
-                request.setMethod(HTTPMethod.of(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8)));
-            case RequestPath -> request.setPath(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
-            case RequestProtocol -> request.setProtocol(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
-            case HeaderName -> headerName = new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8);
-            case HeaderValue ->
-                request.addHeader(headerName, new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
-          }
+      index = 0;
 
-          // If the next state is storing, reset the buffer and seed it with the transition byte.
-          if (nextState.store()) {
-            valueLen = 0;
+      // Phase 1: the request line. Drive RequestPreambleState until the request-line CRLF has been consumed
+      // (state == RequestLF), storing the method, path, and protocol as each token ends.
+      if (fieldParser == null) {
+        for (; index < read && state != RequestPreambleState.RequestLF; index++) {
+          byte ch = requestBuffer[index];
+          RequestPreambleState nextState = state.next(ch);
+          if (nextState != state) {
+            switch (state) {
+              case RequestMethod ->
+                  request.setMethod(HTTPMethod.of(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8)));
+              case RequestPath -> request.setPath(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
+              case RequestProtocol -> request.setProtocol(new String(valueBuffer, 0, valueLen, StandardCharsets.UTF_8));
+              default -> {
+                // Non-storing request-line states (the SP and CR states) have nothing to flush.
+              }
+            }
+
+            if (nextState.store()) {
+              valueLen = 0;
+              valueBuffer[valueLen++] = ch;
+            }
+          } else if (state.store()) {
+            if (valueLen == valueBuffer.length) {
+              valueBuffer = Arrays.copyOf(valueBuffer, valueBuffer.length * 2);
+            }
             valueBuffer[valueLen++] = ch;
           }
-        } else if (state.store()) {
-          if (valueLen == valueBuffer.length) {
-            valueBuffer = Arrays.copyOf(valueBuffer, valueBuffer.length * 2);
-          }
-          valueBuffer[valueLen++] = ch;
+
+          state = nextState;
         }
 
-        state = nextState;
+        // The request line is done once we reach RequestLF; hand the header block to the shared field parser.
+        if (state == RequestPreambleState.RequestLF) {
+          fieldParser = new HTTPFieldParser();
+        }
       }
 
-      // index is the number of bytes we processed as part of the preamble
-      premableLength += index;
-      if (maxRequestHeaderSize != -1 && premableLength > maxRequestHeaderSize) {
+      // Phase 2: the header field block.
+      if (fieldParser != null) {
+        index += fieldParser.feed(requestBuffer, index, read - index, consumer);
+      }
+
+      // index is the number of bytes we processed as part of the preamble this iteration.
+      preambleLength += index;
+      if (maxRequestHeaderSize != -1 && preambleLength > maxRequestHeaderSize) {
         throw new RequestHeadersTooLargeException(maxRequestHeaderSize, "The maximum size of the request header has been exceeded. The maximum size is [" + maxRequestHeaderSize + "] bytes.");
       }
     }
 
-    // Push back the leftover bytes
+    // Push back the leftover bytes (the start of the body, or the next pipelined request).
     if (index < read) {
       inputStream.push(requestBuffer, index, read - index);
     }
@@ -464,7 +610,7 @@ public final class HTTPTools {
    * @throws IOException If the stream threw an exception.
    */
   public static void writeResponsePreamble(HTTPResponse response, OutputStream outputStream) throws IOException {
-    // Single choke point for HTTP response-splitting defense (see docs/security/audit-2026-04-20.md Vuln 4). Every surface that can put
+    // Single choke point for HTTP response-splitting defense (see docs/design/2026-04-20-audit.md Vuln 4). Every surface that can put
     // attacker-influenced bytes into the response preamble — status message, header names/values, cookie components — is validated here
     // before any byte is written. If a bad value is found, the IAE propagates to the worker's catch-all, which resets the response and
     // returns a clean 500, rather than flushing a partially-written (and splittable) preamble.
@@ -532,6 +678,21 @@ public final class HTTPTools {
     return new IllegalArgumentException("Invalid character [0x" + String.format("%02X", (int) c) + "] at index [" + index + "] in " + fieldName + ".");
   }
 
+  /**
+   * Handles header parameters, which might be encoded. Some examples:
+   * <p>
+   * <pre>
+   * - Content-Disposition: attachment; filename*=UTF-8''%E2%82%AC%20rates.pdf - parses and decodes `filename`
+   * - Content-Disposition: attachment; filename="invoice.pdf" - parses `filename` but doesn't decode without `*`
+   * - Accept: text/html; q=0.9, application/xhtml+xml; q=0.8 - parses the `q` parameters
+   * - Content-Type: text/html; charset=UTF-8 - parses `charset`
+   * </pre>
+   *
+   * @param chars      The character array from the header value.
+   * @param start      The start index that starts the parameters.
+   * @param end        The end value that is the end of the parameters.
+   * @param parameters A Map to put the key-value pairs in.
+   */
   private static void parseHeaderParameter(char[] chars, int start, int end, Map<String, String> parameters) {
     boolean encoded = false;
     Charset charset = null;
@@ -539,10 +700,10 @@ public final class HTTPTools {
     for (int i = start; i < end; i++) {
       if (name == null && chars[i] == '*') {
         encoded = true;
-        name = new String(chars, start, i - start).toLowerCase(Locale.ROOT);
+        name = HTTPTools.asciiLowerCase(new String(chars, start, i - start));
         start = i + 2;
       } else if (name == null && chars[i] == '=') {
-        name = new String(chars, start, i - start).toLowerCase(Locale.ROOT);
+        name = HTTPTools.asciiLowerCase(new String(chars, start, i - start));
         start = i + 1;
       } else if (name != null && encoded && charset == null && chars[i] == '\'') {
         String charsetName = new String(chars, start, i - start);

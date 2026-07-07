@@ -19,8 +19,13 @@ import module java.base;
 import module java.net.http;
 import module org.lattejava.http;
 import module org.testng;
+
+import java.nio.file.Files;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
+import java.util.logging.FileHandler;
+import java.util.logging.SimpleFormatter;
 
 import sun.security.util.*;
 import sun.security.x509.*;
@@ -189,9 +194,8 @@ public abstract class BaseTest {
 
   @AfterMethod
   public void flush() {
-    FileLogger fl = (FileLogger) FileLoggerFactory.FACTORY.getLogger(BaseTest.class);
-    if (fl != null) {
-      fl.flush();
+    if (TestListener.fileHandler != null) {
+      TestListener.fileHandler.flush();
     }
   }
 
@@ -205,7 +209,9 @@ public abstract class BaseTest {
       builder.cookieHandler(cookieHandler);
     }
 
-    return builder.connectTimeout(ClientTimeout).build();
+    // Pin to HTTP/1.1 until Task 7 delivers real HTTP/2 support. Without this, the JDK client will negotiate h2 via
+    // ALPN when the server advertises it, and the stub HTTP2Connection closes the socket immediately.
+    return builder.connectTimeout(ClientTimeout).version(HttpClient.Version.HTTP_1_1).build();
   }
 
   public Socket makeClientSocket(String scheme) throws GeneralSecurityException, IOException {
@@ -225,7 +231,30 @@ public abstract class BaseTest {
   }
 
   public HTTPServer makeServer(String scheme, HTTPHandler handler) {
-    return makeServer(scheme, handler, null);
+    return makeServer(scheme, handler, (Instrumenter) null, null);
+  }
+
+  /**
+   * Builds an {@link HTTPServer} with a caller-supplied listener configuration. Useful when the test needs a custom
+   * port (e.g. port 0 for OS-assigned) or non-default h2c flags.
+   *
+   * @param scheme   {@code "http"} or {@code "https"}
+   * @param handler  the request handler
+   * @param listener the listener configuration to use
+   * @return an unstarted {@link HTTPServer}
+   */
+  @SuppressWarnings("resource")
+  public HTTPServer makeServer(String scheme, HTTPHandler handler, HTTPListenerConfiguration listener) {
+    return new HTTPServer().withHandler(handler)
+                           .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout)
+                                              .withExpectValidator(new AlwaysContinueExpectValidator()))
+                           .withInitialReadTimeout(ServerTimeout)
+                           .withProcessingTimeoutDuration(ServerTimeout)
+                           .withMinimumReadThroughput(200 * 1024)
+                           .withMinimumWriteThroughput(200 * 1024)
+                           .withListener(listener)
+                           .withReadThroughputCalculationDelayDuration(Duration.ofSeconds(1))
+                           .withWriteThroughputCalculationDelayDuration(Duration.ofSeconds(1));
   }
 
   @SuppressWarnings("resource")
@@ -239,14 +268,12 @@ public abstract class BaseTest {
       listenerConfiguration = new HTTPListenerConfiguration(4242);
     }
 
-    LoggerFactory factory = FileLoggerFactory.FACTORY;
     return new HTTPServer().withHandler(handler)
-                           .withKeepAliveTimeoutDuration(ServerTimeout)
+                           .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout)
+                                              .withExpectValidator(expectValidator != null ? expectValidator : new AlwaysContinueExpectValidator()))
                            .withInitialReadTimeout(ServerTimeout)
                            .withProcessingTimeoutDuration(ServerTimeout)
-                           .withExpectValidator(expectValidator != null ? expectValidator : new AlwaysContinueExpectValidator())
                            .withInstrumenter(instrumenter)
-                           .withLoggerFactory(factory)
                            .withMinimumReadThroughput(200 * 1024)
                            .withMinimumWriteThroughput(200 * 1024)
                            .withListener(listenerConfiguration)
@@ -510,6 +537,17 @@ public abstract class BaseTest {
 
   @SuppressWarnings("unused")
   public static class TestListener implements ITestListener {
+    // The JUL logger backing the library's System.Logger output. A strong reference is required — the LogManager only
+    // holds loggers weakly, and a collected logger would silently drop the per-test file handler configuration.
+    private static final java.util.logging.Logger julLogger = java.util.logging.Logger.getLogger("org.lattejava.http");
+
+    private static FileHandler fileHandler;
+
+    static {
+      // Single-line records in the per-test log files (the default SimpleFormatter format is two lines per record).
+      System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tF %1$tT.%1$tL %4$s %3$s - %5$s%6$s%n");
+    }
+
     private int counter = 0;
 
     private String lastTestMethod;
@@ -566,10 +604,25 @@ public abstract class BaseTest {
       // Trying to replicate the name of the test in the IJ TestNG runner.
       System.out.println("[" + (++counter) + "] " + hh_mm_ss_SSS.format(ZonedDateTime.now()) + " " + testMethod + iteration);
 
-      // Set up the logger
-      FileLogger logger = new FileLogger(Paths.get("build/test/logs/" + result.getTestClass().getName() + iteration + ".txt"));
-      logger.setLevel(Level.Trace);
-      FileLoggerFactory.setLogger(logger);
+      // Route the library's System.Logger output (JUL-backed) to a per-test trace-level log file.
+      try {
+        Path logFile = Paths.get("build/test/logs/" + result.getTestClass().getName() + iteration + ".txt");
+        Files.createDirectories(logFile.getParent());
+
+        if (fileHandler != null) {
+          julLogger.removeHandler(fileHandler);
+          fileHandler.close();
+        }
+
+        fileHandler = new FileHandler(logFile.toString());
+        fileHandler.setLevel(java.util.logging.Level.ALL);
+        fileHandler.setFormatter(new SimpleFormatter());
+        julLogger.setLevel(java.util.logging.Level.ALL);
+        julLogger.setUseParentHandlers(false);
+        julLogger.addHandler(fileHandler);
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
     }
 
     private String serializeDataProviderArgs(Object[] dataProvider) {

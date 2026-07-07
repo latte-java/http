@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2022-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ public class ChunkedInputStream extends InputStream {
   // RFC 9112 §7.1 chunk-size is a hex number. Integer.MAX_VALUE is "7FFFFFFF" (8 hex chars); any 8-char value starting with 8..F would
   // wrap to a negative int after parseInt, and 0x100000000 would truncate to 0 and collide with the terminator chunk. Capping the hex
   // string at 7 chars keeps the parsed value in [0, 0x0FFFFFFF] and eliminates every overflow path without needing to parse as long.
-  // See docs/security/audit-2026-04-20.md Vuln 2.
+  // See docs/design/2026-04-20-audit.md Vuln 2.
   private static final int MaxHeaderSizeHexLength = 7;
 
   private final byte[] b1 = new byte[1];
@@ -54,10 +54,16 @@ public class ChunkedInputStream extends InputStream {
 
   private ChunkedBodyState state = ChunkedBodyState.ChunkSize;
 
+  private Map<String, List<String>> trailers;
+
   public ChunkedInputStream(PushbackInputStream delegate, int bufferSize, int maxChunkSize) {
     this.delegate = delegate;
     this.buffer = new byte[bufferSize];
     this.maxChunkSize = maxChunkSize;
+  }
+
+  public Map<String, List<String>> getTrailers() {
+    return trailers == null ? Map.of() : trailers;
   }
 
   @Override
@@ -123,11 +129,12 @@ public class ChunkedInputStream extends InputStream {
           chunkBytesRemaining = chunkSize;
           headerSizeHex.delete(0, headerSizeHex.length());
 
-          // A chunk size of 0 indicates this is the terminating chunk. Continue and we will expect the state machine
-          // to process the final CRLF and hit the Complete state.
+          // A chunk size of 0 indicates this is the terminating chunk. Parse the trailer section directly from our own
+          // buffer (feeding the shared field parser and reloading from the delegate as needed).
           if (chunkSize == 0) {
-            state = nextState;
-            continue;
+            parseTrailers();
+            state = ChunkedBodyState.Complete;
+            break;
           }
         }
 
@@ -177,6 +184,43 @@ public class ChunkedInputStream extends InputStream {
     }
 
     return b1[0] & 0xFF;
+  }
+
+  private void addTrailer(String name, String value) {
+    // The FSM guarantees a non-empty token name; case-fold for lookup and storage.
+    String lower = HTTPTools.asciiLowerCase(name);
+    if (HTTPValues.ForbiddenTrailers.Names.contains(lower)) {
+      // RFC 9110 §6.5.2 forbidden trailers are silently dropped.
+      return;
+    }
+
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+
+    trailers.computeIfAbsent(lower, k -> new ArrayList<>()).add(value.trim());
+  }
+
+  private void parseTrailers() throws IOException {
+    // RFC 9112 §7.1.2: trailer-fields use the same syntax as header-fields. Feed the shared parser from our own buffer,
+    // reloading from the delegate when it drains, until the bare CRLF that ends the trailer section.
+    HTTPFieldParser parser = new HTTPFieldParser();
+    FieldConsumer consumer = this::addTrailer;
+
+    while (!parser.isComplete()) {
+      if (bufferIndex >= bufferLength) {
+        bufferIndex = 0;
+        bufferLength = delegate.read(buffer);
+        if (bufferLength < 0) {
+          throw new ParseException("Unexpected end of stream while reading chunked trailers.");
+        }
+      }
+
+      bufferIndex += parser.feed(buffer, bufferIndex, bufferLength - bufferIndex, consumer);
+    }
+
+    // Anything past the trailer section's terminating CRLF belongs to the next message; push it back to the delegate.
+    pushBackOverReadBytes();
   }
 
   private void pushBackOverReadBytes() {

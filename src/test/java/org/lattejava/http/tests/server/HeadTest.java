@@ -19,6 +19,8 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
+import java.time.Duration;
+
 /**
  * Tests automatic HEAD request handling at the wire level. Uses raw sockets because the JDK HttpClient will not read
  * body bytes for HEAD responses (per RFC), making it impossible to verify that the server did not write any.
@@ -401,7 +403,7 @@ public class HeadTest extends BaseSocketTest {
     var server = makeServer("http", handler)
         .withReadThroughputCalculationDelayDuration(Duration.ofMinutes(2))
         .withWriteThroughputCalculationDelayDuration(Duration.ofMinutes(2))
-        .withKeepAliveTimeoutDuration(Duration.ofSeconds(23))
+        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(23)))
         .withInitialReadTimeout(Duration.ofSeconds(19))
         .withProcessingTimeoutDuration(Duration.ofSeconds(27))
         // Suppress auto-Date so the byte-exact HEAD/GET response comparisons below stay deterministic.

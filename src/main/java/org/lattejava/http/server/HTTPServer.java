@@ -18,6 +18,10 @@ package org.lattejava.http.server;
 import module java.base;
 import module org.lattejava.http;
 
+import java.lang.System.Logger.Level;
+
+import org.lattejava.http.io.MultipartConfiguration;
+import org.lattejava.http.io.MultipartFileUploadPolicy;
 import org.lattejava.http.server.internal.*;
 
 /**
@@ -27,22 +31,22 @@ import org.lattejava.http.server.internal.*;
  */
 @SuppressWarnings("unused")
 public class HTTPServer implements Closeable, Configurable<HTTPServer> {
-  private final List<HTTPServerThread> servers = new ArrayList<>();
+  private static final System.Logger logger = System.getLogger(HTTPServer.class.getName());
+
+  private final List<HTTPServerAcceptorThread> servers = new ArrayList<>();
 
   private HTTPServerConfiguration configuration = new HTTPServerConfiguration();
 
   private volatile HTTPContext context;
 
-  private Logger logger;
-
   @Override
   public void close() {
     long start = System.currentTimeMillis();
     long shutdownDuration = configuration.getShutdownDuration().toMillis();
-    logger.info("HTTP server shutdown requested. Attempting to close each listener. Wait up to [{}] ms.", shutdownDuration);
+    logger.log(Level.INFO, "HTTP server shutdown requested. Attempting to close each listener. Wait up to [{0}] ms.", shutdownDuration);
 
     // First, shutdown all the threads
-    for (HTTPServerThread thread : servers) {
+    for (HTTPServerAcceptorThread thread : servers) {
       thread.shutdown();
     }
 
@@ -60,12 +64,23 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
       }
     }
 
-    logger.info("HTTP server shutdown successfully.");
+    logger.log(Level.INFO, "HTTP server shutdown successfully.");
   }
 
   @Override
   public HTTPServerConfiguration configuration() {
     return configuration;
+  }
+
+  /**
+   * @return The actual port the first listener is bound to. Useful when the listener was configured with port 0
+   *     (OS-assigned). Returns -1 if the server has not been started.
+   */
+  public int getActualPort() {
+    if (servers.isEmpty()) {
+      return -1;
+    }
+    return servers.get(0).getActualPort();
   }
 
   /**
@@ -80,25 +95,23 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
       return this;
     }
 
-    // Set up the server logger and the static loggers
-    logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
-    HTTPTools.initialize(configuration().getLoggerFactory());
+    validateConfiguration();
 
-    logger.info("Starting the HTTP server. Buckle up!");
+    logger.log(Level.INFO, "Starting the HTTP server. Buckle up!");
 
     context = new HTTPContext(configuration.getBaseDir());
 
     try {
       for (HTTPListenerConfiguration listener : configuration.getListeners()) {
-        HTTPServerThread server = new HTTPServerThread(configuration, context, listener);
+        HTTPServerAcceptorThread server = new HTTPServerAcceptorThread(configuration, context, listener);
         servers.add(server);
         server.start();
-        logger.info("HTTP server listening on port [{}]", listener.getPort());
+        logger.log(Level.INFO, "HTTP server listening on port [{0,number,#}]", listener.getPort());
       }
 
-      logger.info("HTTP server started successfully");
+      logger.log(Level.INFO, "HTTP server started successfully");
     } catch (Exception e) {
-      logger.error("Unable to start the HTTP server because one of the listeners threw an exception.", e);
+      logger.log(Level.ERROR, "Unable to start the HTTP server because one of the listeners threw an exception.", e);
 
       // Clean up the threads that did start
       close();
@@ -117,7 +130,28 @@ public class HTTPServer implements Closeable, Configurable<HTTPServer> {
    */
   public HTTPServer withConfiguration(HTTPServerConfiguration configuration) {
     this.configuration = configuration;
-    this.logger = configuration.getLoggerFactory().getLogger(HTTPServer.class);
     return this;
+  }
+
+  private void validateConfiguration() {
+    MultipartConfiguration multipart = configuration.getMultipartConfiguration();
+
+    // No file uploads → maxFileSize is irrelevant.
+    if (multipart.getFileUploadPolicy() != MultipartFileUploadPolicy.Allow) {
+      return;
+    }
+
+    long maxFileSize = multipart.getMaxFileSize();
+    // getMaxRequestBodySize never returns null because HTTPServerConfiguration.withMaxRequestBodySize always seeds the "*" fallback key.
+    long effectiveCap = HTTPTools.getMaxRequestBodySize("multipart/form-data", configuration.getMaxRequestBodySize());
+
+    // -1 means unlimited.
+    if (effectiveCap == -1) {
+      return;
+    }
+
+    if (maxFileSize > effectiveCap) {
+      throw new IllegalStateException("The MultipartConfiguration maxFileSize [" + maxFileSize + "] must not exceed the maxRequestBodySize for [multipart/form-data], which resolves to [" + effectiveCap + "]. Either lower maxFileSize or raise maxRequestBodySize for [multipart/form-data] (or its wildcard parent).");
+    }
   }
 }

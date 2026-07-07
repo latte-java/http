@@ -1,0 +1,429 @@
+{
+  "version": 1,
+  "timestamp": "2026-05-09T22:57:35Z",
+  "system": {
+    "os": "Darwin",
+    "arch": "arm64",
+    "osVersion": "macOS 15.7.3",
+    "machineModel": "MacBook Air",
+    "cpuModel": "Apple M4",
+    "cpuCores": 10,
+    "ramGB": 24,
+    "javaVersion": "openjdk version \"25.0.2\" 2026-01-20 LTS",
+    "description": "Local benchmark"
+  },
+  "tools": {
+    "wrkVersion": "wrk 4.2.0 [kqueue] Copyright (C) 2012 Will Glozer",
+    "h2loadVersion": "h2load nghttp2/1.69.0"
+  },
+  "results": [
+    {
+      "server": "self",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "hello",
+      "config": {
+        "threads": 12,
+        "connections": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 444018,
+        "duration_us": 5099244,
+        "rps": 87075.26,
+        "avg_latency_us": 1339.83,
+        "p50_us": 1037,
+        "p90_us": 1135,
+        "p99_us": 12858,
+        "max_us": 64697,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "self",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "high-concurrency",
+      "config": {
+        "threads": 12,
+        "connections": 1000,
+        "duration": "5s",
+        "endpoint": "/",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 414956,
+        "duration_us": 5044813,
+        "rps": 82253.99,
+        "avg_latency_us": 11559.16,
+        "p50_us": 11271,
+        "p90_us": 11894,
+        "p99_us": 30931,
+        "max_us": 67574,
+        "errors_connect": 0,
+        "errors_read": 2797,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "self",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-hello",
+      "config": {
+        "threads": 1,
+        "connections": 1,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 208621.00,
+        "avg_latency_us": 450,
+        "p99_us": 1480,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 0
+      }
+    },
+    {
+      "server": "self",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-high-concurrency",
+      "config": {
+        "threads": 4,
+        "connections": 10,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 369994.00,
+        "avg_latency_us": 2750,
+        "p99_us": 26850,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 13
+      }
+    },
+    {
+      "server": "jetty",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "hello",
+      "config": {
+        "threads": 12,
+        "connections": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 548548,
+        "duration_us": 5101547,
+        "rps": 107525.82,
+        "avg_latency_us": 1355.04,
+        "p50_us": 837,
+        "p90_us": 1115,
+        "p99_us": 17844,
+        "max_us": 95874,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "jetty",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "high-concurrency",
+      "config": {
+        "threads": 12,
+        "connections": 1000,
+        "duration": "5s",
+        "endpoint": "/",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 556002,
+        "duration_us": 5099009,
+        "rps": 109041.19,
+        "avg_latency_us": 9108.45,
+        "p50_us": 8966,
+        "p90_us": 9203,
+        "p99_us": 31576,
+        "max_us": 131344,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "jetty",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-hello",
+      "config": {
+        "threads": 1,
+        "connections": 1,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 27191.40,
+        "avg_latency_us": 425,
+        "p99_us": 1380,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 1011316
+      }
+    },
+    {
+      "server": "jetty",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-high-concurrency",
+      "config": {
+        "threads": 4,
+        "connections": 10,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 85129.80,
+        "avg_latency_us": 2310,
+        "p99_us": 18630,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 1954545
+      }
+    },
+    {
+      "server": "tomcat",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "hello",
+      "config": {
+        "threads": 12,
+        "connections": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 521383,
+        "duration_us": 5101206,
+        "rps": 102207.79,
+        "avg_latency_us": 1015.45,
+        "p50_us": 826,
+        "p90_us": 1254,
+        "p99_us": 6316,
+        "max_us": 30432,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "tomcat",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "high-concurrency",
+      "config": {
+        "threads": 12,
+        "connections": 1000,
+        "duration": "5s",
+        "endpoint": "/",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 534542,
+        "duration_us": 5019816,
+        "rps": 106486.37,
+        "avg_latency_us": 9224.56,
+        "p50_us": 8858,
+        "p90_us": 10115,
+        "p99_us": 28179,
+        "max_us": 59370,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "tomcat",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-hello",
+      "config": {
+        "threads": 1,
+        "connections": 1,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 48975.80,
+        "avg_latency_us": 2030,
+        "p99_us": 4960,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 0
+      }
+    },
+    {
+      "server": "tomcat",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-high-concurrency",
+      "config": {
+        "threads": 4,
+        "connections": 10,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 140423.00,
+        "avg_latency_us": 6610,
+        "p99_us": 37430,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 0
+      }
+    },
+    {
+      "server": "netty",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "hello",
+      "config": {
+        "threads": 12,
+        "connections": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 532857,
+        "duration_us": 5100991,
+        "rps": 104461.47,
+        "avg_latency_us": 3020.90,
+        "p50_us": 850,
+        "p90_us": 1101,
+        "p99_us": 77249,
+        "max_us": 194139,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "netty",
+      "tool": "wrk",
+      "protocol": "http/1.1",
+      "scenario": "high-concurrency",
+      "config": {
+        "threads": 12,
+        "connections": 1000,
+        "duration": "5s",
+        "endpoint": "/",
+        "trial": 1
+      },
+      "metrics": {
+        "requests": 539285,
+        "duration_us": 5103606,
+        "rps": 105667.44,
+        "avg_latency_us": 9189.91,
+        "p50_us": 9024,
+        "p90_us": 9724,
+        "p99_us": 25333,
+        "max_us": 86220,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0
+      }
+    },
+    {
+      "server": "netty",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-hello",
+      "config": {
+        "threads": 1,
+        "connections": 1,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 224839.60,
+        "avg_latency_us": 423,
+        "p99_us": 1590,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 0
+      }
+    },
+    {
+      "server": "netty",
+      "tool": "h2load",
+      "protocol": "h2c",
+      "scenario": "h2-high-concurrency",
+      "config": {
+        "threads": 4,
+        "connections": 10,
+        "streams": 100,
+        "duration": "5s",
+        "endpoint": "/hello",
+        "trial": 1
+      },
+      "metrics": {
+        "rps": 768318.80,
+        "avg_latency_us": 1320,
+        "p99_us": 9530,
+        "errors_connect": 0,
+        "errors_read": 0,
+        "errors_write": 0,
+        "errors_timeout": 0,
+        "errors_other": 0
+      }
+    }
+  ]
+}

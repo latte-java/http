@@ -38,6 +38,8 @@ public class HTTPResponse {
 
   private String statusMessage;
 
+  private Map<String, List<String>> trailers;
+
   private Writer writer;
 
   /**
@@ -89,6 +91,22 @@ public class HTTPResponse {
     }
 
     headers.computeIfAbsent(name.toLowerCase(Locale.ROOT), key -> new ArrayList<>()).add(value);
+  }
+
+  /**
+   * Adds a single trailer field to be emitted after the response body. Forbidden trailers (per RFC 9110 §6.5) are
+   * rejected with {@link IllegalArgumentException}. Trailers are emitted only if the client signaled support via
+   * {@code TE: trailers} ({@link HTTPRequest#acceptsTrailers()}).
+   *
+   * @param name  The trailer field name.
+   * @param value The trailer field value.
+   */
+  public void addTrailer(String name, String value) {
+    rejectIfForbiddenTrailer(name);
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    trailers.computeIfAbsent(name.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(value);
   }
 
   /**
@@ -439,6 +457,14 @@ public class HTTPResponse {
   }
 
   /**
+   * @return An unmodifiable view of all response trailers added via {@link #addTrailer(String, String)}. Returns an
+   *     empty map if no trailers were added.
+   */
+  public Map<String, List<String>> getTrailers() {
+    return trailers == null ? Map.of() : trailers;
+  }
+
+  /**
    * Returns a {@link Writer} for writing the response body as text. The writer is created lazily on first call and
    * encodes characters using the charset from {@link #getCharset()} (derived from the {@code Content-Type} header), so
    * the {@code Content-Type} should be set before this is called. The same writer instance is returned on subsequent
@@ -459,6 +485,13 @@ public class HTTPResponse {
     }
 
     return writer;
+  }
+
+  /**
+   * @return {@code true} if any response trailers have been added via {@link #addTrailer(String, String)}.
+   */
+  public boolean hasTrailers() {
+    return trailers != null && !trailers.isEmpty();
   }
 
   /**
@@ -495,7 +528,7 @@ public class HTTPResponse {
    * the first byte being written to the HTTP OutputStream.
    * <p>
    * An {@link IllegalStateException} will be thrown if you call this method after writing to the OutputStream.
-   *
+   * <p>
    * <pre>{@code
    * HTTPResponse response = ...;
    * response.setCompress(true);
@@ -651,6 +684,16 @@ public class HTTPResponse {
     headers.put(name.toLowerCase(Locale.ROOT), new ArrayList<>(List.of(value)));
   }
 
+  public void setTrailer(String name, String value) {
+    rejectIfForbiddenTrailer(name);
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    List<String> list = new ArrayList<>(1);
+    list.add(value);
+    trailers.put(name.toLowerCase(Locale.ROOT), list);
+  }
+
   /**
    * Indicates whether the response body will actually be compressed when written. Unlike {@link #isCompress()}, which
    * only reports the configured intent, this also factors in everything currently known about the request and stream
@@ -660,6 +703,12 @@ public class HTTPResponse {
    */
   public boolean willCompress() {
     return outputStream.willCompress();
+  }
+
+  private void rejectIfForbiddenTrailer(String name) {
+    if (HTTPValues.ForbiddenTrailers.Names.contains(name.toLowerCase(Locale.ROOT))) {
+      throw new IllegalArgumentException("Header name [" + name + "] is forbidden as a trailer per RFC 9110 §6.5.2");
+    }
   }
 }
 

@@ -35,6 +35,10 @@ public class HTTPListenerConfiguration {
 
   private final boolean tls;
 
+  private boolean http2Enabled = true;
+
+  private boolean sniffProtocolVersion;
+
   /**
    * Stores the configuration for a single HTTP listener for the server. This constructor sets up a non-TLS based
    * listener that binds to all the network interfaces of the server.
@@ -189,8 +193,26 @@ public class HTTPListenerConfiguration {
     return privateKey;
   }
 
+  public boolean isHTTP2Enabled() {
+    return http2Enabled;
+  }
+
+  public boolean isSniffProtocolVersion() {
+    return sniffProtocolVersion;
+  }
+
   public boolean isTLS() {
     return tls;
+  }
+
+  public HTTPListenerConfiguration withHTTP2Enabled(boolean enabled) {
+    this.http2Enabled = enabled;
+    return this;
+  }
+
+  public HTTPListenerConfiguration withSniffProtocolVersion(boolean enabled) {
+    this.sniffProtocolVersion = enabled;
+    return this;
   }
 
   private InetAddress allInterfaces() {

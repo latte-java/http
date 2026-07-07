@@ -25,13 +25,9 @@ import module org.lattejava.http;
  */
 public class ChunkedOutputStream extends OutputStream {
   private final byte[] buffer;
-
   private final FastByteArrayOutputStream chunkOutputStream;
-
   private final OutputStream delegate;
-
   private int bufferIndex;
-
   private boolean closed;
 
   public ChunkedOutputStream(OutputStream delegate, byte[] buffer, FastByteArrayOutputStream chuckOutputStream) {
@@ -40,15 +36,16 @@ public class ChunkedOutputStream extends OutputStream {
     this.chunkOutputStream = chuckOutputStream;
   }
 
+  /**
+   * Flushes the final buffered data chunk. Does NOT write the last-chunk marker, trailers, or the terminating CRLF, and
+   * does NOT close the delegate — the owning {@code HTTP1OutputProtocol.commitTrailers()} writes the chunk terminator
+   * (and any trailers) and flushes the socket sink.
+   */
   @Override
   public void close() throws IOException {
     if (!closed) {
       flush();
-      delegate.write(HTTPValues.ControlBytes.ChunkedTerminator);
-      delegate.flush();
-      delegate.close();
     }
-
     closed = true;
   }
 
@@ -59,8 +56,8 @@ public class ChunkedOutputStream extends OutputStream {
     }
 
     if (bufferIndex > 0) {
-      String header = Integer.toHexString(bufferIndex) + "\r\n";
-      chunkOutputStream.write(header.getBytes());
+      chunkOutputStream.write(Integer.toHexString(bufferIndex).getBytes(StandardCharsets.US_ASCII));
+      chunkOutputStream.write(HTTPValues.ControlBytes.CRLF);
       chunkOutputStream.write(buffer, 0, bufferIndex);
       chunkOutputStream.write(HTTPValues.ControlBytes.CRLF);
       delegate.write(chunkOutputStream.bytes(), 0, chunkOutputStream.size());

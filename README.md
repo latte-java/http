@@ -4,7 +4,7 @@
 
 * Latest stable version: `0.1.0`
 
-The goal of this project is to build a full-featured HTTP server and client in plain Java without the use of any libraries. The client and server will use Project Loom virtual threads and blocking I/O so that the Java VM will handle all the context switching between virtual threads as they block on I/O.
+The goal of this project is to build a full-featured HTTP server and client in plain Java without the use of any libraries. The server supports HTTP/1.1 and HTTP/2 (h2 over TLS via ALPN, h2c prior-knowledge or via Upgrade/101). The client and server will use Project Loom virtual threads and blocking I/O so that the Java VM will handle all the context switching between virtual threads as they block on I/O.
 
 For more information about Project Loom and virtual threads, please review the following link.
 * https://blogs.oracle.com/javamagazine/post/java-virtual-threads
@@ -165,70 +165,60 @@ A key purpose for this project is to obtain screaming performance. Here are benc
 
 These benchmarks ensure `http` stays near the top in raw throughput, and we'll be working on claiming the top position -- even if only for bragging rights, since in practice your database and application code will be the bottleneck long before the HTTP server.
 
-All servers implement the same request handler that reads the request body and returns a `200`. All servers were tested over HTTP (no TLS) to isolate server performance.
+All servers implement the same request handler that reads the request body and returns a `200`.
+
+<!-- PERF-SUMMARY-START -->
+Latte HTTP is competitive with the fastest production HTTP servers across most workloads. Where it pulls clearly ahead is the **blocking-IO scenario**, which simulates a handler waiting on a database, cache, or downstream HTTP call — the most common shape for real web apps. Virtual threads park for free; worker-pool servers (Tomcat, Jetty) are bottlenecked by their default thread-pool size.
+
+**HTTP/2 scenario: `h2-hello`** (baseline h2 throughput — 1 connection × 100 concurrent streams)
+
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |      292,400 |      0 |              0.33 |              0.61 |        100.0% |
+| Jetty         |       14,085 | 8704553 |              0.30 |              0.49 |          4.8% |
+| Netty         |      286,653 |      0 |              0.34 |              0.77 |         98.0% |
+| Apache Tomcat |       57,475 |      0 |              1.76 |              3.27 |         19.6% |
+| Undertow      |      125,668 |      0 |              0.80 |              1.21 |         42.9% |
+
+**Headline scenario: `h2-io`** (handler does `Thread.sleep(10ms)` per request, 10 conns × 100 streams = 1000 in-flight)
+
+| Server        | Requests/sec | Errors | Avg latency (ms) | P99 latency (ms) | vs Latte http |
+|---------------|-------------:|-------:|-----------------:|-----------------:|--------------:|
+| Latte http    |       62,700 |      0 |             15.78 |             18.58 |        100.0% |
+| Jetty         |       10,946 |  86567 |             69.60 |            190.60 |         17.4% |
+| Netty         |       77,834 |      0 |             12.85 |             14.44 |        124.1% |
+| Apache Tomcat |       15,257 |      0 |             65.45 |             71.33 |         24.3% |
+| Undertow      |        5,812 |      0 |            171.55 |            190.78 |          9.2% |
+
+**HTTP/1.1 scenario: `baseline`** (`wrk`, `GET /`, 12 threads × 100 connections, plain HTTP)
 
 | Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
 |----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |      114,483 |            0 |             0.86 |             1.68 |        100.0% |
-| JDK HttpServer |       89,870 |            0 |             1.08 |             2.44 |         78.5% |
-| Jetty          |      111,500 |            0 |             1.17 |            11.89 |         97.3% |
-| Netty          |      117,119 |            0 |             0.85 |             1.75 |        102.3% |
-| Apache Tomcat  |      102,030 |            0 |             0.94 |             2.41 |         89.1% |
+| Latte http     |      111,296 |            0 |              0.87 |              1.45 |        100.0% |
+| JDK HttpServer |      103,969 |            0 |              0.90 |              1.43 |         93.4% |
+| Jetty          |      106,228 |            0 |              1.07 |              2.63 |         95.4% |
+| Netty          |      115,679 |            0 |              0.91 |              1.74 |        103.9% |
+| Apache Tomcat  |      104,615 |            0 |              0.90 |              1.64 |         93.9% |
+| Undertow       |      106,162 |            0 |              1.07 |              4.06 |         95.3% |
 
-#### Under stress (1,000 concurrent connections)
+**See [docs/BENCHMARKS.md](docs/BENCHMARKS.md)** for the full 6-scenario breakdown across self / jetty / tomcat / netty — including HTTP/1, CPU-bound, multiplexed stream concurrency, browser-shape connection concurrency, large-response throughput, and per-scenario rationale on what each scenario was designed to expose.
 
-| Server         | Requests/sec | Failures/sec | Avg latency (ms) | P99 latency (ms) | vs Latte http |
-|----------------|-------------:|-------------:|-----------------:|-----------------:|--------------:|
-| Latte http     |      114,120 |            0 |             8.68 |            11.88 |        100.0% |
-| JDK HttpServer |       50,870 |      17655.7 |             6.19 |            22.61 |         44.5% |
-| Jetty          |      108,434 |            0 |             9.20 |            14.83 |         95.0% |
-| Netty          |      115,105 |            0 |             8.61 |            10.09 |        100.8% |
-| Apache Tomcat  |       99,163 |            0 |             9.88 |            18.77 |         86.8% |
-
-_JDK HttpServer (`com.sun.net.httpserver`) is included as a baseline since it ships with the JDK and requires no dependencies. However, as the stress test shows, it is not suitable for production workloads — it suffers significant failures under high concurrency._
-
-_Benchmark performed 2026-02-19 on Darwin, arm64, 10 cores, Apple M4, 24GB RAM (MacBook Air)._
-_OS: macOS 15.7.3._
-_Java: openjdk version "21.0.10" 2026-01-20._
-
-To reproduce:
-```bash
-cd benchmarks
-./run-benchmarks.sh --scenarios hello,high-concurrency
-./update-readme.sh
-```
+_Benchmark performed 2026-07-07 on Darwin, arm64, 10 cores, Apple M4, 32GB RAM (MacBook Air)._
+_OS: macOS 26.5.1._
+_Java: openjdk version "25.0.2" 2026-01-20 LTS._
+<!-- PERF-SUMMARY-END -->
 
 See [benchmarks/README.md](benchmarks/README.md) for full usage and options.
 
-## Todos and Roadmap
+## Protocol support
 
-### Server tasks
+Detailed conformance status lives in the per-version spec docs:
 
-* [x] Basic HTTP 1.1
-* [x] Support Accept-Encoding (gzip, deflate), by default and per response options.
-* [x] Support Content-Encoding (gzip, deflate)
-* [x] Support Keep-Alive
-* [x] Support Expect-Continue 100
-* [x] Support Transfer-Encoding: chunked on request for streaming.
-* [x] Support Transfer-Encoding: chunked on response
-* [x] Support cookies in request and response
-* [x] Support form data
-* [x] Support multipart form data
-* [x] Support TLS
-* [ ] Support trailers
-* [ ] Support HTTP 2
+- [HTTP/1.1](docs/design/2026-04-27-HTTP1.1.md) — implemented
+- [HTTP/2](docs/design/2026-05-05-HTTP2.md) — implemented (RFC 9113, HPACK, h2c, ALPN, gRPC)
+- [HTTP/3](docs/design/2026-05-09-HTTP3.md) — out of scope until JDK QUIC API
 
-### Client tasks
-
-* [ ] Basic HTTP 1.1
-* [ ] Support Keep-Alive
-* [ ] Support TLS
-* [ ] Support Expect-Continue 100
-* [ ] Support chunked request and response
-* [ ] Support streaming entity bodies
-* [ ] Support form data
-* [ ] Support multipart form data
-* [ ] Support HTTP 2
+The HTTP client is not yet implemented.
 
 ## FAQ
 

@@ -26,28 +26,29 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 
-import org.lattejava.http.log.Level;
-import org.lattejava.http.log.SystemOutLoggerFactory;
 import org.lattejava.http.server.HTTPListenerConfiguration;
 import org.lattejava.http.server.HTTPServer;
 import org.lattejava.http.server.ThreadSafeCountingInstrumenter;
 
 public class Main {
   public static void main(String[] args) throws Exception {
-    SystemOutLoggerFactory.FACTORY.getLogger(Object.class).setLevel(Level.Debug);
-
     var outputFile = setupOutput();
     var instrumenter = new ThreadSafeCountingInstrumenter();
 
+    // TLS listener on 8443: load the benchmark self-signed cert/key from benchmarks/certs/.
+    // start.sh runs from build/dist, so we walk up: dist → build → self → benchmarks → certs.
+    String certPem = Files.readString(Path.of("../../../certs/server.crt"));
+    String keyPem = Files.readString(Path.of("../../../certs/server.key"));
+
     try (HTTPServer ignore = new HTTPServer().withHandler(new LoadHandler())
                                              .withCompressByDefault(false)
-                                             .withMaxRequestsPerConnection(100_000_000)
+                                             .withHTTP1(h1 -> h1.withMaxRequestsPerConnection(100_000_000))
                                              .withInitialReadTimeout(Duration.ofSeconds(10))
                                              .withMinimumReadThroughput(4 * 1024)
                                              .withMinimumWriteThroughput(4 * 1024)
                                              .withInstrumenter(instrumenter)
-                                             .withListener(new HTTPListenerConfiguration(8080))
-                                             .withLoggerFactory(SystemOutLoggerFactory.FACTORY)
+                                             .withListener(new HTTPListenerConfiguration(8080).withH2cPriorKnowledgeEnabled(true))
+                                             .withListener(new HTTPListenerConfiguration(8443, certPem, keyPem))
                                              .start()) {
 
       // End the server after 2 hours, or you an CTRL+C as well.

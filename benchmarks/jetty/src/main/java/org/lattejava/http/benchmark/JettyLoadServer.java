@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2025-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,31 +19,70 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.Map;
 
+import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
+import org.eclipse.jetty.http2.server.HTTP2CServerConnectionFactory;
+import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.io.Content;
 import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 
 public class JettyLoadServer {
   private static final Map<Integer, byte[]> Blobs = new HashMap<>();
 
   public static void main(String[] args) throws Exception {
     Server server = new Server();
-    ServerConnector connector = new ServerConnector(server);
+
+    // Port 8080: HTTP/1.1 + h2c (cleartext) — used by wrk and h2load h2c scenarios.
+    HttpConfiguration httpConfig = new HttpConfiguration();
+    HttpConnectionFactory http1 = new HttpConnectionFactory(httpConfig);
+    HTTP2CServerConnectionFactory h2c = new HTTP2CServerConnectionFactory(httpConfig);
+    ServerConnector connector = new ServerConnector(server, http1, h2c);
     connector.setPort(8080);
     connector.setAcceptQueueSize(200);
     server.addConnector(connector);
 
+    // Port 8443: TLS + ALPN negotiating h2 or http/1.1 — used by h2load TLS scenarios.
+    // Loads the fixed self-signed benchmark cert from benchmarks/certs/.
+    // start.sh runs from build/dist, so we walk up: dist → build → jetty → benchmarks → certs.
+    SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+    sslContextFactory.setKeyStorePath("../../../certs/keystore.p12");
+    sslContextFactory.setKeyStorePassword("benchmark");
+    sslContextFactory.setKeyStoreType("PKCS12");
+
+    HttpConfiguration httpsConfig = new HttpConfiguration(httpConfig);
+    httpsConfig.addCustomizer(new SecureRequestCustomizer());
+
+    // ALPN negotiation: advertises h2 (preferred) and http/1.1.
+    ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory();
+    alpn.setDefaultProtocol("h2");
+
+    HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory(httpsConfig);
+    HttpConnectionFactory https1 = new HttpConnectionFactory(httpsConfig);
+    SslConnectionFactory ssl = new SslConnectionFactory(sslContextFactory, alpn.getProtocol());
+
+    ServerConnector tlsConnector = new ServerConnector(server, ssl, alpn, h2, https1);
+    tlsConnector.setPort(8443);
+    tlsConnector.setAcceptQueueSize(200);
+    server.addConnector(tlsConnector);
+
     server.setHandler(new LoadHandler());
     server.start();
-    System.out.println("Jetty server started on port 8080");
+    System.out.println("Jetty server started on port 8080 (h2c) and port 8443 (TLS+ALPN h2)");
     server.join();
   }
 
@@ -64,6 +103,10 @@ public class JettyLoadServer {
           case "/hello" -> handleHello(request, response);
           case "/file" -> handleFile(request, response);
           case "/load" -> handleLoad(request, response);
+          case "/compute" -> handleCompute(request, response);
+          case "/io" -> handleIO(request, response);
+          case "/large-response" -> handleLargeResponse(request, response);
+          case "/stream" -> handleStream(request, response);
           default -> handleFailure(request, response, path);
         }
         callback.succeeded();
@@ -74,9 +117,26 @@ public class JettyLoadServer {
       return true;
     }
 
+    private void handleCompute(Request request, Response response) throws Exception {
+      int rounds = 5000;
+      String roundsParam = queryParam(request, "rounds");
+      if (roundsParam != null) {
+        rounds = Integer.parseInt(roundsParam);
+      }
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      byte[] hash = new byte[32];
+      for (int i = 0; i < rounds; i++) {
+        hash = md.digest(hash);
+      }
+      byte[] body = HexFormat.of().formatHex(hash).getBytes(StandardCharsets.UTF_8);
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "text/plain");
+      response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
+    }
+
     private void handleFailure(Request request, Response response, String path) throws Exception {
       readRequestBody(request);
-      byte[] body = ("Invalid path [" + path + "]. Supported paths include [/, /no-read, /hello, /file, /load].").getBytes(StandardCharsets.UTF_8);
+      byte[] body = ("Invalid path [" + path + "]. Supported paths include [/, /no-read, /hello, /file, /load, /compute, /io, /stream].").getBytes(StandardCharsets.UTF_8);
       response.setStatus(400);
       response.getHeaders().put("Content-Type", "text/plain");
       response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
@@ -125,6 +185,45 @@ public class JettyLoadServer {
       response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
     }
 
+    private void handleIO(Request request, Response response) throws Exception {
+      int ms = 10;
+      String msParam = queryParam(request, "ms");
+      if (msParam != null) {
+        ms = Integer.parseInt(msParam);
+      }
+      Thread.sleep(ms);
+      byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "text/plain");
+      response.write(true, ByteBuffer.wrap(body), Callback.NOOP);
+    }
+
+    private void handleLargeResponse(Request request, Response response) throws Exception {
+      // Single-shot write; contrast with /stream which writes per-chunk with explicit completion-per-chunk.
+      int size = 131072;
+      String sizeParam = queryParam(request, "size");
+      if (sizeParam != null) {
+        size = Integer.parseInt(sizeParam);
+      }
+
+      byte[] blob = Blobs.get(size);
+      if (blob == null) {
+        synchronized (Blobs) {
+          blob = Blobs.get(size);
+          if (blob == null) {
+            String s = "Lorem ipsum dolor sit amet";
+            String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+            Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+            blob = Blobs.get(size);
+          }
+        }
+      }
+
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "application/octet-stream");
+      response.write(true, ByteBuffer.wrap(blob), Callback.NOOP);
+    }
+
     private void handleLoad(Request request, Response response) throws Exception {
       // Note that this should be mostly the same between all load tests.
       // - See benchmarks/self
@@ -142,6 +241,53 @@ public class JettyLoadServer {
 
     private void handleNoRead(Request request, Response response) {
       response.setStatus(200);
+    }
+
+    private void handleStream(Request request, Response response) throws Exception {
+      int size = 131072;
+      String sizeParam = queryParam(request, "size");
+      if (sizeParam != null) {
+        size = Integer.parseInt(sizeParam);
+      }
+
+      byte[] blob = Blobs.get(size);
+      if (blob == null) {
+        synchronized (Blobs) {
+          blob = Blobs.get(size);
+          if (blob == null) {
+            String s = "Lorem ipsum dolor sit amet";
+            String body = s.repeat((size + s.length() - 1) / s.length()).substring(0, size);
+            Blobs.put(size, body.getBytes(StandardCharsets.UTF_8));
+            blob = Blobs.get(size);
+          }
+        }
+      }
+
+      response.setStatus(200);
+      response.getHeaders().put("Content-Type", "application/octet-stream");
+
+      int chunkSize = 8192;
+      int offset = 0;
+      while (offset < blob.length) {
+        int len = Math.min(chunkSize, blob.length - offset);
+        boolean last = offset + len == blob.length;
+        response.write(last, ByteBuffer.wrap(blob, offset, len), Callback.NOOP);
+        offset += len;
+      }
+    }
+
+    private static String queryParam(Request request, String name) {
+      String query = request.getHttpURI().getQuery();
+      if (query == null) {
+        return null;
+      }
+      for (String param : query.split("&")) {
+        String[] kv = param.split("=", 2);
+        if (kv.length == 2 && kv[0].equals(name)) {
+          return kv[1];
+        }
+      }
+      return null;
     }
   }
 }

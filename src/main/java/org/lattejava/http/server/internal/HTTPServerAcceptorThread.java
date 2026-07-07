@@ -1,0 +1,307 @@
+/*
+ * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied. See the License for the specific
+ * language governing permissions and limitations under the License.
+ */
+package org.lattejava.http.server.internal;
+
+import module java.base;
+import module org.lattejava.http;
+
+import java.lang.System.Logger.Level;
+
+/**
+ * A thread that manages the accept process for a single server socket. Once a connection is accepted, the socket is
+ * passed to a virtual thread for processing.
+ *
+ * @author Brian Pontarelli
+ */
+public class HTTPServerAcceptorThread extends Thread {
+  private static final System.Logger logger = System.getLogger(HTTPServerAcceptorThread.class.getName());
+
+  private final ConnectionReaperThread reaperThread;
+
+  private final Deque<ClientConnection> clients = new ConcurrentLinkedDeque<>();
+
+  private final HTTPServerConfiguration configuration;
+
+  private final HTTPContext context;
+
+  private final Instrumenter instrumenter;
+
+  private final HTTPListenerConfiguration listener;
+
+  private final long minimumReadThroughput;
+
+  private final long minimumWriteThroughput;
+
+  private final ServerSocket socket;
+
+  private volatile boolean running;
+
+  public HTTPServerAcceptorThread(HTTPServerConfiguration configuration, HTTPContext context, HTTPListenerConfiguration listener)
+      throws IOException, GeneralSecurityException {
+    super("HTTP server [" + listener.getBindAddress().toString() + ":" + listener.getPort() + "]");
+
+    this.configuration = configuration;
+    this.context = context;
+    this.listener = listener;
+    this.instrumenter = configuration.getInstrumenter();
+    this.minimumReadThroughput = configuration.getMinimumReadThroughput();
+    this.minimumWriteThroughput = configuration.getMinimumWriteThroughput();
+    this.reaperThread = new ConnectionReaperThread();
+
+    if (listener.isTLS()) {
+      SSLContext sslContext = SecurityTools.serverContext(listener.getCertificateChain(), listener.getPrivateKey());
+      this.socket = sslContext.getServerSocketFactory().createServerSocket();
+    } else {
+      this.socket = new ServerSocket();
+    }
+
+    socket.setSoTimeout(0); // Always block
+    socket.bind(new InetSocketAddress(listener.getBindAddress(), listener.getPort()), configuration.getMaxPendingSocketConnections());
+
+    if (instrumenter != null) {
+      instrumenter.serverStarted();
+    }
+  }
+
+  @Override
+  public void run() {
+    running = true;
+    reaperThread.start();
+
+    while (running) {
+      try {
+        // Note that the socket is using the configured backlog from the configured value for getMaxPendingSocketConnections.
+        // - This should be adequate, but in theory we could also just accept these sockets and queue them for another thread to work FIFO
+        //   and construct the virtual threads. I don't think it is necessary, but if we think this is too slow to pull connections off of
+        //   the server socket and fire up an HTTP worker, then we could consider seeing if we can improve performance here.
+        Socket clientSocket = socket.accept();
+        clientSocket.setSoTimeout((int) configuration.getInitialReadTimeoutDuration().toMillis());
+        if (logger.isLoggable(Level.TRACE)) {
+          String listenerAddress = listener.getBindAddress().toString() + ":" + listener.getPort();
+          logger.log(Level.TRACE, "[{0}] Accepted inbound connection. [{1}] existing connections.", listenerAddress, clients.size());
+        }
+
+        if (instrumenter != null) {
+          instrumenter.acceptedConnection();
+        }
+
+        Throughput throughput = new Throughput(configuration.getReadThroughputCalculationDelay().toMillis(), configuration.getWriteThroughputCalculationDelay().toMillis());
+
+        // Protocol selection (TLS-ALPN handshake / h2c preface peek) is BLOCKING, so it runs inside ConnectionDispatcher
+        // on the per-connection virtual thread — never on this accept thread. The dispatcher is created unstarted and
+        // registered with the reaper before it starts, so the connection is tracked from the moment it can run.
+        ConnectionDispatcher dispatcher = new ConnectionDispatcher(clientSocket, configuration, context, instrumenter, listener, throughput);
+        Thread client = Thread.ofVirtual()
+                              .name("HTTP client [" + clientSocket.getRemoteSocketAddress() + "]")
+                              .unstarted(dispatcher);
+        clients.add(new ClientConnection(client, dispatcher, throughput));
+        client.start();
+      } catch (SocketTimeoutException ignore) {
+        // Completely smother since this is expected with the SO_TIMEOUT setting in the constructor
+        logger.log(Level.DEBUG, "Nothing accepted. Cleaning up existing connections.");
+      } catch (SocketException e) {
+        // This should only happen when the server is shutdown
+        if (socket.isClosed()) {
+          running = false;
+          logger.log(Level.DEBUG, "The server socket was closed. Shutting down the server.");
+        } else {
+          logger.log(Level.ERROR, "An exception was thrown while accepting incoming connections.", e);
+        }
+      } catch (IOException ignore) {
+        // Completely smother since most IO exceptions are common during the connection phase
+        logger.log(Level.DEBUG, "IO exception. Likely a fuzzer or a bad client or a TLS issue, all of which are common and can mostly be ignored.");
+      } catch (Throwable t) {
+        logger.log(Level.ERROR, "An exception was thrown during server processing. This is a fatal issue and we need to shutdown the server.", t);
+        break;
+      }
+    }
+
+    // Close all the client connections as cleanly as possible.
+    // HTTP/2 connections get a GOAWAY(NO_ERROR) so the peer knows the server is shutting down gracefully.
+    for (ClientConnection client : clients) {
+      client.connection().shutdown();
+    }
+    for (ClientConnection client : clients) {
+      client.thread().interrupt();
+    }
+  }
+
+  /**
+   * @return The actual port the server socket is bound to. Useful when the listener was configured with port 0
+   *     (OS-assigned).
+   */
+  public int getActualPort() {
+    return socket.getLocalPort();
+  }
+
+  public void shutdown() {
+    running = false;
+    try {
+      reaperThread.interrupt();
+      socket.close();
+    } catch (IOException ignore) {
+      // Ignorable since we are shutting down regardless
+    }
+  }
+
+  // - In theory we could hold onto some meta-data here that keeps track of how many requests we have processed on this thread and then exit.
+  record ClientConnection(Thread thread, HTTPConnection connection, Throughput throughput) {
+    public long getAge() {
+      return System.currentTimeMillis() - connection().getStartInstant();
+    }
+
+    public long getHandledRequests() {
+      return connection().getHandledRequests();
+    }
+
+    public long getStartInstant() {
+      return connection().getStartInstant();
+    }
+  }
+
+  private class ConnectionReaperThread extends Thread {
+    public ConnectionReaperThread() {
+      super("Cleaner for HTTP server [" + listener.getBindAddress().toString() + ":" + listener.getPort() + "]");
+    }
+
+    public void run() {
+      while (running) {
+
+        int currentClientCount = clients.size();
+        int removedClientCount = 0;
+        logger.log(Level.TRACE, "Wake up. Review [{0}] client worker threads for cleanup.", currentClientCount);
+
+        Iterator<ClientConnection> iterator = clients.iterator();
+        while (iterator.hasNext()) {
+          ClientConnection client = iterator.next();
+          Thread thread = client.thread();
+          long threadId = thread.threadId();
+          if (!thread.isAlive()) {
+            logger.log(Level.TRACE, "[{0}] Remove dead client worker. Born [{1}]. Died at age [{2}] ms. Requests handled [{3}].", threadId, client.getStartInstant(), client.getAge(), client.getHandledRequests());
+            iterator.remove();
+            removedClientCount++;
+            continue;
+          }
+
+          long now = System.currentTimeMillis();
+          Throughput throughput = client.throughput();
+          HTTPConnection worker = client.connection();
+          HTTPConnection.State state = worker.state();
+          long workerLastUsed = throughput.lastUsed();
+          boolean readingSlow = false;
+          boolean writingSlow = false;
+          boolean timedOut = false;
+          boolean badClient = false;
+
+          // -1 means we have not yet calculated these values
+          long readThroughput = -1;
+          long writeThroughput = -1;
+
+          String badClientReason = "[" + threadId + "] Check worker in state [" + state + "]";
+          if (state == HTTPConnection.State.Read) {
+            // Here the SO_TIMEOUT set above or the Keep-Alive timeout in HTTP1Connection will dictate if the socket has timed out. This prevents slow readers
+            // or network issues where the client reads 1 byte per timeout value (i.e. 1 byte per 2 seconds or something like that)
+            readThroughput = throughput.readThroughput(now);
+            badClient = readThroughput < minimumReadThroughput;
+            readingSlow = badClient;
+            badClientReason += " readingSlow=[" + readingSlow + "] readThroughput=[" + readThroughput + "] minimumReadThroughput=[" + minimumReadThroughput + "]";
+          } else if (state == HTTPConnection.State.Write) {
+            // Check for slow clients when writing (or network issues)
+            writeThroughput = throughput.writeThroughput(now);
+            badClient = writeThroughput < minimumWriteThroughput;
+            writingSlow = badClient;
+            badClientReason += " writingSlow=[" + writingSlow + "] writeThroughput=[" + writeThroughput + "] minimumWriteThroughput=[" + minimumWriteThroughput + "]";
+          } else if (state == HTTPConnection.State.Process) {
+            // Here lastUsed was the instant the last byte was read, so we calculate distance between that and now to see if it is beyond the timeout
+            long waited = (now - workerLastUsed);
+            badClient = waited > configuration.getProcessingTimeoutDuration().toMillis();
+            timedOut = badClient;
+            badClientReason += " timedOut=[" + timedOut + "] waited=[" + waited + "] processingTimeoutDuration=[" + configuration.getProcessingTimeoutDuration().toMillis() + "]";
+          }
+
+          if (!badClient) {
+            logger.log(Level.TRACE, "[{0}] Check worker in state [{1}]", threadId, state);
+            continue;
+          }
+
+          // If the client was bad, debug log it.
+          logger.log(Level.DEBUG, badClientReason);
+
+          // Bad client, first things first, remove the client from the list
+          iterator.remove();
+          removedClientCount++;
+
+          String message = "";
+          if (logger.isLoggable(Level.DEBUG)) {
+
+            if (readingSlow) {
+              message += String.format(" Min read throughput [%s], actual throughput [%s].", minimumReadThroughput, readThroughput);
+            }
+
+            if (writingSlow) {
+              message += String.format(" Min write throughput [%s], actual throughput [%s].", minimumWriteThroughput, writeThroughput);
+            }
+
+            if (timedOut) {
+              message += String.format(" Connection timed out while processing. Last used [%s]ms ago. Configured client timeout [%s]ms.", (now - workerLastUsed), configuration.getProcessingTimeoutDuration().toMillis());
+            }
+
+            logger.log(Level.DEBUG, "[{0}] Closing connection readingSlow=[{1}] writingSlow=[{2}] timedOut=[{3}] {4}", threadId, readingSlow, writingSlow, timedOut, message);
+            logger.log(Level.DEBUG, "[{0}] Closing client connection [{1}] due to inactivity", threadId, worker.getSocket().getRemoteSocketAddress());
+          }
+
+          if (logger.isLoggable(Level.TRACE)) {
+            StringBuilder threadDump = new StringBuilder();
+            for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+              threadDump.append(entry.getKey()).append(" ").append(entry.getKey().getState()).append("\n");
+              for (StackTraceElement ste : entry.getValue()) {
+                threadDump.append("\tat ").append(ste).append("\n");
+              }
+              threadDump.append("\n");
+            }
+
+            logger.log(Level.TRACE, "Thread dump from server side.\n{0}", threadDump);
+          }
+
+          try {
+            var socket = worker.getSocket();
+            socket.close();
+
+            if (instrumenter != null) {
+              instrumenter.connectionClosed();
+            }
+          } catch (IOException e) {
+            // Log but ignore
+            logger.log(Level.DEBUG, MessageFormat.format("[{0}] Unable to close connection to client.", threadId), e);
+          }
+        }
+
+        // Only bother tracing this if we started with greater than 0
+        if (currentClientCount > 0) {
+          logger.log(Level.TRACE, "Cleanup removed [{0}] clients", removedClientCount);
+        }
+
+        // Take a break
+        try {
+          //noinspection BusyWait
+          sleep(2_000);
+        } catch (InterruptedException ignore) {
+          // Ignore
+        }
+      }
+    }
+  }
+}

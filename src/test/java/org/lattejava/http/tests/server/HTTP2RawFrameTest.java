@@ -1,0 +1,1687 @@
+/*
+ * Copyright (c) 2026 The Latte Project
+ * SPDX-License-Identifier: MIT
+ */
+package org.lattejava.http.tests.server;
+
+import module java.base;
+import module org.lattejava.http;
+import module org.testng;
+
+import org.lattejava.http.server.internal.h2.*;
+
+import static org.testng.Assert.*;
+
+/**
+ * Raw frame conformance tests for HTTP/2. Each test sends specific frame sequences over a raw h2c socket and asserts
+ * RFC 9113 conformance at the connection level: correct GOAWAY error codes or correct transparent-ignore behavior.
+ *
+ * <p>Frame helpers live in {@link BaseHTTP2RawTest}, shared by all raw-frame HTTP/2 suites.
+ *
+ * @author Daniel DeGroff
+ */
+public class HTTP2RawFrameTest extends BaseHTTP2RawTest {
+  /**
+   * Minimal HPACK block representing a valid GET / request over HTTP/2. Uses only indexed header field representations
+   * from the static table (RFC 7541 §6.1):
+   * <ul>
+   *   <li>{@code 0x82} — index 2: {@code :method: GET}</li>
+   *   <li>{@code 0x84} — index 4: {@code :path: /}</li>
+   *   <li>{@code 0x86} — index 6: {@code :scheme: https}</li>
+   *   <li>{@code 0x41, 0x0f, ...} — literal {@code :authority: localhost}</li>
+   * </ul>
+   * Passing this as the HEADERS payload gives the server a decodable header block, which is required for tests
+   * that need to exercise post-HEADERS logic (e.g. stream-id ordering).
+   */
+  private static final byte[] MINIMAL_HPACK_GET = {
+      (byte) 0x82,                          // :method: GET
+      (byte) 0x84,                          // :path: /
+      (byte) 0x86,                          // :scheme: https → server accepts either scheme; using literal below instead
+      // :authority: localhost (literal with indexing, name from static table index 1)
+      (byte) 0x41, 0x09,
+      'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
+  };
+
+  /**
+   * Design §2.2 — the default 1 MB connection window is advertised in the server's FIRST flight, coalesced with the
+   * server preface SETTINGS and ahead of the SETTINGS ACK (RFC 9113 §6.9.2: a stream-0 WINDOW_UPDATE is the only
+   * mechanism; the grant is causally independent of the peer's SETTINGS, so it need not wait — Go/nginx/browser
+   * practice). Uses a raw socket because openH2CConnection deliberately drains the advertisement.
+   */
+  @Test
+  public void connection_window_advertised_at_default_one_megabyte() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = new Socket("127.0.0.1", server.getActualPort())) {
+        var out = sock.getOutputStream();
+        out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes());
+        out.write(new byte[]{0, 0, 0, 0x4, 0, 0, 0, 0, 0}); // empty client SETTINGS
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        int[] settings = readFrameHeader(in);
+        assertEquals(settings[0], 0x4, "Expected the server preface SETTINGS first; got type: " + settings[0]);
+        in.readNBytes(settings[3]);
+
+        int[] windowUpdate = readFrameHeader(in);
+        assertEquals(windowUpdate[0], 0x8, "Expected the first-flight WINDOW_UPDATE before the ACK; got type: " + windowUpdate[0]);
+        assertEquals(windowUpdate[2], 0, "Expected stream 0; got: " + windowUpdate[2]);
+        byte[] payload = in.readNBytes(4);
+        int increment = ((payload[0] & 0x7F) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+        assertEquals(increment, 1_048_576 - 65_535, "Expected the default 1MB advertisement delta; got: " + increment);
+
+        int[] ack = readFrameHeader(in);
+        assertEquals(ack[0], 0x4, "Expected the SETTINGS ACK after the advertisement; got type: " + ack[0]);
+        assertEquals(ack[1] & 0x1, 0x1, "Expected the ACK flag on the trailing SETTINGS frame");
+      }
+    }
+  }
+
+  /** Design §2.2 — configured to exactly 65,535, no stream-0 WINDOW_UPDATE is advertised. */
+  @Test
+  public void connection_window_at_minimum_advertises_nothing() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withConnectionWindowSize(65_535)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Send a request; the FIRST server frame must be its response HEADERS, not a WINDOW_UPDATE.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+        sock.setSoTimeout(5000);
+        int[] frame = readFrameHeader(sock.getInputStream());
+        assertEquals(frame[0], 0x1, "Expected response HEADERS as the first frame (no advertisement); got type: " + frame[0]);
+      }
+    }
+  }
+
+  /** Design §2.2 replenish-at-half — far fewer stream-0 WINDOW_UPDATEs than one per DATA frame. */
+  @Test
+  public void connection_window_replenishes_at_half_not_per_frame() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withConnectionWindowSize(131_072).withInitialWindowSize(1 << 20)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, 1);
+        out.write(MINIMAL_HPACK_GET);
+        byte[] chunk = new byte[16_384];
+        for (int i = 0; i < 16; i++) { // 262,144 bytes = 2x the connection window
+          boolean last = i == 15;
+          writeFrameHeader(out, chunk.length, 0x0, last ? 0x1 : 0x0, 1);
+          out.write(chunk);
+        }
+        out.flush();
+        sock.setSoTimeout(5000);
+        // Count stream-0 WINDOW_UPDATEs until the response HEADERS arrives.
+        var in = sock.getInputStream();
+        int connectionWindowUpdates = 0;
+        while (true) {
+          int[] frame = readFrameHeader(in);
+          byte[] payload = in.readNBytes(frame[3]);
+          assertEquals(payload.length, frame[3]);
+          if (frame[0] == 0x8 && frame[2] == 0) {
+            connectionWindowUpdates++;
+          }
+          if (frame[0] == 0x1) {
+            break; // response HEADERS
+          }
+        }
+        // 262,144 bytes / (131,072/2 per replenish) + 1 slack = at most 5; the old per-frame echo would emit 16.
+        assertTrue(connectionWindowUpdates <= 5,
+            "Expected replenish-at-half (<=5 stream-0 WINDOW_UPDATEs); got: " + connectionWindowUpdates);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.10 — CONTINUATION frame with no preceding HEADERS (no active header block) must trigger
+   * GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void continuation_without_preceding_headers_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // CONTINUATION on stream 1 with no preceding HEADERS (no active header block) —
+        // RFC 9113 §6.10 requires GOAWAY(PROTOCOL_ERROR).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x9 /* CONTINUATION */, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for CONTINUATION without preceding HEADERS; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §4.3 — CONTINUATION for a different stream inside an open header block is a connection error.
+   */
+  @Test
+  public void continuation_on_wrong_stream_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, 3, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET, 0, 3);
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length - 3, 0x9 /* CONTINUATION */, 0x4 /* END_HEADERS */, 3);
+        out.write(MINIMAL_HPACK_GET, 3, MINIMAL_HPACK_GET.length - 3);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for CONTINUATION on wrong stream; got: " + errorCode);
+      }
+    }
+  }
+
+  /** Design §2.2 enforcement — one frame larger than the connection window's available credit. Only reachable by
+   * config: large advertised MAX_FRAME_SIZE, minimum connection window, large stream windows so the connection debit
+   * (which runs first) trips. */
+  @Test
+  public void data_exceeding_connection_window_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withMaxFrameSize(1 << 20).withConnectionWindowSize(65_535).withInitialWindowSize(1 << 20))
+        .start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 70,000 bytes in ONE frame (legal against our advertised 1MB MAX_FRAME_SIZE) > 65,535 connection window.
+        writeFrameHeader(out, 70_000, 0x0, 0x1, 1);
+        out.write(new byte[70_000]);
+        out.flush();
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected GOAWAY(FLOW_CONTROL_ERROR=0x3) for connection window overrun; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.9.1 — a DATA frame larger than the stream's available receive window is a stream error of type
+   * FLOW_CONTROL_ERROR. Today the underflow throws internally and surfaces as GOAWAY(INTERNAL_ERROR); the HTTP2Window
+   * migration maps it correctly. Debit and replenish run inline on the reader thread, so the only reachable overrun is
+   * a single frame exceeding available credit — hence the tiny configured window.
+   */
+  @Test
+  public void data_exceeding_stream_window_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withInitialWindowSize(1024)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 with a body pending.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 2048-byte DATA against a 1024-byte stream window — overruns in one frame.
+        writeFrameHeader(out, 2048, 0x0 /* DATA */, 0x1 /* END_STREAM */, 1);
+        out.write(new byte[2048]);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected RST_STREAM(FLOW_CONTROL_ERROR=0x3) for stream window overrun; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * Design §4.4 rule 3 — once a closed stream ID is evicted from the 100-entry recently-closed memory, DATA on it is
+   * ignored per §6.1 (not STREAM_CLOSED), and the connection keeps serving. Raises rstStreamMax so 101 client resets
+   * don't trip the rapid-reset guard.
+   */
+  @Test
+  public void data_on_forgotten_closed_stream_is_ignored() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    // The handler reads the body: the 101 reset streams park in the body read until the RST EOFs their pipe, and by
+    // then the stream is CLOSED so the response is suppressed (HTTP2OutputProtocol.commitHeaders null-sinks reset
+    // streams). Net effect: the ONLY response frames on the wire come from the final request, so the assertion below
+    // genuinely proves the post-eviction request was served.
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withRateLimits(rl -> rl.withRstStreamMax(1000))).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        // Open and reset 101 streams (IDs 1..201) — stream 1 falls out of the recently-closed memory.
+        for (int id = 1; id <= 201; id += 2) {
+          writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS, no END_STREAM */, id);
+          out.write(MINIMAL_HPACK_GET);
+          writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, id);
+          out.write(new byte[]{0, 0, 0, 0x8}); // CANCEL
+        }
+        // DATA on evicted stream 1 — must be ignored, not STREAM_CLOSED.
+        writeFrameHeader(out, 3, 0x0 /* DATA */, 0x1 /* END_STREAM */, 1);
+        out.write(new byte[]{1, 2, 3});
+        // The connection must still serve a fresh request.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 203);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        assertEquals(readUntilResponseHeaders(in), 203,
+            "Expected a response on stream 203 — the connection must survive DATA on a forgotten stream (helper returns stream ID)");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §5.1 — a DATA frame on a recently-closed stream (one the client just RST'd) must produce
+   * {@code GOAWAY(STREAM_CLOSED)} (error code {@code 0x5}).
+   */
+  @Test
+  public void data_on_recently_closed_stream_triggers_stream_closed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 with END_STREAM (no body — handler completes immediately).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // RST stream 1 — server marks stream 1 as recently closed.
+        writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0x8}); // error code = CANCEL (0x8)
+        // Send DATA on stream 1 — must produce GOAWAY(STREAM_CLOSED=0x5).
+        writeFrameHeader(out, 5, 0x0 /* DATA */, 0x1 /* END_STREAM */, 1);
+        out.write(new byte[]{1, 2, 3, 4, 5});
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x5, "Expected GOAWAY(STREAM_CLOSED=0x5) for DATA on recently-closed stream; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.1 — DATA frame with stream ID 0 must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void data_on_stream_zero_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // DATA frame on stream 0 — RFC 9113 §6.1 requires GOAWAY(PROTOCOL_ERROR).
+        writeFrameHeader(out, 4, 0x0 /* DATA */, 0x1 /* END_STREAM */, 0);
+        out.write(new byte[]{1, 2, 3, 4});
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for DATA on stream 0; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.1 — DATA frame with an invalid pad length (padLen >= frame payload length) must trigger
+   * GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void data_with_invalid_pad_length_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // First open stream 1 so DATA isn't on an idle stream.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+
+        // DATA on stream 1, PADDED flag set, padLen = 10 but payload length is only 5 (1 pad-len byte + 4 data/pad).
+        // padLen (10) > remaining (4) → invalid pad length → PROTOCOL_ERROR.
+        // Payload: [padLen=10] [data: 1,2,3,4] — total 5 bytes, padLen claims 10.
+        writeFrameHeader(out, 5, 0x0 /* DATA */, 0x8 /* PADDED */, 1);
+        out.write(new byte[]{10, 1, 2, 3, 4}); // padLen=10, only 4 actual bytes remain
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for invalid DATA pad length; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §5.1.1 — stream IDs MUST be strictly monotonically increasing. Sending a HEADERS on a stream whose ID is
+   * lower than a previously seen stream ID must result in {@code GOAWAY(PROTOCOL_ERROR)} (error code {@code 0x1}).
+   */
+  @Test
+  public void decreasing_stream_id_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // First HEADERS on stream 5.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 5);
+        out.write(MINIMAL_HPACK_GET);
+        // Second HEADERS on stream 3 — lower than 5, a protocol error.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 3);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for decreasing stream ID; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.8 — GOAWAY frame with non-zero stream ID must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void goaway_with_non_zero_stream_id_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // GOAWAY on stream 1 — RFC 9113 §6.8 requires stream ID 0; any other is PROTOCOL_ERROR.
+        // GOAWAY payload: last-stream-id (4 bytes) + error-code (4 bytes).
+        writeFrameHeader(out, 8, 0x7 /* GOAWAY */, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0, 0, 0, 0, 0}); // lastStreamId=0, errorCode=NO_ERROR
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for GOAWAY on stream 1; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * When the writer thread exits and the connection is dead, an in-flight handler virtual-thread must not park
+   * indefinitely on {@code writerQueue.put()} or in the {@code HTTP2OutputStream} flow-control wait loop.
+   *
+   * <p>Reproduction: client sends GET, then closes the socket before the response can be written. The reader
+   * thread exits and the writer thread drains its sentinel and exits. The handler (mid-write of a large body) must
+   * detect the dead connection within a bounded time and exit, instead of spinning forever on flow control or blocking
+   * forever on a full {@code writerQueue}.
+   */
+  @Test
+  public void handler_thread_does_not_hang_after_writer_dies() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    AtomicBoolean handlerCompleted = new AtomicBoolean(false);
+    CountDownLatch handlerStarted = new CountDownLatch(1);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      handlerStarted.countDown();
+      try {
+        // Write 1 MB. With default initial window 65535, the handler will exhaust the window quickly and
+        // block in HTTP2OutputStream's flow-control wait loop. Once the client closes, no WINDOW_UPDATE
+        // will arrive and the loop must abort instead of spinning forever.
+        byte[] payload = new byte[1024 * 1024];
+        res.getOutputStream().write(payload);
+        res.getOutputStream().flush();
+      } catch (IOException ignored) {
+        // Expected once the connection is detected dead.
+      }
+      handlerCompleted.set(true);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      var sock = openH2CConnection(server.getActualPort());
+      var out = sock.getOutputStream();
+      writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+      out.write(MINIMAL_HPACK_GET);
+      out.flush();
+
+      assertTrue(handlerStarted.await(5, TimeUnit.SECONDS), "Handler should start within 5s");
+      // Brief pause to let the handler enter the write/flow-control path.
+      Thread.sleep(100);
+      // Abruptly close the client socket. Server reader notices EOF, finally enqueues sentinel, writer
+      // takes sentinel and exits. Connection is dead. Handler must detect this and abort.
+      sock.close();
+
+      long deadline = System.currentTimeMillis() + 10_000;
+      while (!handlerCompleted.get() && System.currentTimeMillis() < deadline) {
+        Thread.sleep(50);
+      }
+      assertTrue(handlerCompleted.get(),
+          "Handler did not exit within 10s of client close — likely hung in flow-control wait or writerQueue.put()");
+    }
+  }
+
+  /**
+   * CVE-2024-27316 guard — cumulative HEADERS+CONTINUATION fragments beyond maxHeaderListSize (derived from
+   * maxRequestHeaderSize) must produce GOAWAY(ENHANCE_YOUR_CALM=0xb) without buffering the rest of the block.
+   */
+  @Test
+  public void header_block_exceeding_max_header_list_size_triggers_enhance_your_calm() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).withMaxRequestHeaderSize(1024).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // 800-byte junk fragment (never decoded — the cap fires pre-decode), no END_HEADERS.
+        byte[] junk = new byte[800];
+        writeFrameHeader(out, junk.length, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(junk);
+        // Second 800-byte fragment pushes the cumulative block past 1024.
+        writeFrameHeader(out, junk.length, 0x9 /* CONTINUATION */, 0x4 /* END_HEADERS */, 1);
+        out.write(junk);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0xb, "Expected GOAWAY(ENHANCE_YOUR_CALM=0xb) for oversized header block; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §5.1 — a HEADERS frame on a recently-closed stream (one the client just RST'd) must produce
+   * {@code GOAWAY(STREAM_CLOSED)} (error code {@code 0x5}).
+   */
+  @Test
+  public void headers_on_recently_closed_stream_triggers_stream_closed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 with END_STREAM (no body — handler completes immediately).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // RST stream 1 — server marks stream 1 as recently closed.
+        writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0x8}); // error code = CANCEL (0x8)
+        // Send HEADERS on stream 1 again — must produce GOAWAY(STREAM_CLOSED=0x5).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x5, "Expected GOAWAY(STREAM_CLOSED=0x5) for HEADERS on recently-closed stream; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.2 — HEADERS frame with stream ID 0 must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void headers_on_stream_zero_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS frame on stream 0 — RFC 9113 §5.1.1 requires GOAWAY(PROTOCOL_ERROR).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 0);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for HEADERS on stream 0; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * Design §4.4 — a refused stream ID is consumed: retrying HEADERS on the same ID is a monotonicity violation,
+   * GOAWAY(PROTOCOL_ERROR). RFC 9113 permits retrying a refused request only on a new stream ID.
+   */
+  @Test
+  public void headers_reusing_refused_stream_id_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    CountDownLatch release = new CountDownLatch(1);
+    HTTPHandler handler = (req, res) -> {
+      try {
+        release.await(10, TimeUnit.SECONDS);
+      } catch (InterruptedException ignore) {
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withMaxConcurrentStreams(1)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 1);
+        out.write(MINIMAL_HPACK_GET);
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 3); // refused at cap
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+        assertEquals(readUntilRstStream(in), 0x7);
+
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 3); // reuse of a consumed ID
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        int errorCode = readUntilGoaway(in);
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for reusing a refused stream ID; got: " + errorCode);
+        release.countDown();
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §4.3 — a header block split across HEADERS + CONTINUATION is one field block; the request must succeed
+   * with the fragments reassembled.
+   */
+  @Test
+  public void headers_split_across_continuations_yields_request() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS on stream 1: first 3 bytes of the block, END_STREAM but NOT END_HEADERS.
+        writeFrameHeader(out, 3, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET, 0, 3);
+        // CONTINUATION on stream 1: the rest, END_HEADERS.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length - 3, 0x9 /* CONTINUATION */, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET, 3, MINIMAL_HPACK_GET.length - 3);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int streamId = readUntilResponseHeaders(sock.getInputStream());
+        assertEquals(streamId, 1, "Expected response HEADERS on stream 1 from a split header block; got: " + streamId);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §5.1.1 — client-initiated streams must use odd stream IDs. A HEADERS frame with an even stream ID must
+   * trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void headers_with_even_stream_id_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS frame on stream 2 (even) — RFC 9113 §5.1.1 requires GOAWAY(PROTOCOL_ERROR).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 2);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for HEADERS on even stream ID 2; got: " + errorCode);
+      }
+    }
+  }
+
+  /** Design §2.1 bug 4 / §2.5 — DATA at a forgotten stream debits AND replenishes; the connection window no longer
+   * leaks. Evicts stream 1 from recently-closed memory (101 RSTs, like data_on_forgotten_closed_stream_is_ignored),
+   * then pushes a full window of ignored DATA on the forgotten stream before a normal upload. */
+  @Test
+  public void ignored_data_does_not_leak_connection_window() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      req.getInputStream().readAllBytes();
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener)
+        .withHTTP2(h2 -> h2.withConnectionWindowSize(65_535).withInitialWindowSize(1 << 20)
+                           .withRateLimits(rl -> rl.withRstStreamMax(1000))).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open and reset 101 streams (IDs 1..201) — stream 1 falls out of the recently-closed memory.
+        for (int id = 1; id <= 201; id += 2) {
+          writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, id);
+          out.write(MINIMAL_HPACK_GET);
+          writeFrameHeader(out, 4, 0x3 /* RST_STREAM */, 0, id);
+          out.write(new byte[]{0, 0, 0, 0x8}); // CANCEL
+        }
+        // A full connection window of DATA at the evicted (forgotten) stream 1: 4 x 16,384 = 65,536 > 65,535.
+        // Without debit+replenish for ignored frames, the peer-visible window would be exhausted and stream 203
+        // would stall waiting for a WINDOW_UPDATE that never arrives.
+        byte[] chunk = new byte[16_384];
+        for (int i = 0; i < 4; i++) {
+          writeFrameHeader(out, chunk.length, 0x0, 0x0, 1);
+          out.write(chunk);
+        }
+        // Pin: flush and verify the server emits at least one stream-0 WINDOW_UPDATE for the ignored DATA before
+        // sending the follow-up request. Pre-fix, ignored DATA produced ZERO stream-0 WINDOW_UPDATEs (the old echo
+        // lived in the data handler, unreachable for forgotten streams), so this assertion discriminates the fix.
+        // At a 65,535 window the burst produces exactly one replenish; reading until it arrives is timing-safe
+        // because the replenish is written before any follow-up request is sent.
+        out.flush();
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        boolean sawStream0WindowUpdate = false;
+        while (!sawStream0WindowUpdate) {
+          int[] frame = readFrameHeader(in);
+          byte[] payload = in.readNBytes(frame[3]);
+          if (frame[0] == 0x8 /* WINDOW_UPDATE */ && frame[2] == 0 /* stream 0 */) {
+            int increment = ((payload[0] & 0x7F) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+            assertTrue(increment > 0, "Stream-0 WINDOW_UPDATE must carry a positive increment; got: " + increment);
+            sawStream0WindowUpdate = true;
+          }
+        }
+        assertTrue(sawStream0WindowUpdate, "Expected at least one stream-0 WINDOW_UPDATE for ignored DATA frames");
+        // Now a real upload on stream 203.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4, 203);
+        out.write(MINIMAL_HPACK_GET);
+        for (int i = 0; i < 4; i++) {
+          boolean last = i == 3;
+          writeFrameHeader(out, chunk.length, 0x0, last ? 0x1 : 0x0, 203);
+          out.write(chunk);
+        }
+        out.flush();
+        assertEquals(readUntilResponseHeaders(in), 203, "Upload after ignored DATA must complete");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.9.1 — after the peer sets SETTINGS_INITIAL_WINDOW_SIZE=1, a stream opened afterward must not send a
+   * DATA frame larger than the 1-octet send window. Frames on one connection are processed in order, so sending
+   * SETTINGS(IWS=1) immediately before HEADERS deterministically opens the stream with a 1-octet send window.
+   */
+  @Test
+  public void initial_window_size_one_caps_first_data_frame() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      var os = res.getOutputStream();
+      os.write(new byte[10]);
+      os.close();
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // SETTINGS with SETTINGS_INITIAL_WINDOW_SIZE (0x4) = 1.
+        writeFrameHeader(out, 6, 0x4, 0, 0);
+        out.write(new byte[]{0, 0x4, 0, 0, 0, 1});
+        // HEADERS: GET /, END_HEADERS | END_STREAM.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int dataLen = readFirstDataFrameLength(sock.getInputStream());
+        assertTrue(dataLen >= 0, "Expected a DATA frame, got EOF");
+        assertTrue(dataLen <= 1, "First DATA frame must respect the 1-octet send window; got [" + dataLen + "]");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.10 — once a HEADERS frame without END_HEADERS is sent, the next frame on the connection MUST be a
+   * CONTINUATION on the same stream. Any other frame type or stream ID triggers {@code GOAWAY(PROTOCOL_ERROR)} (error
+   * code {@code 0x1}).
+   */
+  @Test
+  public void interleaved_frame_during_headers_continuation_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Send HEADERS on stream 1 WITHOUT END_HEADERS — this starts a header block.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x0 /* no END_HEADERS, no END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // Now send a DATA frame on stream 3 instead of CONTINUATION on stream 1 — protocol error.
+        writeFrameHeader(out, 0, 0x0, 0x1 /* END_STREAM */, 3);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for interleaved frame mid-header-block; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §4.3 / §6.10 — a header block whose encoded payload exceeds the peer's SETTINGS_MAX_FRAME_SIZE MUST be
+   * split across one HEADERS frame plus one or more CONTINUATION frames. Emitting a single oversize HEADERS frame
+   * either (a) crashes the writer (current bug — AIOOBE in HTTP2FrameWriter) or (b) violates FRAME_SIZE_ERROR.
+   */
+  @Test
+  public void large_response_headers_fragmented_into_continuation() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      // 250 unique headers × ~150 bytes each — encoded HPACK block will exceed peer's default 16384 max-frame-size.
+      for (int i = 0; i < 250; i++) {
+        res.setHeader("x-bulk-" + i, "v".repeat(150));
+      }
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        boolean headersStarted = false;
+        boolean endHeadersSeen = false;
+        int continuationCount = 0;
+        while (!endHeadersSeen) {
+          int b0 = in.read();
+          if (b0 == -1) {
+            fail("EOF before response HEADERS block completed; writer likely crashed on oversize HEADERS frame");
+          }
+          byte[] rest = new byte[8];
+          int read = in.readNBytes(rest, 0, 8);
+          assertEquals(read, 8, "Short frame header read");
+          int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
+          int type = rest[2] & 0xFF;
+          int flags = rest[3] & 0xFF;
+          assertTrue(length <= 16384, "Frame length [" + length + "] exceeds peer MAX_FRAME_SIZE [16384]");
+          in.readNBytes(length);
+          if (type == 0x1) {  // HEADERS
+            assertFalse(headersStarted, "Multiple HEADERS frames on the same stream");
+            headersStarted = true;
+            if ((flags & 0x4) != 0) endHeadersSeen = true;
+          } else if (type == 0x9) {  // CONTINUATION
+            assertTrue(headersStarted, "CONTINUATION without prior HEADERS");
+            continuationCount++;
+            if ((flags & 0x4) != 0) endHeadersSeen = true;
+          } else if (type == 0x7) {  // GOAWAY
+            fail("Server sent GOAWAY instead of fragmenting HEADERS into CONTINUATION");
+          }
+        }
+        assertTrue(continuationCount > 0,
+            "Expected at least one CONTINUATION frame for oversize HEADERS block; got [" + continuationCount + "]");
+      }
+    }
+  }
+
+  /**
+   * Task 5 review finding — a HEADERS block that opens a stream but fails validation (here: unparseable
+   * content-length, §8.1.2.6) must release its MAX_CONCURRENT_STREAMS slot when it is RST. Otherwise a
+   * malformed-request flood permanently consumes the cap and well-formed requests get spuriously REFUSED.
+   */
+  @Test
+  public void malformed_headers_do_not_leak_concurrency_slots() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withMaxConcurrentStreams(2)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        // HPACK literal-without-indexing, name = static index 28 (content-length), value "abc" (unparseable).
+        byte[] badContentLength = {(byte) 0x0f, (byte) 0x0d, 0x03, 'a', 'b', 'c'};
+        byte[] malformed = new byte[MINIMAL_HPACK_GET.length + badContentLength.length];
+        System.arraycopy(MINIMAL_HPACK_GET, 0, malformed, 0, MINIMAL_HPACK_GET.length);
+        System.arraycopy(badContentLength, 0, malformed, MINIMAL_HPACK_GET.length, badContentLength.length);
+
+        // Two malformed streams — enough to fill the cap of 2 if the slots leak.
+        for (int id = 1; id <= 3; id += 2) {
+          writeFrameHeader(out, malformed.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, id);
+          out.write(malformed);
+        }
+        out.flush();
+        assertEquals(readUntilRstStream(in), 0x1, "Expected RST_STREAM(PROTOCOL_ERROR) for malformed content-length");
+        assertEquals(readUntilRstStream(in), 0x1, "Expected RST_STREAM(PROTOCOL_ERROR) for malformed content-length");
+
+        // A well-formed request must now succeed — the two malformed streams must not occupy the cap.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 5);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+        assertEquals(readUntilResponseHeaders(in), 5, "Expected a response on stream 5 — malformed streams leaked the cap");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.5.2 — SETTINGS_INITIAL_WINDOW_SIZE above 2^31-1 in the client's opening SETTINGS must produce
+   * GOAWAY(FLOW_CONTROL_ERROR=0x3). Today the connection closes silently during negotiation; the redesign returns the
+   * error through HTTP2Tools.negotiateSettings and run() emits the GOAWAY directly.
+   */
+  @Test
+  public void malformed_settings_at_negotiation_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = new Socket("localhost", server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // h2c prior-knowledge preface, then a SETTINGS frame with INITIAL_WINDOW_SIZE (id 0x4) = 2^31.
+        out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+        writeFrameHeader(out, 6, 0x4 /* SETTINGS */, 0, 0);
+        out.write(new byte[]{0x0, 0x4, (byte) 0x80, 0x0, 0x0, 0x0}); // id=4, value=0x80000000
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected GOAWAY(FLOW_CONTROL_ERROR=0x3) for INITIAL_WINDOW_SIZE overflow; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.1 — a second HEADERS on an open stream without END_STREAM is not trailers and must produce a stream
+   * error of type PROTOCOL_ERROR on that stream (h2spec http2/8.1/1), not a connection error.
+   */
+  @Test
+  public void mid_stream_headers_without_end_stream_triggers_rst_stream_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 without END_STREAM (body pending) — stream is OPEN.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // Second HEADERS on stream 1, END_HEADERS but no END_STREAM — illegal mid-stream HEADERS.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for mid-stream HEADERS; got: " + errorCode);
+      }
+    }
+  }
+
+  /** Design §2.1 bug 3 — padding is flow-controlled but not data; using flowControlledLength for debit ensures padded
+   * uploads do not exhaust the connection window. */
+  @Test
+  public void padded_upload_completes_without_window_leak() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    AtomicInteger received = new AtomicInteger();
+    HTTPHandler handler = (req, res) -> {
+      received.set(req.getInputStream().readAllBytes().length);
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 20 padded DATA frames: 1 pad-length byte + 16,183 data bytes + 200 pad bytes = 16,384 frame payload.
+        // flags: PADDED (0x8) for first 19 frames, PADDED|END_STREAM (0x8|0x1) for last.
+        byte[] payload = new byte[16_384];
+        payload[0] = (byte) 200; // pad-length byte
+        // data bytes are zero (bytes 1..16183); padding bytes are zero (bytes 16184..16383)
+        for (int i = 0; i < 20; i++) {
+          boolean last = i == 19;
+          writeFrameHeader(out, payload.length, 0x0, last ? (0x1 | 0x8) : 0x8, 1);
+          out.write(payload);
+        }
+        out.flush();
+        sock.setSoTimeout(5000);
+        assertEquals(readUntilResponseHeaders(sock.getInputStream()), 1);
+        assertEquals(received.get(), 20 * 16_183, "Handler must receive the full unpadded body");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §4.3 — no frame of any type, on any stream (including stream 0), may interleave inside a header block.
+   */
+  @Test
+  public void ping_interleaved_in_header_block_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // HEADERS on stream 1 without END_HEADERS — header block is open.
+        writeFrameHeader(out, 3, 0x1 /* HEADERS */, 0x1 /* END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET, 0, 3);
+        // PING interleaved mid-block — connection error PROTOCOL_ERROR.
+        writeFrameHeader(out, 8, 0x6 /* PING */, 0, 0);
+        out.write(new byte[8]);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for PING mid header block; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.7 — PING frame with non-zero stream ID must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void ping_with_non_zero_stream_id_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // PING on stream 1 — RFC 9113 §6.7 requires stream ID 0; any other is PROTOCOL_ERROR.
+        writeFrameHeader(out, 8, 0x6 /* PING */, 0, 1);
+        out.write(new byte[8]);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for PING on stream 1; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §5.3.2 — PRIORITY frames are valid but advisory only; the server MUST parse and discard them. Send a
+   * PRIORITY frame, then a valid HEADERS request. The server should respond successfully.
+   */
+  @Test
+  public void priority_frame_silently_ignored() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // PRIORITY: type=0x2, payload=5 bytes (stream dependency 4 bytes + weight 1 byte), stream-id=1.
+        writeFrameHeader(out, 5, 0x2, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0, 0});  // exclusive=0, dependency=0, weight=0
+
+        // Follow with a valid HEADERS request on stream 1.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int streamId = readUntilResponseHeaders(sock.getInputStream());
+        assertEquals(streamId, 1, "Expected response HEADERS on stream 1 after PRIORITY was silently ignored");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §4.2 — PRIORITY frame with wrong length (not 5 bytes) must trigger GOAWAY(FRAME_SIZE_ERROR).
+   */
+  @Test
+  public void priority_wrong_length_triggers_frame_size_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // PRIORITY frame on stream 1 with 4-byte payload (must be exactly 5) — FRAME_SIZE_ERROR.
+        writeFrameHeader(out, 4, 0x2 /* PRIORITY */, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0});
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x6, "Expected GOAWAY(FRAME_SIZE_ERROR=0x6) for PRIORITY with wrong length; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.4 — clients MUST NOT send PUSH_PROMISE frames. The server must respond with
+   * {@code GOAWAY(PROTOCOL_ERROR)} (error code {@code 0x1}).
+   */
+  @Test
+  public void push_promise_inbound_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // PUSH_PROMISE: type=0x5, stream-id=1, promised-stream-id=2 (4-byte prefix) + empty header block.
+        // Total payload = 4 bytes (promised stream-id only, no header block).
+        writeFrameHeader(out, 4, 0x5, 0x4 /* END_HEADERS */, 1);
+        out.write(new byte[]{0, 0, 0, 2});  // promised stream id = 2
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for inbound PUSH_PROMISE; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * When the writer thread dies (broken pipe / peer reset mid-write), the reader must not park indefinitely on
+   * {@code writerQueue.put()}. The {@code writerDead} flag plus reader interrupt close the deadlock by triggering the
+   * reader's finally block, which interrupts handler virtual threads. Within a few seconds the connection should be
+   * fully torn down.
+   *
+   * <p>This test is intentionally light — fully deterministic reproduction would need a test hook to inject a
+   * {@code writeFrame} failure. The test passes if the {@code timeOut} does not fire.
+   */
+  @Test(timeOut = 10_000)
+  public void reader_exits_within_timeout_after_socket_abort() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      Socket sock = openH2CConnection(server.getActualPort());
+      var out = sock.getOutputStream();
+      byte[] headers = new byte[]{
+          (byte) 0x82, (byte) 0x84, (byte) 0x86,
+          (byte) 0x41, 0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
+      };
+      writeFrameHeader(out, headers.length, 0x1, 0x4 | 0x1, 1);
+      out.write(headers);
+      out.flush();
+      // Abort the socket from the client side. The server's writer will fail next writeFrame and exit.
+      sock.setSoLinger(true, 0);
+      sock.close();
+      // Give the server time to clean up. The 10-second @Test timeout is the safety net.
+      Thread.sleep(1500);
+    }
+  }
+
+  /**
+   * Design §9 / RFC 9113 §4.3 — a header block on a stream refused at MAX_CONCURRENT_STREAMS must still be
+   * HPACK-decoded (dynamic-table state is connection-wide), so a later request that references the dynamic table
+   * entries added by the refused block must decode correctly.
+   */
+  @Test
+  public void refused_stream_header_block_still_updates_hpack_state() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicReference<String> customHeader = new AtomicReference<>();
+    HTTPHandler handler = (req, res) -> {
+      if (req.getHeader("x-a") != null) {
+        customHeader.set(req.getHeader("x-a"));
+      } else {
+        try {
+          release.await(10, TimeUnit.SECONDS); // hold stream 1 open so the cap stays occupied
+        } catch (InterruptedException ignore) {
+        }
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).withHTTP2(h2 -> h2.withMaxConcurrentStreams(1)).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        var in = sock.getInputStream();
+        sock.setSoTimeout(5000);
+
+        // Stream 1: occupies the single concurrent-stream slot; handler blocks on the latch.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        // Stream 3: refused at the cap. Its block adds "x-a: 1" to the dynamic table via literal-with-incremental-
+        // indexing (0x40, new name). RFC 9113 §4.3: the server must decode this block even though it refuses the
+        // stream.
+        byte[] literalXA = {
+            (byte) 0x40, 0x03, 'x', '-', 'a', 0x01, '1'
+        };
+        byte[] refusedBlock = new byte[MINIMAL_HPACK_GET.length + literalXA.length];
+        System.arraycopy(MINIMAL_HPACK_GET, 0, refusedBlock, 0, MINIMAL_HPACK_GET.length);
+        System.arraycopy(literalXA, 0, refusedBlock, MINIMAL_HPACK_GET.length, literalXA.length);
+        writeFrameHeader(out, refusedBlock.length, 0x1, 0x4 | 0x1, 3);
+        out.write(refusedBlock);
+        out.flush();
+        int rstCode = readUntilRstStream(in);
+        assertEquals(rstCode, 0x7, "Expected RST_STREAM(REFUSED_STREAM=0x7) at the concurrency cap; got: " + rstCode);
+
+        // Release stream 1 and let it finish so the slot frees up. NOTE: readUntilResponseHeaders returns the STREAM
+        // ID of the first response HEADERS frame, not the HTTP status (Task 2 discovered this helper contract).
+        release.countDown();
+        assertEquals(readUntilResponseHeaders(in), 1, "Expected the released stream 1 response first");
+
+        // Stream 5: references the dynamic-table entry the REFUSED block created. MINIMAL_HPACK_GET's 0x41 byte
+        // (literal with incremental indexing) adds ":authority: localhost" at index 62, pushing "x-a: 1" to index 63
+        // (0x80 | 63 = 0xBF). If the server skipped decoding stream 3's block, its table is desynchronized and this
+        // block fails (COMPRESSION_ERROR GOAWAY) or decodes the wrong header.
+        byte[] indexedBlock = new byte[MINIMAL_HPACK_GET.length + 1];
+        System.arraycopy(MINIMAL_HPACK_GET, 0, indexedBlock, 0, MINIMAL_HPACK_GET.length);
+        indexedBlock[MINIMAL_HPACK_GET.length] = (byte) 0xBF;
+        writeFrameHeader(out, indexedBlock.length, 0x1, 0x4 | 0x1, 5);
+        out.write(indexedBlock);
+        out.flush();
+
+        assertEquals(readUntilResponseHeaders(in), 5, "Expected a response on stream 5 (helper returns stream ID)");
+        assertEquals(customHeader.get(), "1", "Dynamic-table entry from the refused block must decode on stream 5");
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // Per-frame validators added in batch 1 (h2spec batch 1)
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * RFC 9113 §8.1 — a second HEADERS block on a stream that has not END_STREAM'd carries request trailers and MUST be
+   * accepted. Current bug at HTTP2Connection.java:284-287 rejects every second HEADERS with RST_STREAM(STREAM_CLOSED).
+   */
+  @Test
+  public void request_trailers_accepted_not_reset_as_stream_closed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    AtomicReference<String> trailerValue = new AtomicReference<>();
+    HTTPHandler handler = (req, res) -> {
+      // Drain body so trailers are processed by the server.
+      req.getInputStream().readAllBytes();
+      String value = req.getTrailer("x-trailer");
+      if (value != null) {
+        trailerValue.set(value);
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // POST headers with TE: trailers (RFC 9113 §8.1 — required for the server to know trailers may follow).
+        // HPACK: :method POST (static idx 3 = 0x83), :path / (idx 4 = 0x84), :scheme http (idx 6 = 0x86),
+        //        content-length 4 (literal with indexing, name idx 28 = 0x5c, value "4"),
+        //        te trailers (literal w/o indexing, name idx 58 = 0x1a [no — te is not in static table for h2 reuse, encode as literal name])
+        // Simpler: use literal-without-indexing for te to avoid table mismatch.
+        byte[] postHeaders = new byte[]{
+            (byte) 0x83,                                              // :method: POST
+            (byte) 0x84,                                              // :path: /
+            (byte) 0x86,                                              // :scheme: http
+            (byte) 0x41, 0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't',  // :authority: localhost
+            (byte) 0x5c, 0x01, '4',                                   // content-length: 4
+            (byte) 0x00, 0x02, 't', 'e', 0x08, 't', 'r', 'a', 'i', 'l', 'e', 'r', 's'  // te: trailers
+        };
+        writeFrameHeader(out, postHeaders.length, 0x1, 0x4 /* END_HEADERS, no END_STREAM */, 1);
+        out.write(postHeaders);
+
+        // DATA frame with 4-byte body, no END_STREAM (trailers will carry it).
+        writeFrameHeader(out, 4, 0x0, 0, 1);
+        out.write("body".getBytes());
+
+        // Trailers: HEADERS with END_HEADERS | END_STREAM, single literal "x-trailer: end".
+        byte[] trailers = new byte[]{
+            (byte) 0x00, 0x09, 'x', '-', 't', 'r', 'a', 'i', 'l', 'e', 'r', 0x03, 'e', 'n', 'd'
+        };
+        writeFrameHeader(out, trailers.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(trailers);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+        int responseStreamId = readUntilResponseHeaders(in);
+        assertEquals(responseStreamId, 1,
+            "Expected response HEADERS on stream 1 (current bug: trailers HEADERS triggers RST_STREAM(STREAM_CLOSED))");
+        assertEquals(trailerValue.get(), "end", "Server should expose request trailer via req.getTrailers()");
+      }
+    }
+  }
+
+  /**
+   * Design §11.4 — a gzip-compressed response body and response trailers MUST compose correctly on the wire. The
+   * request advertises {@code accept-encoding: gzip}, so the server compresses the body by default; because the handler
+   * also sets a trailer, the final DATA frame must defer END_STREAM and the trailers must arrive as a HEADERS frame
+   * with END_STREAM. This pins the interaction between gzip framing and the deferred-END_STREAM trailer path: the
+   * response HEADERS advertise {@code content-encoding: gzip} (and omit {@code content-length}), and the accumulated
+   * DATA payload gunzips back to the exact original body.
+   */
+  @Test
+  public void response_gzip_body_with_trailers_composes_on_the_wire() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    String body = "hello world ".repeat(200);
+    HTTPHandler handler = (_, res) -> {
+      res.setStatus(200);
+      // Setting a trailer makes the output stream defer END_STREAM on the final DATA frame. Compression is left on
+      // (the default) so the body is gzip-encoded because the request advertised accept-encoding: gzip.
+      res.setTrailer("x-checksum", "abc123");
+      try (var out = res.getOutputStream()) {
+        out.write(body.getBytes(StandardCharsets.UTF_8));
+      }
+    };
+
+    try (var server = makeServer("http", handler, listener).start(); var sock = openH2CConnection(server.getActualPort())) {
+      var out = sock.getOutputStream();
+
+      // Build a request HEADERS block advertising gzip, using the production HPACK encoder. MINIMAL_HPACK_GET does
+      // not include accept-encoding, so we encode the required request pseudo-headers plus accept-encoding: gzip.
+      var encoder = new HPACKEncoder(new HPACKDynamicTable(4096));
+      byte[] requestHeaders = encoder.encode(List.of(
+          new HPACKDynamicTable.HeaderField(":method", "GET"),
+          new HPACKDynamicTable.HeaderField(":scheme", "http"),
+          new HPACKDynamicTable.HeaderField(":path", "/"),
+          new HPACKDynamicTable.HeaderField("accept-encoding", "gzip")
+      ));
+      writeFrameHeader(out, requestHeaders.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+      out.write(requestHeaders);
+      out.flush();
+
+      sock.setSoTimeout(5000);
+      var in = sock.getInputStream();
+
+      // Read frames in order. Capture the FIRST HEADERS block (response headers), accumulate every DATA payload,
+      // track the LAST DATA frame's flags, and capture the SECOND HEADERS block + flags (the trailers).
+      byte[] responseHeaderBlock = null;
+      var dataAccum = new ByteArrayOutputStream();
+      boolean sawDataFrame = false;
+      int lastDataFlags = -1;
+      byte[] trailerBlock = null;
+      int trailerFlags = -1;
+      int sawHeadersCount = 0;
+      for (int i = 0; i < 30 && trailerBlock == null; i++) {
+        byte[] hdr = in.readNBytes(9);
+        if (hdr.length < 9) break;
+        int len = ((hdr[0] & 0xFF) << 16) | ((hdr[1] & 0xFF) << 8) | (hdr[2] & 0xFF);
+        int type = hdr[3] & 0xFF;
+        int flags = hdr[4] & 0xFF;
+        byte[] payload = in.readNBytes(len);
+        if (payload.length < len) break;
+        switch (type) {
+          case 0x1 -> { // HEADERS
+            sawHeadersCount++;
+            if (sawHeadersCount == 1) {
+              responseHeaderBlock = payload;
+            } else {
+              trailerBlock = payload;
+              trailerFlags = flags;
+            }
+          }
+          case 0x0 -> { // DATA
+            sawDataFrame = true;
+            lastDataFlags = flags;
+            dataAccum.write(payload);
+          }
+          default -> {
+          } // SETTINGS, WINDOW_UPDATE, etc. — ignore.
+        }
+      }
+
+      // Decode the response HEADERS block: content-encoding: gzip, vary: accept-encoding, no content-length.
+      assertNotNull(responseHeaderBlock, "Expected response HEADERS frame on stream 1");
+
+      var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+      var responseFields = decoder.decode(responseHeaderBlock);
+      assertTrue(responseFields.stream()
+                               .anyMatch(f -> f.name().equals("content-encoding") && f.value().equalsIgnoreCase("gzip")),
+          "Expected content-encoding: gzip in response headers; decoded: [" + responseFields + "]");
+      assertTrue(responseFields.stream()
+                               .anyMatch(f -> f.name().equals("vary") && f.value().equalsIgnoreCase("accept-encoding")),
+          "Expected vary: accept-encoding in response headers; decoded: [" + responseFields + "]");
+      assertFalse(responseFields.stream().anyMatch(f -> f.name().equals("content-length")),
+          "Compressed response MUST NOT carry content-length; decoded: [" + responseFields + "]");
+
+      // The final DATA frame must NOT have END_STREAM (trailers follow).
+      assertTrue(sawDataFrame, "Expected at least one DATA frame");
+      assertEquals(lastDataFlags & 0x1, 0,
+          "Final DATA frame MUST NOT have END_STREAM when trailers follow; flags=[" + lastDataFlags + "]");
+
+      // The trailers HEADERS frame must have END_STREAM and decode to include x-checksum: abc123.
+      assertNotNull(trailerBlock, "Expected trailers HEADERS frame after final DATA");
+      assertEquals(trailerFlags & 0x1, 0x1,
+          "Trailers HEADERS frame MUST have END_STREAM; flags=[" + trailerFlags + "]");
+
+      var trailerFields = decoder.decode(trailerBlock);
+      assertTrue(trailerFields.stream()
+                              .anyMatch(f -> f.name().equals("x-checksum") && f.value().equals("abc123")),
+          "Expected x-checksum: abc123 in trailer block; decoded: [" + trailerFields + "]");
+
+      // The key proof: gunzip the accumulated DATA payload and confirm it round-trips to the original body.
+      byte[] gzipped = dataAccum.toByteArray();
+      String decompressed;
+      try (var gzin = new GZIPInputStream(new ByteArrayInputStream(gzipped))) {
+        decompressed = new String(gzin.readAllBytes(), StandardCharsets.UTF_8);
+      }
+      assertEquals(decompressed, body, "Gunzipped DATA payload must equal the original response body");
+    }
+  }
+
+  /**
+   * RFC 9113 §8.1 — response trailers MUST be sent as a HEADERS frame with END_STREAM AFTER the final DATA frame, and
+   * the final DATA frame MUST NOT have END_STREAM set. Currently exercised only indirectly via GRPCInteropTest; this
+   * direct test pins the wire-level behavior so a regression in setTrailersFollow / emitTrailers fails fast.
+   */
+  @Test
+  public void response_trailers_emitted_as_headers_frame_after_final_data() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      res.setStatus(200);
+      // Signal that the response will have trailers (so the output stream defers END_STREAM on the final DATA).
+      res.setTrailer("x-checksum", "abc123");
+      try (var out = res.getOutputStream()) {
+        out.write("hello".getBytes());
+      }
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Send a basic GET request on stream 1.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        var in = sock.getInputStream();
+
+        // Read frames in order. Track: did we see response HEADERS, then DATA frames (last one MUST NOT have
+        // END_STREAM), then trailers HEADERS (MUST have END_STREAM and decode to include x-checksum: abc123).
+        boolean sawResponseHeaders = false;
+        boolean sawDataFrame = false;
+        int lastDataFlags = -1;
+        byte[] trailerBlock = null;
+        int trailerFlags = -1;
+        int sawHeadersCount = 0;
+        for (int i = 0; i < 20 && trailerBlock == null; i++) {
+          byte[] hdr = in.readNBytes(9);
+          if (hdr.length < 9) break;
+          int len = ((hdr[0] & 0xFF) << 16) | ((hdr[1] & 0xFF) << 8) | (hdr[2] & 0xFF);
+          int type = hdr[3] & 0xFF;
+          int flags = hdr[4] & 0xFF;
+          byte[] payload = in.readNBytes(len);
+          if (payload.length < len) break;
+          switch (type) {
+            case 0x1 -> { // HEADERS
+              sawHeadersCount++;
+              if (sawHeadersCount == 1) {
+                sawResponseHeaders = true;
+              } else {
+                trailerBlock = payload;
+                trailerFlags = flags;
+              }
+            }
+            case 0x0 -> { // DATA
+              sawDataFrame = true;
+              lastDataFlags = flags;
+            }
+            default -> {
+            } // SETTINGS, WINDOW_UPDATE, etc. — ignore.
+          }
+        }
+
+        assertTrue(sawResponseHeaders, "Expected response HEADERS frame on stream 1");
+        assertTrue(sawDataFrame, "Expected at least one DATA frame");
+        assertEquals(lastDataFlags & 0x1, 0,
+            "Final DATA frame MUST NOT have END_STREAM when trailers follow; flags=[" + lastDataFlags + "]");
+        assertNotNull(trailerBlock, "Expected trailers HEADERS frame after final DATA");
+        assertEquals(trailerFlags & 0x1, 0x1,
+            "Trailers HEADERS frame MUST have END_STREAM; flags=[" + trailerFlags + "]");
+
+        // Decode the trailer block to verify x-checksum: abc123.
+        var decoder = new HPACKDecoder(new HPACKDynamicTable(4096));
+        var fields = decoder.decode(trailerBlock);
+        boolean foundChecksum = fields.stream()
+                                      .anyMatch(f -> f.name().equals("x-checksum") && f.value().equals("abc123"));
+        assertTrue(foundChecksum, "Expected x-checksum: abc123 in trailer block; decoded: [" + fields + "]");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.5.2 — SETTINGS ENABLE_PUSH value other than 0 or 1 must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void settings_enable_push_invalid_value_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // SETTINGS: ENABLE_PUSH (0x2) = 2 — invalid; must be 0 or 1.
+        byte[] payload = {0, 2, 0, 0, 0, 2}; // id=2 (ENABLE_PUSH), value=2
+        writeFrameHeader(out, payload.length, 0x4 /* SETTINGS */, 0, 0);
+        out.write(payload);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for ENABLE_PUSH=2; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.9.2 — a SETTINGS_INITIAL_WINDOW_SIZE increase that pushes an open stream's send window past 2^31-1 is
+   * a connection error FLOW_CONTROL_ERROR. The window must first be raised above its initial value via WINDOW_UPDATE,
+   * because the SETTINGS delta alone can only reach exactly 2^31-1.
+   */
+  @Test
+  public void settings_increase_overflowing_stream_window_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    CountDownLatch release = new CountDownLatch(1);
+    HTTPHandler handler = (req, res) -> {
+      try {
+        release.await(10, TimeUnit.SECONDS);
+      } catch (InterruptedException ignore) {
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 (handler parks, keeping the stream live).
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // Raise stream 1's send window 1000 above the 65535 baseline.
+        writeFrameHeader(out, 4, 0x8 /* WINDOW_UPDATE */, 0, 1);
+        out.write(new byte[]{0, 0, 0x3, (byte) 0xe8}); // increment = 1000
+        // SETTINGS INITIAL_WINDOW_SIZE = 2^31-1: delta pushes stream 1 to 66535 + (2^31-1 - 65535) > 2^31-1.
+        writeFrameHeader(out, 6, 0x4 /* SETTINGS */, 0, 0);
+        out.write(new byte[]{0x0, 0x4, (byte) 0x7f, (byte) 0xff, (byte) 0xff, (byte) 0xff});
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected GOAWAY(FLOW_CONTROL_ERROR=0x3) for SETTINGS-induced window overflow; got: " + errorCode);
+        release.countDown();
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.5.2 — SETTINGS INITIAL_WINDOW_SIZE exceeding 2^31-1 must trigger GOAWAY(FLOW_CONTROL_ERROR).
+   */
+  @Test
+  public void settings_initial_window_size_too_large_triggers_flow_control_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // SETTINGS: INITIAL_WINDOW_SIZE (0x4) = 2^31 (0x80000000) — exceeds 2^31-1.
+        byte[] payload = {0, 4, (byte) 0x80, 0, 0, 0}; // id=4, value=2^31
+        writeFrameHeader(out, payload.length, 0x4 /* SETTINGS */, 0, 0);
+        out.write(payload);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x3, "Expected GOAWAY(FLOW_CONTROL_ERROR=0x3) for INITIAL_WINDOW_SIZE > 2^31-1; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.5.2 — SETTINGS MAX_FRAME_SIZE below 2^14 (16384) must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void settings_max_frame_size_too_small_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // SETTINGS: MAX_FRAME_SIZE (0x5) = 1024 — below the minimum of 16384.
+        byte[] payload = {0, 5, 0, 0, 0x04, 0}; // id=5, value=1024
+        writeFrameHeader(out, payload.length, 0x4 /* SETTINGS */, 0, 0);
+        out.write(payload);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for MAX_FRAME_SIZE below 16384; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.5 — SETTINGS frame with non-zero stream ID must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void settings_with_non_zero_stream_id_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // SETTINGS on stream 1 — RFC 9113 §6.5 requires stream ID 0; any other is PROTOCOL_ERROR.
+        writeFrameHeader(out, 0, 0x4 /* SETTINGS */, 0, 1);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for SETTINGS on stream 1; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §5.5 — unknown frame types MUST be ignored. Send an unknown frame (type {@code 0xFE}), then a normal
+   * HEADERS request. The server should respond successfully, proving the unknown frame was silently discarded.
+   */
+  @Test
+  public void unknown_frame_type_silently_ignored() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Unknown frame type 0xFE with 4-byte payload on stream 0.
+        writeFrameHeader(out, 4, 0xFE, 0, 0);
+        out.write(new byte[]{0x1, 0x2, 0x3, 0x4});
+
+        // Follow with a valid HEADERS request on stream 1.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS | END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int streamId = readUntilResponseHeaders(sock.getInputStream());
+        assertEquals(streamId, 1, "Expected response HEADERS on stream 1 after unknown frame was silently ignored");
+      }
+    }
+  }
+
+  /** Design §2.1 bug 1 / §2.5 — an upload burst beyond the old 64 KB connection window completes under the default. */
+  @Test
+  public void upload_beyond_old_connection_window_completes() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    AtomicInteger received = new AtomicInteger();
+    HTTPHandler handler = (req, res) -> {
+      received.set(req.getInputStream().readAllBytes().length);
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 /* END_HEADERS */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // 20 DATA frames x 16384 = 327,680 bytes — 5x the old connection window, blasted without reading credit.
+        byte[] chunk = new byte[16_384];
+        for (int i = 0; i < 20; i++) {
+          boolean last = i == 19;
+          writeFrameHeader(out, chunk.length, 0x0, last ? 0x1 : 0x0, 1);
+          out.write(chunk);
+        }
+        out.flush();
+        sock.setSoTimeout(5000);
+        assertEquals(readUntilResponseHeaders(sock.getInputStream()), 1);
+        assertEquals(received.get(), 20 * 16_384, "Handler must receive the full body");
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.9 — WINDOW_UPDATE with increment 0 on the connection (stream 0) must trigger GOAWAY(PROTOCOL_ERROR).
+   */
+  @Test
+  public void window_update_zero_increment_on_connection_triggers_protocol_error() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // WINDOW_UPDATE on stream 0 with increment 0 — RFC 9113 §6.9 requires GOAWAY(PROTOCOL_ERROR).
+        writeFrameHeader(out, 4, 0x8 /* WINDOW_UPDATE */, 0, 0);
+        out.write(new byte[]{0, 0, 0, 0}); // increment = 0
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilGoaway(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected GOAWAY(PROTOCOL_ERROR=0x1) for WINDOW_UPDATE increment=0 on connection; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §6.9 — WINDOW_UPDATE with increment 0 on a stream must trigger RST_STREAM(PROTOCOL_ERROR).
+   */
+  @Test
+  public void window_update_zero_increment_on_stream_triggers_rst_stream() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> {
+      // Slow handler to keep the stream open long enough for the client's WINDOW_UPDATE.
+      try {
+        Thread.sleep(200);
+      } catch (InterruptedException ignore) {
+        Thread.currentThread().interrupt();
+      }
+      res.setStatus(200);
+    };
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        // Open stream 1 — no END_STREAM so stream stays open.
+        writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1 /* END_HEADERS|END_STREAM */, 1);
+        out.write(MINIMAL_HPACK_GET);
+        // WINDOW_UPDATE on stream 1 with increment 0 — RFC 9113 §6.9 requires RST_STREAM(PROTOCOL_ERROR).
+        writeFrameHeader(out, 4, 0x8 /* WINDOW_UPDATE */, 0, 1);
+        out.write(new byte[]{0, 0, 0, 0}); // increment = 0
+        out.flush();
+
+        // Expect RST_STREAM(PROTOCOL_ERROR=0x1) on stream 1.
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for WINDOW_UPDATE increment=0 on stream 1; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * Read and discard frames until a DATA frame (type {@code 0x0}) arrives. Returns its payload length, or {@code -1} on
+   * EOF.
+   */
+  private int readFirstDataFrameLength(InputStream in) throws Exception {
+    while (true) {
+      int b0 = in.read();
+      if (b0 == -1) {
+        return -1;
+      }
+      byte[] rest = new byte[8];
+      int read = in.readNBytes(rest, 0, 8);
+      if (read != 8) {
+        return -1;
+      }
+      int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
+      int type = rest[2] & 0xFF;
+      in.readNBytes(length);
+      if (type == 0x0) {  // DATA
+        return length;
+      }
+    }
+  }
+
+}

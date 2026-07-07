@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2022-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,8 +39,6 @@ public class MultipartStream {
   private int boundaryLength;
 
   private int boundaryStart;
-
-  private long bytesRead;
 
   private int current;
 
@@ -227,37 +225,26 @@ public class MultipartStream {
   }
 
   /**
-   * Processes any headers in the stream using the same finite state machine as the HTTP request preamble uses.
+   * Processes the part headers using the shared {@link HTTPFieldParser}, feeding it directly from the multipart buffer
+   * and reloading as needed. Header names are lower-cased with {@link HTTPTools#asciiLowerCase}; values are parsed into
+   * {@link HTTPTools.HeaderValue} via {@link HTTPTools#parseHeaderValue}.
    *
+   * @param headers The map to populate with the part's headers.
    * @throws IOException    If any I/O operation failed.
    * @throws ParseException If the input is not a proper multipart body and could not be processed.
    */
   private void readHeaders(Map<String, HTTPTools.HeaderValue> headers) throws IOException, ParseException {
-    var state = RequestPreambleState.HeaderName;
-    var build = new StringBuilder();
-    String headerName = null;
-    byte b;
-    while (state != RequestPreambleState.Complete) {
-      b = readByte();
+    var parser = new HTTPFieldParser();
+    FieldConsumer consumer = (name, value) -> headers.put(HTTPTools.asciiLowerCase(name), HTTPTools.parseHeaderValue(value));
 
-      var nextState = state.next(b);
-      if (nextState != state) {
-        switch (state) {
-          case HeaderName -> headerName = build.toString().toLowerCase(Locale.ROOT);
-          case HeaderValue -> headers.put(headerName, HTTPTools.parseHeaderValue(build.toString()));
+    while (!parser.isComplete()) {
+      if (current == end) {
+        if (!reload(1)) {
+          throw new ParseException("Invalid multipart body. Ran out of data while processing.");
         }
-
-        // If the next state is storing, reset the builder
-        if (nextState.store()) {
-          build.delete(0, build.length());
-          build.appendCodePoint(b);
-        }
-      } else if (state.store()) {
-        // If the current state is storing, store the character
-        build.appendCodePoint(b);
       }
 
-      state = nextState;
+      current += parser.feed(buffer, current, end - current, consumer);
     }
   }
 
@@ -326,6 +313,10 @@ public class MultipartStream {
       if (isFile) {
         if (multipartConfiguration.getFileUploadPolicy() == MultipartFileUploadPolicy.Allow) {
           files.add(processor.toFileInfo());
+          int maxFileCount = multipartConfiguration.getMaxFileCount();
+          if (maxFileCount != -1 && files.size() > maxFileCount) {
+            throw new ContentTooLargeException(maxFileCount, "The maximum number of files in a multipart stream has been exceeded. The maximum file count is [" + maxFileCount + "].");
+          }
         }
       } else {
         parameters.computeIfAbsent(name, _ -> new LinkedList<>()).add(processor.toValue());
@@ -358,18 +349,6 @@ public class MultipartStream {
 
       end += read;
       start += read;
-
-      // Keep track of all bytes read for this multipart stream. Fail if the length has been exceeded. With the previous `start += end`
-      // arithmetic, `start` grew quadratically across iterations whenever `input.read` returned fewer bytes than requested — a routine
-      // condition under TCP segmentation or TLS record boundaries — so `start` would overshoot the real write offset, leaving gaps and
-      // misattributed bytes in the buffer and eventually throwing IndexOutOfBoundsException on an overrun. See
-      // docs/security/audit-2026-04-20.md Vuln 5.
-      bytesRead += read;
-      long maximumRequestSize = multipartConfiguration.getMaxRequestSize();
-      if (bytesRead > maximumRequestSize) {
-        String detailedMessage = "The maximum request size of multipart stream has been exceeded. The maximum request size is [" + maximumRequestSize + "] bytes.";
-        throw new ContentTooLargeException(maximumRequestSize, detailedMessage);
-      }
     }
 
     return true;

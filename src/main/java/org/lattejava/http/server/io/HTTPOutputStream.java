@@ -21,82 +21,112 @@ import module org.lattejava.http;
 import org.lattejava.http.server.internal.*;
 
 /**
- * The primary output stream for the HTTP server (currently supporting version 1.1). This handles delegating to
- * compression and chunking output streams, depending on the response headers the application set.
+ * The primary response body output stream for the HTTP server, shared by HTTP/1.1 and HTTP/2. It owns the commit
+ * lifecycle, body suppression (HEAD, 204, and 304 responses), and compression (gzip/deflate), and delegates the
+ * protocol-specific concerns — emitting the response headers and framing the body — to an {@link HTTPOutputProtocol}: a
+ * text preamble plus chunked framing for HTTP/1.1, and an HPACK HEADERS frame plus DATA frames for HTTP/2.
  *
  * @author Brian Pontarelli
  */
 public class HTTPOutputStream extends OutputStream {
   private final List<String> acceptEncodings;
-
-  private final HTTPBuffers buffers;
-
   private final Instrumenter instrumenter;
-
+  private final HTTPOutputProtocol protocol;
   private final HTTPResponse response;
-
-  private final ServerToSocketOutputStream serverToSocket;
-
   private boolean bodySuppressed;
-
+  private boolean closed;
   private boolean committed;
-
   private boolean compress;
-
   private OutputStream delegate;
-
   private boolean suppressBody;
 
-  private boolean wroteOneByteToClient;
-
-  public HTTPOutputStream(HTTPServerConfiguration configuration, List<String> acceptEncodings, HTTPResponse response, OutputStream delegate,
-                          HTTPBuffers buffers, Runnable writeObserver) {
-    this.acceptEncodings = acceptEncodings;
-    this.response = response;
-    this.buffers = buffers;
+  public HTTPOutputStream(HTTPServerConfiguration configuration, HTTPRequest request, HTTPResponse response, HTTPOutputProtocol protocol) {
+    this.acceptEncodings = request.getAcceptEncodings();
     this.compress = configuration.isCompressByDefault();
     this.instrumenter = configuration.getInstrumenter();
-    this.serverToSocket = new ServerToSocketOutputStream(delegate, buffers, writeObserver);
-    this.delegate = serverToSocket;
-  }
-
-  @Override
-  public void close() throws IOException {
-    commit(true);
-    delegate.close();
-  }
-
-  @Override
-  public void flush() throws IOException {
-    delegate.flush();
+    this.response = response;
+    this.protocol = protocol;
   }
 
   /**
-   * Calls the {@link ServerToSocketOutputStream#forceFlush()} method to write all buffered bytes to the socket. This
-   * also writes the preamble to the buffer or to the socket if it hasn't been written yet.
-   *
-   * @throws IOException If the socket throws.
+   * Commits the response if it has not been already (writing the preamble or HTTP/2 HEADERS), flushes any remaining body
+   * bytes, emits trailers, and pushes everything to the client. This method is idempotent — calling it again after the
+   * first call is a no-op.
+   */
+  @Override
+  public void close() throws IOException {
+    if (closed) {
+      return;
+    }
+    closed = true;
+
+    commit(true);
+    protocol.prepareTrailers();
+    if (delegate != null) {
+      delegate.close();
+    }
+    protocol.commitTrailers();
+    protocol.forceFlush();
+  }
+
+  /**
+   * Flushes already-written body bytes to the client. This method does NOT commit the response: it will not emit the
+   * response preamble or HEADERS frame before the first body byte has been written, so calling it on a stream that has
+   * not yet been written to is a no-op (HTTP/1 never committed on {@code flush()} either, so this contract is consistent
+   * across protocols). Handlers that want to commit the response and push the status and headers to the client early
+   * (for example, an HTTP/2 bidirectional-streaming handler) must call {@link HTTPResponse#flush()} instead, which
+   * routes through {@link #forceFlush()} and commits the response.
+   */
+  @Override
+  public void flush() throws IOException {
+    if (delegate != null) {
+      delegate.flush();
+    }
+  }
+
+  /**
+   * Commits the response (writing the preamble/HEADERS if not yet written) and forces all buffered bytes to the client.
    */
   public void forceFlush() throws IOException {
     commit(false);
-    delegate.flush();
-    serverToSocket.forceFlush();
+    if (delegate != null) {
+      delegate.flush();
+    }
+    protocol.forceFlush();
   }
 
   /**
-   * @return True if at least one byte was written back to the client. False if the response has not been generated or
-   *     is sitting in the response buffer.
+   * Determines whether the response has been committed, meaning at least one byte — for HTTP/2, the response HEADERS
+   * frame — has been written back to the client. Once committed, the status, headers, and compression configuration can
+   * no longer be changed and {@link #reset()} will throw.
+   *
+   * @return {@code true} if the response has been committed, {@code false} if it has not been generated yet or is still
+   *     buffered.
    */
   public boolean isCommitted() {
-    return wroteOneByteToClient;
+    return protocol.wroteToClient();
   }
 
+  /**
+   * Indicates whether compression is currently enabled for this response. This reflects the configured intent; whether
+   * compression is actually applied to the body also depends on the request's accepted encodings, which
+   * {@link #willCompress()} accounts for.
+   *
+   * @return {@code true} if compression is enabled.
+   */
   public boolean isCompress() {
     return compress;
   }
 
+  /**
+   * Enables or disables compression of the response body. This may be called repeatedly, but only before the first byte
+   * is written: once bytes have been written the body pipeline is fixed and this throws, because the gzip/deflate
+   * streams write header bytes during construction and cannot be installed retroactively.
+   *
+   * @param compress {@code true} to write the body compressed when the client accepts a supported encoding.
+   * @throws IllegalStateException if called after the response has been committed.
+   */
   public void setCompress(boolean compress) {
-    // Too late, once you write bytes, we can no longer change the OutputStream configuration.
     if (committed) {
       throw new IllegalStateException("The HTTPResponse compression configuration cannot be modified once bytes have been written to it.");
     }
@@ -104,25 +134,34 @@ public class HTTPOutputStream extends OutputStream {
     this.compress = compress;
   }
 
+  /**
+   * Resets this stream so the response can be regenerated, provided nothing has been written back to the client yet.
+   * Clears the committed state, discards the body pipeline, and turns compression off. {@code suppressBody} (HEAD
+   * handling) is intentionally preserved so HEAD error responses continue to suppress the body.
+   *
+   * @throws IllegalStateException if the response has already been committed (a byte has reached the client).
+   */
   public void reset() {
-    if (wroteOneByteToClient) {
+    if (protocol.wroteToClient()) {
       throw new IllegalStateException("The HTTPOutputStream can't be reset after it has been committed, meaning at least one byte was written back to the client.");
     }
 
     bodySuppressed = false;
-    serverToSocket.reset();
+    closed = false;
     committed = false;
     compress = false;
-    delegate = serverToSocket;
-    // suppressBody is intentionally preserved across reset() so that HEAD error responses (triggered via response.reset() in closeSocketOnError) continue to suppress the body. HTTPOutputStream is constructed fresh per connection iteration in HTTPWorker, so there is no cross-request bleed.
+    delegate = null;
+    protocol.reset();
+    // suppressBody is intentionally preserved across reset() so HEAD error responses keep suppressing the body.
   }
 
   /**
-   * Enables or disables body-byte suppression for this response. When enabled, the preamble is still written normally
-   * (identical to a GET response), but any subsequent {@link #write} calls become no-ops and the chunked/gzip/deflate
-   * delegates are not installed. Intended for HEAD request handling.
+   * Enables or disables body-byte suppression for this response. When enabled, the preamble (or HTTP/2 HEADERS) is still
+   * written normally — identical to a GET response, so the framing headers match — but any subsequent {@link #write}
+   * calls become no-ops and the chunked/gzip/deflate delegates are not installed. Intended for HEAD request handling.
    *
-   * @param suppressBody true to drop all body output.
+   * @param suppressBody {@code true} to drop all body output.
+   * @throws IllegalStateException if called after the response has been committed.
    */
   public void setSuppressBody(boolean suppressBody) {
     if (committed) {
@@ -133,20 +172,19 @@ public class HTTPOutputStream extends OutputStream {
   }
 
   /**
-   * @return true if compression has been requested, and it appears as though we will compress because the requested
-   *     content encoding is supported.
+   * Indicates whether the body will actually be compressed when written. Unlike {@link #isCompress()}, which reports
+   * only the configured intent, this also accounts for whether the client's accepted encodings include an encoding the
+   * server supports (gzip or deflate).
+   *
+   * @return {@code true} if compression has been requested and a supported content encoding was offered by the client.
    */
   public boolean willCompress() {
     if (compress) {
       for (String encoding : acceptEncodings) {
-        if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip)) {
-          return true;
-        } else if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
+        if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip) || encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
           return true;
         }
       }
-
-      return false;
     }
 
     return false;
@@ -188,9 +226,9 @@ public class HTTPOutputStream extends OutputStream {
   }
 
   /**
-   * Initialize the actual OutputStream latent so that we can call setCompress more than once. The GZIPOutputStream
-   * writes bytes to the OutputStream during construction which means we cannot build it more than once. This is why we
-   * must wait until we know for certain we are going to write bytes to construct the compressing OutputStream.
+   * Latently builds the body pipeline on the first write or on close. Applies RFC body-suppression, decides
+   * compression (the only protocol-agnostic body transform), then hands header emission + framing to the protocol and
+   * wraps the returned sink with gzip/deflate when compressing.
    */
   private void commit(boolean closing) throws IOException {
     if (committed) {
@@ -201,195 +239,50 @@ public class HTTPOutputStream extends OutputStream {
 
     int status = response.getStatus();
     boolean noBodyStatus = status == 204 || status == 304;
-
-    // HEAD always suppresses body bytes; 204 and 304 must never carry a body per RFC 9110.
     bodySuppressed = suppressBody || noBodyStatus;
+
+    // framingBody: headers are computed as if a body follows (true for a writing GET and for HEAD mirroring GET).
+    boolean framingBody = !noBodyStatus && !closing;
+    // emitBytes: real body bytes will be written, so a compression delegate is installed.
+    boolean emitBytes = framingBody && !suppressBody;
 
     boolean gzip = false;
     boolean deflate = false;
-    boolean chunked = false;
-
-    if (noBodyStatus) {
-      // 204/304 must not carry Content-Length, Transfer-Encoding, or a body (RFC 9110 §15.3.5 / §15.4.5 / RFC 7230 §3.3.2).
-      response.removeHeader(HTTPValues.Headers.ContentLength);
-      response.removeHeader(HTTPValues.Headers.TransferEncoding);
-    } else {
-      // RFC 7230 §3.3.3: a sender must not send Content-Length in a message that also has Transfer-Encoding. TE wins.
-      boolean handlerSetTransferEncoding = response.getHeader(HTTPValues.Headers.TransferEncoding) != null;
-      if (handlerSetTransferEncoding) {
-        response.removeHeader(HTTPValues.Headers.ContentLength);
-      }
-
-      if (closing) {
-        // Handler wrote no bytes.
-        if (suppressBody) {
-          // HEAD: preserve the handler's framing so CDN-style handlers can report a synthetic Content-Length or indicate chunked framing
-          // without actually generating a body. Only default to Content-Length: 0 when the handler set nothing.
-          if (response.getContentLength() == null && !handlerSetTransferEncoding) {
-            response.setContentLength(0L);
-          }
-        } else {
-          // GET defensive override: the handler declared framing but produced no bytes. Strip any Transfer-Encoding (no chunks were sent)
-          // and force Content-Length: 0 so the client does not wait for a body.
-          if (handlerSetTransferEncoding) {
-            response.removeHeader(HTTPValues.Headers.TransferEncoding);
-          }
-          response.setContentLength(0L);
-        }
-      } else {
-        // Handler is writing bytes.
-        if (compress) {
-          for (String encoding : acceptEncodings) {
-            if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip)) {
-              response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Gzip);
-              response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
-              response.removeHeader(HTTPValues.Headers.ContentLength);
-              gzip = true;
-              break;
-            } else if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
-              response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Deflate);
-              response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
-              response.removeHeader(HTTPValues.Headers.ContentLength);
-              deflate = true;
-              break;
-            }
-          }
-        }
-
-        if (handlerSetTransferEncoding) {
-          // Handler asked for chunked framing explicitly. Wrap the delegate so the bytes are actually chunk-framed on the wire.
-          chunked = true;
-        } else if (response.getContentLength() == null) {
-          response.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
-          chunked = true;
+    if (framingBody && compress) {
+      for (String encoding : acceptEncodings) {
+        if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Gzip)) {
+          response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Gzip);
+          response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
+          response.removeHeader(HTTPValues.Headers.ContentLength);
+          gzip = true;
+          break;
+        } else if (encoding.equalsIgnoreCase(HTTPValues.ContentEncodings.Deflate)) {
+          response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Deflate);
+          response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
+          response.removeHeader(HTTPValues.Headers.ContentLength);
+          deflate = true;
+          break;
         }
       }
     }
 
-    // Write the preamble to the socket.
-    HTTPTools.writeResponsePreamble(response, delegate);
+    OutputStream sink = protocol.commitHeaders(closing, suppressBody);
 
-    // Bail if no body bytes will follow.
-    if (bodySuppressed || closing) {
+    if (!emitBytes) {
+      delegate = sink;
       return;
-    }
-
-    // Install body delegate(s).
-    if (chunked) {
-      delegate = new ChunkedOutputStream(delegate, buffers.chunkBuffer(), buffers.chuckedOutputStream());
-      if (instrumenter != null) {
-        instrumenter.chunkedResponse();
-      }
     }
 
     if (gzip) {
       try {
-        delegate = new GZIPOutputStream(delegate, true);
-        response.setHeader(HTTPValues.Headers.ContentEncoding, HTTPValues.ContentEncodings.Gzip);
-        response.setHeader(HTTPValues.Headers.Vary, HTTPValues.Headers.AcceptEncoding);
+        delegate = new GZIPOutputStream(sink, true);
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
     } else if (deflate) {
-      delegate = new DeflaterOutputStream(delegate, true);
-    }
-  }
-
-  /**
-   * This OutputStream handles all the complexity of buffering the response, managing calls to {@link #close()}, etc.
-   *
-   * @author Brian Pontarelli
-   */
-  private class ServerToSocketOutputStream extends OutputStream {
-    private final byte[] buffer;
-
-    private final OutputStream delegate;
-
-    private final byte[] intsAreDumb = new byte[1];
-
-    private final Runnable writeObserver;
-
-    private int bufferIndex;
-
-    public ServerToSocketOutputStream(OutputStream delegate, HTTPBuffers buffers, Runnable writeObserver) {
-      this.delegate = delegate;
-      this.buffer = buffers.responseBuffer();
-      this.bufferIndex = 0;
-      this.writeObserver = writeObserver;
-    }
-
-    /**
-     * Flushes the buffer but does not close the delegate.
-     *
-     * @throws IOException If the flush fails.
-     */
-    @Override
-    public void close() throws IOException {
-      forceFlush();
-    }
-
-    /**
-     * Only flushes if the buffer is 90+% full.
-     *
-     * @throws IOException If the write and flush to the delegate stream throws.
-     */
-    @Override
-    public void flush() throws IOException {
-      if (buffer == null || bufferIndex >= (buffer.length * 0.90)) {
-        forceFlush();
-      }
-    }
-
-    public void forceFlush() throws IOException {
-      if (buffer == null || bufferIndex == 0) {
-        return;
-      }
-
-      wroteOneByteToClient = true;
-      delegate.write(buffer, 0, bufferIndex);
-      delegate.flush();
-      bufferIndex = 0;
-    }
-
-    /**
-     * Resets the ServerToSocketOutputStream by resetting the buffer location to 0. This only applies if the response
-     * buffer is in use.
-     */
-    public void reset() {
-      bufferIndex = 0;
-    }
-
-    @Override
-    public void write(byte[] b, int offset, int length) throws IOException {
-      writeObserver.run();
-
-      if (buffer == null) {
-        delegate.write(b, offset, length);
-      } else {
-        do {
-          int remaining = buffer.length - bufferIndex;
-          int toWrite = Math.min(remaining, length);
-          System.arraycopy(b, offset, buffer, bufferIndex, toWrite);
-          bufferIndex += toWrite;
-          offset += toWrite;
-          length -= toWrite;
-
-          if (bufferIndex >= buffer.length) {
-            forceFlush();
-          }
-        } while (length > 0);
-      }
-    }
-
-    @Override
-    public void write(int b) throws IOException {
-      intsAreDumb[0] = (byte) b;
-      write(intsAreDumb, 0, 1);
-    }
-
-    @Override
-    public void write(byte[] b) throws IOException {
-      write(b, 0, b.length);
+      delegate = new DeflaterOutputStream(sink, true);
+    } else {
+      delegate = sink;
     }
   }
 }

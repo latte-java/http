@@ -23,28 +23,16 @@ import module org.lattejava.http;
  * @author Daniel DeGroff
  */
 public class ExceptionHandlerContext {
-  private final Logger logger;
-
   private final HTTPRequest request;
 
   private final Throwable throwable;
 
   private int statusCode;
 
-  public ExceptionHandlerContext(Logger logger, HTTPRequest request, int statusCode, Throwable throwable) {
-    this.logger = logger;
+  public ExceptionHandlerContext(HTTPRequest request, int statusCode, Throwable throwable) {
     this.request = request;
     this.statusCode = statusCode;
     this.throwable = throwable;
-  }
-
-  /**
-   * This is provided for convenience, but you may wish to use your own logger.
-   *
-   * @return the optional logger to use in the exception handler.
-   */
-  public Logger getLogger() {
-    return logger;
   }
 
   /**

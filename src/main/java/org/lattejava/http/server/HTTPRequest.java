@@ -93,6 +93,8 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
 
   private String scheme;
 
+  private Map<String, List<String>> trailers;
+
   /**
    * Constructs an empty request with an empty context path. All other fields are left at their defaults and are
    * expected to be populated by the server as it parses the request line, headers, and body.
@@ -144,118 +146,22 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
-   * Parse an Accept-Encoding header value into the list of encodings ordered by RFC 9110 priority — q-value descending,
-   * original-position ascending for ties. Walks the input with indexOf() instead of {@link String#split(String)} +
-   * {@link java.util.TreeSet} + a stream pipeline. The previous implementation showed up at ~17% of CPU and was the top
-   * single-source allocator in JFR profiling. Browsers send 1–4 entries with no q-values in the common case; for that
-   * path the insertion sort is O(N) over already-sorted weights.
-   *
-   * @param value the raw header value, e.g. {@code "gzip, deflate, br;q=0.5"}
-   * @return the encodings in priority order, never null
+   * @return true if the client signaled {@code TE: trailers} per RFC 9110 §10.1.4 — trailer fields will be honored on
+   *     the response.
    */
-  private static List<String> parseAcceptEncoding(String value) {
-    int cap = 4;
-    String[] encodings = new String[cap];
-    double[] weights = new double[cap];
-    int count = 0;
-    int len = value.length();
-    int from = 0;
-
-    while (from < len) {
-      int comma = value.indexOf(',', from);
-      int segmentEnd = comma < 0 ? len : comma;
-
-      // Trim OWS (RFC 9110 §5.6.3 allows space and HTAB) from both ends of the segment.
-      int start = from;
-      while (start < segmentEnd && (value.charAt(start) == ' ' || value.charAt(start) == '\t')) {
-        start++;
-      }
-      int end = segmentEnd;
-      while (end > start && (value.charAt(end - 1) == ' ' || value.charAt(end - 1) == '\t')) {
-        end--;
-      }
-
-      if (start < end) {
-        // Locate the optional ';q=...' parameter. Other parameters (rare for Accept-Encoding) are skipped over.
-        int semi = value.indexOf(';', start);
-        if (semi < 0 || semi >= end) {
-          semi = -1;
-        }
-
-        double weight = 1.0;
-        int encEnd = end;
-        if (semi >= 0) {
-          encEnd = semi;
-          while (encEnd > start && (value.charAt(encEnd - 1) == ' ' || value.charAt(encEnd - 1) == '\t')) {
-            encEnd--;
-          }
-
-          int p = semi + 1;
-          while (p < end) {
-            while (p < end && (value.charAt(p) == ' ' || value.charAt(p) == '\t')) {
-              p++;
-            }
-            if (p + 1 < end && (value.charAt(p) == 'q' || value.charAt(p) == 'Q') && value.charAt(p + 1) == '=') {
-              int qStart = p + 2;
-              int qEnd = value.indexOf(';', qStart);
-              if (qEnd < 0 || qEnd > end) {
-                qEnd = end;
-              }
-              try {
-                weight = Double.parseDouble(value.substring(qStart, qEnd).trim());
-              } catch (NumberFormatException ignored) {
-                // Malformed q-value — leave weight at default 1.0.
-              }
-              break;
-            }
-            int next = value.indexOf(';', p);
-            if (next < 0 || next >= end) {
-              break;
-            }
-            p = next + 1;
-          }
-        }
-
-        if (count == cap) {
-          cap *= 2;
-          encodings = Arrays.copyOf(encodings, cap);
-          weights = Arrays.copyOf(weights, cap);
-        }
-        encodings[count] = value.substring(start, encEnd);
-        weights[count] = weight;
-        count++;
-      }
-
-      if (comma < 0) {
-        break;
-      }
-      from = comma + 1;
+  public boolean acceptsTrailers() {
+    String te = getHeader(HTTPValues.Headers.TE);
+    if (te == null) {
+      return false;
     }
 
-    if (count == 0) {
-      return List.of();
-    }
-
-    // Insertion sort: weight DESC, original index ASC. Stable on equal weights because we only swap on strict less-than. O(N) on the common
-    // browser case where every weight is 1.0 and the input is already in priority order.
-    for (int i = 1; i < count; i++) {
-      String e = encodings[i];
-      double w = weights[i];
-      int j = i - 1;
-      while (j >= 0 && weights[j] < w) {
-        encodings[j + 1] = encodings[j];
-        weights[j + 1] = weights[j];
-        j--;
+    for (String token : te.split(",")) {
+      if (token.trim().equalsIgnoreCase("trailers")) {
+        return true;
       }
-      encodings[j + 1] = e;
-      weights[j + 1] = w;
     }
 
-    List<String> result = new ArrayList<>(count);
-    for (int i = 0; i < count; i++) {
-      result.add(encodings[i]);
-    }
-    return result;
+    return false;
   }
 
   /**
@@ -344,7 +250,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @param value The header value.
    */
   public void addHeader(String name, String value) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).add(value);
     decodeHeader(name, value);
   }
@@ -357,7 +263,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @param values The header values to add.
    */
   public void addHeaders(String name, String... values) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).addAll(List.of(values));
 
     for (String value : values) {
@@ -373,7 +279,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @param values The header values to add.
    */
   public void addHeaders(String name, Collection<String> values) {
-    name = name.toLowerCase(Locale.ROOT);
+    name = HTTPTools.asciiLowerCase(name);
     headers.computeIfAbsent(name, key -> new ArrayList<>()).addAll(values);
 
     for (String value : values) {
@@ -409,6 +315,20 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    */
   public void addLocales(Collection<Locale> locales) {
     this.locales.addAll(locales);
+  }
+
+  /**
+   * Adds a single trailer field received from the client after the request body. Trailers are valid only on chunked
+   * HTTP/1.1 requests and on HTTP/2 streams where the client signaled them via {@code TE: trailers}.
+   *
+   * @param name  The trailer field name (case-insensitive).
+   * @param value The trailer field value.
+   */
+  public void addTrailer(String name, String value) {
+    if (trailers == null) {
+      trailers = new HashMap<>();
+    }
+    trailers.computeIfAbsent(name.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(value);
   }
 
   /**
@@ -1238,6 +1158,42 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
+   * Returns the first value of the named trailer field, or {@code null} if absent. Trailer fields are populated by the
+   * server after the request body has been fully read on chunked HTTP/1.1 and on HTTP/2 streams.
+   *
+   * @param name The trailer field name (case-insensitive).
+   * @return The first trailer value, or {@code null} if no such trailer was received.
+   */
+  public String getTrailer(String name) {
+    if (trailers == null) {
+      return null;
+    }
+    List<String> values = trailers.get(name.toLowerCase(Locale.ROOT));
+    return (values == null || values.isEmpty()) ? null : values.getFirst();
+  }
+
+  /**
+   * @return An unmodifiable view of all trailer fields received with this request, keyed by lowercased name. Returns an
+   *     empty map if no trailers were received.
+   */
+  public Map<String, List<String>> getTrailerMap() {
+    return trailers == null ? Map.of() : trailers;
+  }
+
+  /**
+   * Returns all values for the named trailer field.
+   *
+   * @param name The trailer field name (case-insensitive).
+   * @return The list of values for this trailer, or an empty list if no such trailer was received.
+   */
+  public List<String> getTrailers(String name) {
+    if (trailers == null) {
+      return List.of();
+    }
+    return trailers.getOrDefault(name.toLowerCase(Locale.ROOT), List.of());
+  }
+
+  /**
    * Returns the value of the {@code Transfer-Encoding} header, or {@code null} if it is absent.
    *
    * @return The transfer encoding, or {@code null}.
@@ -1309,12 +1265,26 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   }
 
   /**
+   * @return {@code true} if any trailer fields were received with this request.
+   */
+  public boolean hasTrailers() {
+    return trailers != null && !trailers.isEmpty();
+  }
+
+  /**
    * Returns whether the request body uses chunked transfer encoding, based on the {@code Transfer-Encoding} header.
    *
    * @return {@code true} if the request is chunked.
    */
   public boolean isChunked() {
     return HTTPValues.TransferEncodings.Chunked.equalsIgnoreCase(getTransferEncoding());
+  }
+
+  /**
+   * @return True if this request was received over HTTP/2 (protocol set to {@code HTTP/2.0}).
+   */
+  public boolean isHTTP2() {
+    return "HTTP/2.0".equals(protocol);
   }
 
   /**
@@ -1337,6 +1307,10 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
    * @return True if the Connection header is missing or not `Close`.
    */
   public boolean isKeepAlive() {
+    if (isHTTP2()) {
+      return true;
+    }
+
     // Connection is a comma-separated token list per RFC 9110 §7.6.1, e.g. "close, upgrade". Exact equality misclassifies any
     // multi-token value, so split into tokens and check membership.
     var tokens = connectionTokens();
@@ -1512,7 +1486,7 @@ public class HTTPRequest implements Buildable<HTTPRequest> {
   private void decodeHeader(String name, String value) {
     switch (name) {
       case HTTPValues.Headers.AcceptEncodingLower:
-        setAcceptEncodings(parseAcceptEncoding(value));
+        setAcceptEncodings(HTTPTools.parseAcceptEncoding(value));
         break;
       case HTTPValues.Headers.AcceptLanguageLower:
         try {

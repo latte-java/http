@@ -44,18 +44,6 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the buffer size for the chunked input stream. Defaults to 4 Kilobytes.
-   *
-   * @param chunkedBufferSize the buffer size used to read a request body that was encoded using 'chunked'
-   *                          transfer-encoding.
-   * @return This.
-   */
-  default T withChunkedBufferSize(int chunkedBufferSize) {
-    configuration().withChunkedBufferSize(chunkedBufferSize);
-    return (T) this;
-  }
-
-  /**
    * Sets the default compression behavior for the HTTP response. This behavior can be optionally set per response. See
    * {@link HTTPResponse#setCompress(boolean)}. Defaults to true.
    * <p>
@@ -91,19 +79,6 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets an ExpectValidator that is used if a client sends the server a {@code Expect: 100-continue} header.
-   * <p>
-   * Must not be null.
-   *
-   * @param validator The validator.
-   * @return This.
-   */
-  default T withExpectValidator(ExpectValidator validator) {
-    configuration().withExpectValidator(validator);
-    return (T) this;
-  }
-
-  /**
    * Sets the handler that will process the requests.
    * <p>
    * Must not be null.
@@ -113,6 +88,28 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withHandler(HTTPHandler handler) {
     configuration().withHandler(handler);
+    return (T) this;
+  }
+
+  /**
+   * Configures the HTTP/1.x-specific options.
+   *
+   * @param consumer A consumer that receives the always-present {@link HTTP1Configuration} to mutate.
+   * @return This.
+   */
+  default T withHTTP1(Consumer<HTTP1Configuration> consumer) {
+    configuration().withHTTP1(consumer);
+    return (T) this;
+  }
+
+  /**
+   * Configures the HTTP/2-specific options.
+   *
+   * @param consumer A consumer that receives the always-present {@link HTTP2Configuration} to mutate.
+   * @return This.
+   */
+  default T withHTTP2(Consumer<HTTP2Configuration> consumer) {
+    configuration().withHTTP2(consumer);
     return (T) this;
   }
 
@@ -140,18 +137,6 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the duration that the server will allow client connections to remain open and idle after each request has been
-   * processed. This is the Keep-Alive state before the first byte of the next request is read. Defaults to 20 seconds.
-   *
-   * @param duration The duration.
-   * @return This.
-   */
-  default T withKeepAliveTimeoutDuration(Duration duration) {
-    configuration().withKeepAliveTimeoutDuration(duration);
-    return (T) this;
-  }
-
-  /**
    * Adds a listener configuration for the server. This will listen on the address and port of the configuration but
    * will share the thread pool of the server.
    *
@@ -160,18 +145,6 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withListener(HTTPListenerConfiguration listener) {
     configuration().withListener(listener);
-    return (T) this;
-  }
-
-  /**
-   * Sets the logger factory that all the HTTP server classes use to retrieve specific loggers. Defaults to the
-   * {@link SystemOutLoggerFactory}.
-   *
-   * @param loggerFactory The factory.
-   * @return This.
-   */
-  default T withLoggerFactory(LoggerFactory loggerFactory) {
-    configuration().withLoggerFactory(loggerFactory);
     return (T) this;
   }
 
@@ -215,26 +188,17 @@ public interface Configurable<T extends Configurable<T>> {
    * Set any value to -1 to disable this limitation.
    * <p>
    * Defaults to 128 Megabytes for the default "*" and 10 Megabytes for "application/x-www-form-urlencoded".
+   * <p>
+   * This is the single total-body size cap for all request bodies, including multipart uploads. The
+   * {@link MultipartConfiguration} bounds per-file size ({@code maxFileSize}) and file count ({@code maxFileCount})
+   * within that envelope. At server start, the configuration is rejected if {@code maxFileSize} exceeds the
+   * effective {@code maxRequestBodySize} for {@code multipart/form-data}.
    *
    * @param maxRequestBodySize a map specifying the maximum size in bytes for the HTTP request body by Content-Type
    * @return This.
    */
-  default T withMaxRequestBodySize(Map<String, Integer> maxRequestBodySize) {
+  default T withMaxRequestBodySize(Map<String, Long> maxRequestBodySize) {
     configuration().withMaxRequestBodySize(maxRequestBodySize);
-    return (T) this;
-  }
-
-  /**
-   * Sets the maximum size in bytes of a single chunk in a chunked-encoded request body. A chunk whose declared hex size
-   * exceeds this value is rejected as a malformed request before any body bytes are read. This defends against a 4 GiB
-   * (and larger) chunk size that would otherwise truncate when narrowed to an int and collide with the terminator
-   * chunk, enabling request smuggling. Defaults to 1 Megabyte.
-   *
-   * @param maxRequestChunkSize the maximum per-chunk size in bytes.
-   * @return This.
-   */
-  default T withMaxRequestChunkSize(int maxRequestChunkSize) {
-    configuration().withMaxRequestChunkSize(maxRequestChunkSize);
     return (T) this;
   }
 
@@ -250,31 +214,6 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withMaxRequestHeaderSize(int maxRequestHeaderSize) {
     configuration().withMaxRequestHeaderSize(maxRequestHeaderSize);
-    return (T) this;
-  }
-
-  /**
-   * Sets the base directory for this server. This is passed to the HTTPContext, which is available from this class.
-   * This defaults to the current working directory of the process. Defaults to 100,000.
-   *
-   * @param maxRequestsPerConnection The maximum number of requests that can be handled by a single persistent
-   *                                 connection.
-   * @return This.
-   */
-  default T withMaxRequestsPerConnection(int maxRequestsPerConnection) {
-    configuration().withMaxRequestsPerConnection(maxRequestsPerConnection);
-    return (T) this;
-  }
-
-  /**
-   * This configures the maximum size of a chunk in the response when the server is using chunked response encoding.
-   * Defaults to 16 Kilobytes.
-   *
-   * @param size The size in bytes.
-   * @return This.
-   */
-  default T withMaxResponseChunkSize(int size) {
-    configuration().withMaxResponseChunkSize(size);
     return (T) this;
   }
 
@@ -317,22 +256,13 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Sets the size of the buffer that is used to process the multipart request body. This defaults to 16 Kilobytes.
-   *
-   * @param multipartBufferSize The size of the buffer.
-   * @return This.
-   * @deprecated use the configuration found in {@link MultipartConfiguration} instead.
-   */
-  @Deprecated
-  default T withMultipartBufferSize(int multipartBufferSize) {
-    configuration().withMultipartBufferSize(multipartBufferSize);
-    return (T) this;
-  }
-
-  /**
    * Sets the multipart processor configuration.
    * <p>
    * This configuration is used when parsing a multipart HTTP request that includes files.
+   * <p>
+   * The {@link MultipartConfiguration} controls only file-shape concerns: the upload policy, per-file size
+   * limit, and file-count limit. The total multipart request body is bounded by
+   * {@link #withMaxRequestBodySize}, which applies uniformly to all content types.
    *
    * @param multipartStreamConfiguration The configuration.
    * @return This

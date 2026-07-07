@@ -86,13 +86,17 @@ public final class HTTPValues {
   public static final class ControlBytes {
     public static final byte CR = '\r';
 
+    public static final byte[] ColonSpace = {':', ' '};
+
     public static final byte Dash = '-';
+
+    public static final byte[] HTTP2Preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
     public static final byte LF = '\n';
 
-    public static final byte[] ColonSpace = {':', ' '};
-
     public static final byte[] CRLF = {CR, LF};
+
+    public static final byte[] EmptyChunk = {'0', CR, LF};
 
     public static final byte[] ChunkedTerminator = {'0', CR, LF, CR, LF};
 
@@ -149,6 +153,31 @@ public final class HTTPValues {
     public static final String filename = "filename";
 
     public static final String name = "name";
+  }
+
+  public static final class ForbiddenTrailers {
+    /**
+     * RFC 9110 §6.5.2 forbids any trailer field that affects message framing, routing, authentication, request
+     * modifiers, response control, caching, payload processing, or connection management. Lowercased; lookups must
+     * lowercase the candidate name.
+     */
+    public static final Set<String> Names = Set.of(
+        // Framing
+        "content-encoding", "content-length", "content-range", "content-type", "transfer-encoding",
+        // Routing / pseudo-headers (h2)
+        ":authority", ":method", ":path", ":scheme", ":status", "host",
+        // Request modifiers
+        "cache-control", "expect", "max-forwards", "pragma", "range", "te",
+        // Authentication / cookies
+        "authorization", "cookie", "proxy-authenticate", "proxy-authorization", "set-cookie", "www-authenticate",
+        // Response control
+        "age", "date", "expires", "location", "retry-after", "vary", "warning",
+        // Connection management
+        "connection", "keep-alive", "proxy-connection", "trailer", "upgrade"
+    );
+
+    private ForbiddenTrailers() {
+    }
   }
 
   public static final class HeaderBytes {
@@ -223,6 +252,8 @@ public final class HTTPValues {
 
     public static final String Connection = "Connection";
 
+    public static final String ConnectionLower = "connection";
+
     public static final String ContentDispositionLower = "content-disposition";
 
     public static final String ContentEncoding = "Content-Encoding";
@@ -253,6 +284,8 @@ public final class HTTPValues {
 
     public static final String IfModifiedSince = "If-Modified-Since";
 
+    public static final String KeepAliveLower = "keep-alive";
+
     public static final String LastModified = "Last-Modified";
 
     public static final String Location = "Location";
@@ -264,13 +297,31 @@ public final class HTTPValues {
      */
     public static final String Origin = "Origin";
 
+    public static final String ProxyConnectionLower = "proxy-connection";
+
     public static final String Referer = "Referer";
+
+    // RFC 9113 §8.1.2.1: the only pseudo-headers valid in a client request.
+    public static final Set<String> RequestPseudoHeaders = Set.of(":authority", ":method", ":path", ":scheme");
 
     public static final String RetryAfter = "Retry-After";
 
     public static final String SetCookie = "Set-Cookie";
 
+    public static final String TE = "TE";
+
+    public static final String Trailer = "Trailer";
+
     public static final String TransferEncoding = "Transfer-Encoding";
+
+    public static final String TransferEncodingLower = "transfer-encoding";
+
+    public static final String UpgradeLower = "upgrade";
+
+    // RFC 9113 §8.1.2.2: headers that are connection-specific and forbidden in HTTP/2.
+    public static final Set<String> ConnectionSpecificHeaders = Set.of(
+        ConnectionLower, KeepAliveLower, ProxyConnectionLower, TransferEncodingLower, UpgradeLower
+    );
 
     public static final String UserAgent = "User-Agent";
 
@@ -328,13 +379,23 @@ public final class HTTPValues {
   }
 
   public static final class Status {
+    public static final int BadRequest = 400;
+
     public static final String ContinueRequest = "100-continue";
+
+    public static final int ExpectationFailed = 417;
+
+    public static final int HTTPVersionNotSupported = 505;
+
+    public static final int InternalServerError = 500;
 
     public static final int MovedPermanently = 301;
 
     public static final int MovedTemporarily = 302;
 
     public static final int NotModified = 304;
+
+    public static final int UnsupportedMediaType = 415;
 
     private Status() {
     }

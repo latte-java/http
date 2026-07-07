@@ -1,0 +1,235 @@
+/*
+ * Copyright (c) 2026 The Latte Project
+ * SPDX-License-Identifier: MIT
+ */
+package org.lattejava.http.server.internal.h2;
+
+import module java.base;
+import module org.lattejava.http;
+
+import static org.lattejava.http.server.internal.h2.HTTP2Frame.*;
+
+/**
+ * Reads HTTP/2 frames from an InputStream. Owns the frame-read buffer (passed in by the caller, sized to
+ * MAX_FRAME_SIZE). Single-threaded — instance must not be shared across threads.
+ *
+ * @author Daniel DeGroff
+ */
+public class HTTP2FrameReader {
+  private final byte[] buffer;
+
+  private final InputStream in;
+
+  private final int maxHeaderListSize;
+
+  public HTTP2FrameReader(InputStream in, byte[] buffer, int maxHeaderListSize) {
+    this.in = in;
+    this.buffer = buffer;
+    this.maxHeaderListSize = maxHeaderListSize;
+  }
+
+  private static byte[] copyOf(byte[] src, int len) {
+    byte[] dst = new byte[len];
+    System.arraycopy(src, 0, dst, 0, len);
+    return dst;
+  }
+
+  private static byte[] copyOfRange(byte[] src, int from, int to) {
+    byte[] dst = new byte[to - from];
+    System.arraycopy(src, from, dst, 0, to - from);
+    return dst;
+  }
+
+  /**
+   * Reads the next logical frame. A HEADERS frame without END_HEADERS is assembled here: CONTINUATION frames are read
+   * and concatenated until END_HEADERS, and the returned {@link HTTP2Frame.HeadersFrame} always carries the complete
+   * header block with END_HEADERS set (END_STREAM comes from the initial HEADERS — RFC 9113 permits it nowhere else in
+   * the sequence). CONTINUATION therefore never escapes this reader.
+   */
+  public HTTP2Frame readFrame() throws IOException {
+    HTTP2Frame frame = readRawFrame();
+    if (frame instanceof ContinuationFrame) {
+      // RFC 9113 §6.10: CONTINUATION with no open header block is a connection error PROTOCOL_ERROR.
+      throw new ProtocolException("CONTINUATION frame without a preceding HEADERS frame");
+    }
+
+    // Everything except headers is returned because it's a complete frame
+    if (!(frame instanceof HeadersFrame headers)) {
+      return frame;
+    }
+
+    if (headers.data().length > maxHeaderListSize) {
+      throw new HeaderListSizeException("Header block exceeds [" + maxHeaderListSize + "] bytes");
+    }
+
+    if ((headers.flags() & FLAG_END_HEADERS) != 0) {
+      return headers;
+    }
+
+    // Assemble: RFC 9113 §4.3 — the following frames MUST be CONTINUATION on the same stream, no interleaving of any
+    // other frame type or stream, until END_HEADERS.
+    @SuppressWarnings("resource")
+    FastByteArrayOutputStream accumulator = new FastByteArrayOutputStream(headers.data().length * 2, headers.data().length);
+    accumulator.write(headers.data());
+    while (true) {
+      HTTP2Frame next = readRawFrame();
+      if (!(next instanceof ContinuationFrame(int streamId, int flags, byte[] headerBlockFragment)) ||
+          streamId != headers.streamId()) {
+        throw new ProtocolException("Frame [" + next.getClass().getSimpleName() + "] on stream [" + next.streamId() +
+            "] interleaved in the header block of stream [" + headers.streamId() + "]");
+      }
+
+      accumulator.write(headerBlockFragment);
+      if (accumulator.size() > maxHeaderListSize) {
+        throw new HeaderListSizeException("Header block exceeds [" + maxHeaderListSize + "] bytes");
+      }
+
+      if ((flags & FLAG_END_HEADERS) != 0) {
+        byte[] finalBlock = accumulator.finalBytes();
+        return new HeadersFrame(headers.streamId(), headers.flags() | FLAG_END_HEADERS, finalBlock, headers.priorityDependency());
+      }
+    }
+  }
+
+  private HTTP2Frame readRawFrame() throws IOException {
+    if (in.readNBytes(buffer, 0, 9) != 9) {
+      throw new EOFException("Connection closed before frame header");
+    }
+
+    int length = ((buffer[0] & 0xFF) << 16) | ((buffer[1] & 0xFF) << 8) | (buffer[2] & 0xFF);
+    int type = buffer[3] & 0xFF;
+    int flags = buffer[4] & 0xFF;
+    int streamId = ((buffer[5] & 0x7F) << 24) | ((buffer[6] & 0xFF) << 16) | ((buffer[7] & 0xFF) << 8) | (buffer[8] & 0xFF);
+
+    if (length > buffer.length) {
+      throw new FrameSizeException("Frame length [" + length + "] exceeds buffer capacity [" + buffer.length + "]");
+    }
+
+    if (in.readNBytes(buffer, 0, length) != length) {
+      throw new EOFException("Connection closed mid-frame; expected [" + length + "] bytes");
+    }
+
+    return switch (type) {
+      case FRAME_TYPE_DATA -> {
+        // RFC 9113 §6.1: DATA frames may be padded.
+        if ((flags & FLAG_PADDED) != 0) {
+          int padLen = buffer[0] & 0xFF;
+          int dataLen = length - 1 - padLen;
+          // RFC 9113 §6.1: "If the length of the padding is the length of the frame payload or greater, the
+          // recipient MUST treat this as a connection error (Section 5.4.1) of type PROTOCOL_ERROR."
+          if (dataLen < 0) {
+            throw new ProtocolException("DATA pad length [" + padLen + "] exceeds frame payload length [" + length + "]");
+          }
+          yield new DataFrame(streamId, flags, copyOfRange(buffer, 1, 1 + dataLen), length);
+        }
+        yield new DataFrame(streamId, flags, copyOf(buffer, length), length);
+      }
+      case FRAME_TYPE_HEADERS -> {
+        // RFC 9113 §6.2: HEADERS frame may have PADDED and/or PRIORITY prefix bytes before the fragment.
+        int hdrOff = 0;
+        int hdrEnd = length;
+        if ((flags & FLAG_PADDED) != 0) {
+          int padLen = buffer[hdrOff] & 0xFF;
+          hdrOff++;
+          hdrEnd -= padLen;
+          // RFC 9113 §6.2: invalid pad length is a connection error PROTOCOL_ERROR.
+          if (hdrEnd < hdrOff) {
+            throw new ProtocolException("HEADERS pad length exceeds frame payload length [" + length + "]");
+          }
+        }
+        int priorityDependency = -1;
+        if ((flags & FLAG_PRIORITY) != 0) {
+          // RFC 9113 §6.2: exclusive bit + 31-bit stream dependency (4 bytes) + weight (1 byte).
+          if (hdrEnd - hdrOff < 5) {
+            throw new FrameSizeException("HEADERS with the PRIORITY flag requires 5 priority bytes; got [" + (hdrEnd - hdrOff) + "]");
+          }
+          priorityDependency = ((buffer[hdrOff] & 0x7F) << 24) | ((buffer[hdrOff + 1] & 0xFF) << 16) |
+              ((buffer[hdrOff + 2] & 0xFF) << 8) | (buffer[hdrOff + 3] & 0xFF);
+          hdrOff += 5;
+        }
+        yield new HeadersFrame(streamId, flags, copyOfRange(buffer, hdrOff, hdrEnd), priorityDependency);
+      }
+      case FRAME_TYPE_PRIORITY -> {
+        if (length != 5) throw new FrameSizeException("PRIORITY payload must be 5; got [" + length + "]");
+        // RFC 9113 §6.3: PRIORITY must have a non-zero stream ID.
+        if (streamId == 0) throw new ProtocolException("PRIORITY frame with stream ID 0");
+        int dependency = ((buffer[0] & 0x7F) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
+        yield new PriorityFrame(streamId, dependency);
+      }
+      case FRAME_TYPE_RST_STREAM -> {
+        if (length != 4) throw new FrameSizeException("RST_STREAM payload must be 4; got [" + length + "]");
+        // RFC 9113 §6.4: RST_STREAM must have a non-zero stream ID.
+        if (streamId == 0) throw new ProtocolException("RST_STREAM frame with stream ID 0");
+        int code = ((buffer[0] & 0xFF) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
+        yield new RSTStreamFrame(streamId, code);
+      }
+      case FRAME_TYPE_SETTINGS -> {
+        // RFC 9113 §6.5: SETTINGS must have stream ID 0.
+        if (streamId != 0) throw new ProtocolException("SETTINGS frame with non-zero stream ID [" + streamId + "]");
+        if ((flags & FLAG_ACK) != 0 && length != 0)
+          throw new FrameSizeException("SETTINGS ACK must have empty payload");
+        if (length % 6 != 0) throw new FrameSizeException("SETTINGS payload length [" + length + "] not multiple of 6");
+        yield new SettingsFrame(flags, copyOf(buffer, length));
+      }
+      case FRAME_TYPE_PUSH_PROMISE -> {
+        int promised = ((buffer[0] & 0x7F) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
+        yield new PushPromiseFrame(streamId, flags, promised, copyOfRange(buffer, 4, length));
+      }
+      case FRAME_TYPE_PING -> {
+        if (length != 8) throw new FrameSizeException("PING payload must be 8; got [" + length + "]");
+        // RFC 9113 §6.7: PING must have stream ID 0.
+        if (streamId != 0) throw new ProtocolException("PING frame with non-zero stream ID [" + streamId + "]");
+        yield new PingFrame(flags, copyOf(buffer, 8));
+      }
+      case FRAME_TYPE_GOAWAY -> {
+        if (length < 8) throw new FrameSizeException("GOAWAY payload must be >= 8; got [" + length + "]");
+        // RFC 9113 §6.8: GOAWAY must have stream ID 0.
+        if (streamId != 0) throw new ProtocolException("GOAWAY frame with non-zero stream ID [" + streamId + "]");
+        int last = ((buffer[0] & 0x7F) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
+        int code = ((buffer[4] & 0xFF) << 24) | ((buffer[5] & 0xFF) << 16) | ((buffer[6] & 0xFF) << 8) | (buffer[7] & 0xFF);
+        yield new GoawayFrame(last, code, copyOfRange(buffer, 8, length));
+      }
+      case FRAME_TYPE_WINDOW_UPDATE -> {
+        if (length != 4) throw new FrameSizeException("WINDOW_UPDATE payload must be 4");
+        int inc = ((buffer[0] & 0x7F) << 24) | ((buffer[1] & 0xFF) << 16) | ((buffer[2] & 0xFF) << 8) | (buffer[3] & 0xFF);
+        yield new WindowUpdateFrame(streamId, inc);
+      }
+      case FRAME_TYPE_CONTINUATION -> {
+        // RFC 9113 §6.10: CONTINUATION must have a non-zero stream ID.
+        if (streamId == 0) throw new ProtocolException("CONTINUATION frame with stream ID 0");
+        yield new ContinuationFrame(streamId, flags, copyOf(buffer, length));
+      }
+      default -> new UnknownFrame(streamId, flags, type, copyOf(buffer, length));
+    };
+  }
+
+  /**
+   * Thrown when the frame reader detects a FRAME_SIZE_ERROR condition (RFC 9113 §6, §7). The connection handler must
+   * respond with GOAWAY(FRAME_SIZE_ERROR).
+   */
+  public static class FrameSizeException extends IOException {
+    public FrameSizeException(String message) {
+      super(message);
+    }
+  }
+
+  /**
+   * Thrown when a cumulative header block exceeds the advertised SETTINGS_MAX_HEADER_LIST_SIZE while being assembled
+   * (CVE-2024-27316 guard). The connection handler must respond with GOAWAY(ENHANCE_YOUR_CALM).
+   */
+  public static class HeaderListSizeException extends IOException {
+    public HeaderListSizeException(String message) {
+      super(message);
+    }
+  }
+
+  /**
+   * Thrown when the frame reader detects a PROTOCOL_ERROR condition (RFC 9113 §5.4.1, §7). The connection handler must
+   * respond with GOAWAY(PROTOCOL_ERROR).
+   */
+  public static class ProtocolException extends IOException {
+    public ProtocolException(String message) {
+      super(message);
+    }
+  }
+}

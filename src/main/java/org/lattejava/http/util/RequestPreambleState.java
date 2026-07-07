@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2025, FusionAuth, All Rights Reserved
+ * Copyright (c) 2022-2026, FusionAuth, All Rights Reserved
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,8 @@ package org.lattejava.http.util;
 import static org.lattejava.http.util.HTTPTools.*;
 
 /**
- * Finite state machine parser for an HTTP 1.1 request preamble. This is the start-line and headers.
+ * Finite state machine parser for the start-line (request line) of an HTTP/1.1 request. The header block is parsed
+ * separately by {@link HTTPFieldParser}.
  *
  * @author Brian Pontarelli
  */
@@ -134,132 +135,8 @@ public enum RequestPreambleState {
   RequestLF {
     @Override
     public RequestPreambleState next(byte ch) {
-      if (ch == '\r') {
-        return PreambleCR;
-      } else if (HTTPTools.isTokenCharacter(ch)) {
-        return HeaderName;
-      }
-
-      throw makeParseException(ch, this);
-    }
-
-    @Override
-    public boolean store() {
-      return false;
-    }
-  },
-
-  HeaderName {
-    @Override
-    public RequestPreambleState next(byte ch) {
-      if (HTTPTools.isTokenCharacter(ch)) {
-        return HeaderName;
-      } else if (ch == ':') {
-        return HeaderColon;
-      }
-
-      throw makeParseException(ch, this);
-    }
-
-    @Override
-    public boolean store() {
-      return true;
-    }
-  },
-
-  HeaderColon {
-    @Override
-    public RequestPreambleState next(byte ch) {
-      if (ch == ' ') {
-        return HeaderColon; // Re-using this state because HeaderSP would be the same
-      } else if (ch == '\r') {
-        return HeaderCR; // Empty header
-      } else if (HTTPTools.isValueCharacter(ch)) {
-        return HeaderValue;
-      }
-
-      // Otherwise the byte is invalid for a field value (e.g. bare LF, NUL, or other control). Reject rather than fall through, or a
-      // header like "X: \nY: Z" would store LF as the first byte of the value — a smuggling-adjacent primitive.
-      throw makeParseException(ch, this);
-    }
-
-    @Override
-    public boolean store() {
-      return false;
-    }
-  },
-
-  HeaderValue {
-    @Override
-    public RequestPreambleState next(byte ch) {
-      if (ch == '\r') {
-        return HeaderCR;
-      } else if (HTTPTools.isValueCharacter(ch)) {
-        return HeaderValue;
-      }
-
-      throw makeParseException(ch, this);
-    }
-
-    @Override
-    public boolean store() {
-      return true;
-    }
-  },
-
-  HeaderCR {
-    @Override
-    public RequestPreambleState next(byte ch) {
-      if (ch == '\n') {
-        return HeaderLF;
-      }
-
-      throw makeParseException(ch, this);
-    }
-
-    @Override
-    public boolean store() {
-      return false;
-    }
-  },
-
-  HeaderLF {
-    @Override
-    public RequestPreambleState next(byte ch) {
-      if (ch == '\r') {
-        return PreambleCR;
-      } else if (HTTPTools.isTokenCharacter(ch)) {
-        return HeaderName;
-      }
-
-      throw makeParseException(ch, this);
-    }
-
-    @Override
-    public boolean store() {
-      return false;
-    }
-  },
-
-  PreambleCR {
-    @Override
-    public RequestPreambleState next(byte ch) {
-      if (ch == '\n') {
-        return Complete;
-      }
-
-      throw makeParseException(ch, this);
-    }
-
-    @Override
-    public boolean store() {
-      return false;
-    }
-  },
-
-  Complete {
-    @Override
-    public RequestPreambleState next(byte ch) {
+      // Terminal: the request line is complete. parseRequestPreamble hands the header block to HTTPFieldParser and never
+      // calls next() on this state.
       return null;
     }
 
