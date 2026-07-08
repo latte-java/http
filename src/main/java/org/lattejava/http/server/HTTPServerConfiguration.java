@@ -392,6 +392,19 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
+  public HTTPServerConfiguration withListeners(HTTPListenerConfiguration... listeners) {
+    Objects.requireNonNull(listeners, "You cannot add a null array of HTTPListenerConfigurations");
+    for (HTTPListenerConfiguration listener : listeners) {
+      Objects.requireNonNull(listener, "You cannot add a null HTTPListenerConfiguration");
+      this.listeners.add(listener);
+    }
+    return this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
   public HTTPServerConfiguration withMaxPendingSocketConnections(int maxPendingSocketConnections) {
     if (maxPendingSocketConnections < 25) {
       throw new IllegalArgumentException("The minimum pending socket connections must be greater than or equal to 25");

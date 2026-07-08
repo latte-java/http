@@ -137,7 +137,7 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
-   * Adds a listener configuration for the server. This will listen on the address and port of the configuration but
+   * Adds a listener configuration for the server. This will listen on the address and port of the listener, but
    * will share the thread pool of the server.
    *
    * @param listener The listener.
@@ -145,6 +145,18 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withListener(HTTPListenerConfiguration listener) {
     configuration().withListener(listener);
+    return (T) this;
+  }
+
+  /**
+   * Adds one or more listener configurations for the server. This will listen on the address and port of the
+   * listeners, but will share the thread pool of the server.
+   *
+   * @param listeners The listeners.
+   * @return This.
+   */
+  default T withListeners(HTTPListenerConfiguration... listeners) {
+    configuration().withListeners(listeners);
     return (T) this;
   }
 
