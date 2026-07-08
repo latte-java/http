@@ -19,6 +19,7 @@ import module java.base;
 import module org.lattejava.http;
 import module org.testng;
 
+import org.lattejava.http.ParseException;
 import org.lattejava.http.io.PushbackInputStream;
 import org.lattejava.http.tests.util.*;
 
@@ -29,7 +30,6 @@ import static org.testng.Assert.*;
  */
 @Test
 public class ChunkedInputStreamTest {
-  @SuppressWarnings("GrazieInspection")
   @Test
   public void chunkExtensions() throws Exception {
     // Test extensions
@@ -233,6 +233,27 @@ public class ChunkedInputStreamTest {
             """)
         // If we correctly read to the end of the InputStream we should not have any bytes left over in the PushbackInputStream
         .assertLeftOverBytes(0);
+  }
+
+  @Test(timeOut = 5000)
+  public void truncatedBodyThrowsInsteadOfLooping() {
+    // The client declares a 5-byte chunk but the stream reaches EOF after only 3 bytes and never sends the terminating
+    // 0\r\n\r\n. A ByteArrayInputStream returns -1 on every read once drained — the same behavior as a socket whose peer
+    // half-closed the write side. Before the fix the main read loop never checks for delegate.read() == -1, so it spins
+    // forever calling read() and burning 100% CPU (the timeOut guard turns that hang into a test failure). After the fix a
+    // truncated body is rejected as a parse error, mirroring the EOF guard already present in parseTrailers().
+    var body = "5\r\nabc";
+    var pushback = new PushbackInputStream(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), null);
+    var inputStream = new ChunkedInputStream(pushback, 1024, 1024 * 1024);
+
+    try {
+      inputStream.readAllBytes();
+      fail("Expected ParseException for a truncated chunked body.");
+    } catch (ParseException expected) {
+      assertTrue(expected.getMessage().contains("Unexpected end of stream"), "Unexpected message: " + expected.getMessage());
+    } catch (IOException e) {
+      fail("Expected ParseException, not IOException: " + e.getMessage());
+    }
   }
 
   private Builder withBody(String body) {

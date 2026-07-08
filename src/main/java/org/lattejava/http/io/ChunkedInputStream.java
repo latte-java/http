@@ -79,6 +79,13 @@ public class ChunkedInputStream extends InputStream {
       if (bufferIndex >= bufferLength) {
         bufferIndex = 0;
         bufferLength = delegate.read(buffer);
+
+        // The delegate hit EOF before the terminating 0-length chunk. A truncated chunked body is a parse error, not a
+        // clean end-of-message; without this guard the loop would re-read the exhausted delegate forever (delegate.read
+        // keeps returning -1), spinning at 100% CPU. Mirrors the EOF guard in parseTrailers().
+        if (bufferLength < 0) {
+          throw new ParseException("Unexpected end of stream while reading a chunked body.");
+        }
       }
 
       // Process the buffer
