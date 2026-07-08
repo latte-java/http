@@ -42,8 +42,9 @@ public class TransferEncodingSmugglingTest extends BaseSocketTest {
 
   @Test
   public void chunked_with_tab_accepted() throws Exception {
-    // After trimming the tab, the TE value is exactly "chunked" — accept and process as a normal chunked request. Uses a hand-written
-    // zero-chunk body so this test doesn't depend on BaseSocketTest's case-sensitive "Transfer-Encoding: chunked" substring match.
+    // HTTPFieldParser strips the trailing HTAB (OWS), leaving the TE value exactly "chunked" — accept and process as a normal chunked
+    // request. Uses a hand-written zero-chunk body so this test doesn't depend on BaseSocketTest's case-sensitive
+    // "Transfer-Encoding: chunked" substring match.
     withRequest("""
         POST / HTTP/1.1\r
         Host: cyberdyne-systems.com\r
@@ -63,8 +64,9 @@ public class TransferEncodingSmugglingTest extends BaseSocketTest {
 
   @Test
   public void chunked_with_trailing_space_accepted() throws Exception {
-    // Before this fix, "chunked " (trailing space) would bypass the exact-match check in HTTPRequest.isChunked, leaving the body unread and
-    // desyncing the socket on keep-alive. The fix trims the TE value before comparison and normalizes the stored value to "chunked".
+    // "chunked " (trailing space) once bypassed the exact-match check in HTTPRequest.isChunked, leaving the body unread and desyncing the
+    // socket on keep-alive. HTTPFieldParser now strips the OWS surrounding every field value (RFC 9112 §5), so the stored value is
+    // exactly "chunked".
     withRequest("""
         POST / HTTP/1.1\r
         Host: cyberdyne-systems.com\r

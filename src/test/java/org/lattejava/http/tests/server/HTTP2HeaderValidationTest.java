@@ -14,9 +14,10 @@ import org.lattejava.http.server.internal.h2.HPACKEncoder;
 import static org.testng.Assert.*;
 
 /**
- * Unit tests for HPACK pseudo-header / connection-specific-header validation per RFC 9113 §8.1.2.* Each test sends a
- * hand-crafted HEADERS frame over a raw h2c prior-knowledge socket and asserts that the server responds with
- * RST_STREAM(PROTOCOL_ERROR) for violations, or with a 200 response for the content-length sanity case.
+ * Unit tests for HPACK pseudo-header / connection-specific-header validation per RFC 9113 §8.1.2.* and the field
+ * name/value character rules of §8.2.1. Each test sends a hand-crafted HEADERS frame over a raw h2c prior-knowledge
+ * socket and asserts that the server responds with RST_STREAM(PROTOCOL_ERROR) for violations, or with a 200 response
+ * for the positive sanity cases.
  *
  * @author Daniel DeGroff
  */
@@ -56,7 +57,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void uppercase_header_name_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -81,7 +82,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void unknown_pseudo_header_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -110,7 +111,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void response_pseudo_header_in_request_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -138,7 +139,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void pseudo_header_after_regular_header_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -169,7 +170,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void connection_header_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -192,7 +193,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void te_gzip_header_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -215,7 +216,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void te_trailers_is_allowed() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -239,7 +240,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void missing_method_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -266,7 +267,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void empty_path_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -293,7 +294,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void duplicated_method_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();
@@ -311,6 +312,166 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
         sock.setSoTimeout(5000);
         int errorCode = readUntilRstStream(sock.getInputStream());
         assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for duplicated :method; got: " + errorCode);
+      }
+    }
+  }
+
+  // ─── §8.2.1: field name and value character rules ───────────────────────────────────────────────
+
+  /**
+   * RFC 9113 §8.2.1 — a field value MUST NOT start with SP or HTAB. HPACK values are length-prefixed, so there is no
+   * OWS to strip; edge whitespace is malformed and must trigger RST_STREAM(PROTOCOL_ERROR), not be trimmed.
+   */
+  @Test
+  public void value_with_leading_space_triggers_rst_stream() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        byte[] block = hpackWith(List.of(new HPACKDynamicTable.HeaderField("x-padded", " value")));
+        writeFrameHeader(out, block.length, 0x1, 0x4 | 0x1, 1);
+        out.write(block);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for leading-space value; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.2.1 — a field value MUST NOT end with SP or HTAB.
+   */
+  @Test
+  public void value_with_trailing_tab_triggers_rst_stream() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        byte[] block = hpackWith(List.of(new HPACKDynamicTable.HeaderField("x-padded", "value\t")));
+        writeFrameHeader(out, block.length, 0x1, 0x4 | 0x1, 1);
+        out.write(block);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for trailing-tab value; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.2.1 — a field value MUST NOT contain CR or LF at any position. This is the header-injection primitive
+   * for anything downstream that logs fields or re-serializes them to HTTP/1.1.
+   */
+  @Test
+  public void value_with_embedded_crlf_triggers_rst_stream() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        byte[] block = hpackWith(List.of(new HPACKDynamicTable.HeaderField("x-evil", "a\r\nx-injected: 1")));
+        writeFrameHeader(out, block.length, 0x1, 0x4 | 0x1, 1);
+        out.write(block);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for embedded CRLF in value; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.2.1 — a field value MUST NOT contain NUL at any position.
+   */
+  @Test
+  public void value_with_embedded_nul_triggers_rst_stream() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        byte[] block = hpackWith(List.of(new HPACKDynamicTable.HeaderField("x-evil", "a\u0000b")));
+        writeFrameHeader(out, block.length, 0x1, 0x4 | 0x1, 1);
+        out.write(block);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for embedded NUL in value; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.2.1 sanity check — whitespace strictly inside a value is legal and the request MUST succeed. Guards
+   * the edge-whitespace check against over-rejection.
+   */
+  @Test
+  public void value_with_internal_whitespace_is_allowed() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (req, res) -> res.setStatus("a  b\tc".equals(req.getHeader("x-ok")) ? 200 : 500);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        byte[] block = hpackWith(List.of(new HPACKDynamicTable.HeaderField("x-ok", "a  b\tc")));
+        writeFrameHeader(out, block.length, 0x1, 0x4 | 0x1, 1);
+        out.write(block);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int streamId = readUntilResponseHeaders(sock.getInputStream());
+        assertEquals(streamId, 1, "Expected 200 response on stream 1 for internal whitespace in value; got stream: " + streamId);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.2.1 — field names must be valid tokens (RFC 9110 §5.1). HPACK can encode arbitrary bytes in the name
+   * string, so a non-token character (here an SP) must trigger RST_STREAM(PROTOCOL_ERROR).
+   */
+  @Test
+  public void name_with_invalid_token_character_triggers_rst_stream() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        byte[] block = hpackWith(List.of(new HPACKDynamicTable.HeaderField("bad name", "x")));
+        writeFrameHeader(out, block.length, 0x1, 0x4 | 0x1, 1);
+        out.write(block);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for non-token name; got: " + errorCode);
+      }
+    }
+  }
+
+  /**
+   * RFC 9113 §8.2.1 — a zero-length field name is not a token and must trigger RST_STREAM(PROTOCOL_ERROR).
+   */
+  @Test
+  public void empty_header_name_triggers_rst_stream() throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
+    try (var server = makeServer("http", handler, listener).start()) {
+      try (var sock = openH2CConnection(server.getActualPort())) {
+        var out = sock.getOutputStream();
+        byte[] block = hpackWith(List.of(new HPACKDynamicTable.HeaderField("", "x")));
+        writeFrameHeader(out, block.length, 0x1, 0x4 | 0x1, 1);
+        out.write(block);
+        out.flush();
+
+        sock.setSoTimeout(5000);
+        int errorCode = readUntilRstStream(sock.getInputStream());
+        assertEquals(errorCode, 0x1, "Expected RST_STREAM(PROTOCOL_ERROR=0x1) for empty header name; got: " + errorCode);
       }
     }
   }
@@ -366,7 +527,7 @@ public class HTTP2HeaderValidationTest extends BaseHTTP2RawTest {
   @Test
   public void content_length_over_delivery_triggers_rst_stream() throws Exception {
     var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
-    HTTPHandler handler = (req, res) -> res.setStatus(200);
+    HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var server = makeServer("http", handler, listener).start()) {
       try (var sock = openH2CConnection(server.getActualPort())) {
         var out = sock.getOutputStream();

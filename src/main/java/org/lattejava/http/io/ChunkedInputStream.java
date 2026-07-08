@@ -198,7 +198,7 @@ public class ChunkedInputStream extends InputStream {
       trailers = new HashMap<>();
     }
 
-    trailers.computeIfAbsent(lower, k -> new ArrayList<>()).add(value.trim());
+    trailers.computeIfAbsent(lower, _ -> new ArrayList<>()).add(value);
   }
 
   private void parseTrailers() throws IOException {

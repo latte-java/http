@@ -16,11 +16,13 @@ public class RequestPreambleConformanceTest extends BaseSocketTest {
   @Test
   public void bare_cr_in_header_value_rejected() throws Exception {
     // RFC 9112 §5: bare CR (CR not followed by LF) inside a header value MUST be rejected. The field-value state only accepts \r as a transition to FieldCR, and FieldCR only accepts \n.
-    withRequest("GET / HTTP/1.1\r\n" +
-        "Host: cyberdyne-systems.com\r\n" +
-        "X: bad\rmore\r\n" +
-        "Content-Length: 0\r\n" +
-        "\r\n"
+    withRequest("""
+        GET / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        X: bad\rmore\r
+        Content-Length: 0\r
+        \r
+        """
     ).expectResponse("""
         HTTP/1.1 400 \r
         connection: close\r
@@ -43,6 +45,32 @@ public class RequestPreambleConformanceTest extends BaseSocketTest {
         \r
         """
     ).expectResponseSubstring("HTTP/1.1 200 ");
+  }
+
+  @Test
+  public void header_value_surrounding_ows_stripped() throws Exception {
+    // RFC 9112 §5: field-line = field-name ":" OWS field-value OWS — the surrounding OWS is not part of the value. The handler-side
+    // assertions prove stored values arrive with edge SP/HTAB stripped (internal whitespace kept), including the Transfer-Encoding
+    // value, whose trailing space previously left the body unread and desynced the keep-alive socket.
+    withRequest("""
+        POST / HTTP/1.1\r
+        Host: cyberdyne-systems.com\r
+        X-Padded: \ta  b \t\r
+        Transfer-Encoding: chunked \r
+        \r
+        0\r
+        \r
+        """
+    ).withHandler((req, res) -> {
+      req.getInputStream().readAllBytes();
+      boolean trimmed = "a  b".equals(req.getHeader("X-Padded")) && "chunked".equals(req.getTransferEncoding());
+      res.setStatus(trimmed ? 200 : 500);
+    }).expectResponse("""
+        HTTP/1.1 200 \r
+        connection: keep-alive\r
+        content-length: 0\r
+        \r
+        """);
   }
 
   @Test

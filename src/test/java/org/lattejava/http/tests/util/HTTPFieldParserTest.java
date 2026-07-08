@@ -40,7 +40,7 @@ public class HTTPFieldParserTest {
   public void isCompleteAfterBlankLine() {
     byte[] bytes = "Host: example.org\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
     var parser = new HTTPFieldParser();
-    int consumed = parser.feed(bytes, 0, bytes.length, (n, v) -> {
+    int consumed = parser.feed(bytes, 0, bytes.length, (_, _) -> {
     });
     assertTrue(parser.isComplete());
     assertEquals(consumed, bytes.length);
@@ -61,16 +61,37 @@ public class HTTPFieldParserTest {
   }
 
   @Test
-  public void skipsOptionalLeadingSpaceButKeepsTrailing() {
+  public void stripsWhitespaceAroundValue() {
+    // RFC 9112 §5: field-line = field-name ":" OWS field-value OWS — the surrounding OWS is not part of the value.
     byte[] bytes = "X-A:    spaced   \r\n\r\n".getBytes(StandardCharsets.US_ASCII);
-    assertEquals(collect(bytes, bytes.length), List.of("X-A=spaced   "));
+    assertEquals(collect(bytes, bytes.length), List.of("X-A=spaced"));
   }
 
   @Test
-  public void leadingHorizontalTabBeginsValue() {
-    // Only SP is optional whitespace after the colon; a leading HTAB is a value character and is kept.
-    byte[] bytes = "X-A:\tvalue\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
-    assertEquals(collect(bytes, bytes.length), List.of("X-A=\tvalue"));
+  public void stripsLeadingAndTrailingHorizontalTabs() {
+    // OWS = *( SP / HTAB ), so tabs around the value are stripped just like spaces.
+    byte[] bytes = "X-A:\tvalue\t\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    assertEquals(collect(bytes, bytes.length), List.of("X-A=value"));
+  }
+
+  @Test
+  public void preservesInternalWhitespace() {
+    byte[] bytes = "X-A: a  b\tc\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    assertEquals(collect(bytes, bytes.length), List.of("X-A=a  b\tc"));
+  }
+
+  @Test
+  public void stripsTrailingWhitespaceAcrossTinyFeeds() {
+    // The trailing OWS must be stripped even when every byte arrives in its own feed call.
+    byte[] bytes = "X-A: a b \t\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    assertEquals(collect(bytes, 1), List.of("X-A=a b"));
+  }
+
+  @Test
+  public void dropsWhitespaceOnlyValues() {
+    // A value that is nothing but OWS is an empty value, and empty values are not emitted.
+    byte[] bytes = "X-WS:  \t \r\nX-Full: y\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    assertEquals(collect(bytes, bytes.length), List.of("X-Full=y"));
   }
 
   @Test
@@ -82,14 +103,14 @@ public class HTTPFieldParserTest {
   @Test(expectedExceptions = ParseException.class)
   public void rejectsNonTokenInName() {
     byte[] bytes = "Bad Name: x\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
-    new HTTPFieldParser().feed(bytes, 0, bytes.length, (n, v) -> {
+    new HTTPFieldParser().feed(bytes, 0, bytes.length, (_, _) -> {
     });
   }
 
   @Test(expectedExceptions = ParseException.class)
   public void rejectsControlByteInValue() {
     byte[] bytes = "X-A: ab\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
-    new HTTPFieldParser().feed(bytes, 0, bytes.length, (n, v) -> {
+    new HTTPFieldParser().feed(bytes, 0, bytes.length, (_, _) -> {
     });
   }
 }

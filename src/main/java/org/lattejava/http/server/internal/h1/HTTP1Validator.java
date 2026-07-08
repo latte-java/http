@@ -71,9 +71,9 @@ public final class HTTP1Validator {
 
     // Validate Transfer-Encoding and Content-Length per RFC 9112 §6.1 (see docs/design/2026-04-20-audit.md Vuln 1). This server only
     // supports the "chunked" transfer coding, so anything else must be rejected rather than silently discarded — mishandling TE is the
-    // classic request-smuggling primitive. Specifically we reject: multiple Transfer-Encoding headers, TE values that aren't exactly
-    // "chunked" after trimming (e.g. "identity", "chunked, identity", "xchunked", "chunked " with trailing whitespace), and the CL+TE
-    // coexistence that a front-end proxy might resolve differently than we do.
+    // classic request-smuggling primitive. Specifically we reject: multiple Transfer-Encoding headers, TE values that aren't "chunked"
+    // (e.g. "identity", "chunked, identity", "xchunked"), and the CL+TE coexistence that a front-end proxy might resolve differently
+    // than we do. Header values arrive with surrounding OWS already stripped by HTTPFieldParser, so no trimming is needed here.
     var transferEncodingHeaders = request.getHeaders(HTTPValues.Headers.TransferEncoding);
     if (transferEncodingHeaders != null && !transferEncodingHeaders.isEmpty()) {
       if (transferEncodingHeaders.size() != 1) {
@@ -84,10 +84,10 @@ public final class HTTP1Validator {
         return HTTPValues.Status.BadRequest;
       }
 
-      String rawTransferEncoding = transferEncodingHeaders.getFirst();
-      if (!HTTPValues.TransferEncodings.Chunked.equalsIgnoreCase(rawTransferEncoding.trim())) {
+      String transferEncoding = transferEncodingHeaders.getFirst();
+      if (!HTTPValues.TransferEncodings.Chunked.equalsIgnoreCase(transferEncoding)) {
         if (debugEnabled) {
-          logger.log(Level.DEBUG, "Invalid request. Unsupported Transfer-Encoding. [{0}]", rawTransferEncoding);
+          logger.log(Level.DEBUG, "Invalid request. Unsupported Transfer-Encoding. [{0}]", transferEncoding);
         }
 
         return HTTPValues.Status.BadRequest;
@@ -95,16 +95,10 @@ public final class HTTP1Validator {
 
       if (request.getHeader(HTTPValues.Headers.ContentLength) != null) {
         if (debugEnabled) {
-          logger.log(Level.DEBUG, "Invalid request. Both Transfer-Encoding and Content-Length present. [{0}] [{1}]", rawTransferEncoding, request.getHeader(HTTPValues.Headers.ContentLength));
+          logger.log(Level.DEBUG, "Invalid request. Both Transfer-Encoding and Content-Length present. [{0}] [{1}]", transferEncoding, request.getHeader(HTTPValues.Headers.ContentLength));
         }
 
         return HTTPValues.Status.BadRequest;
-      }
-
-      // Normalize the stored value so downstream code (HTTPRequest.isChunked, ChunkedInputStream routing) sees an exact match regardless
-      // of incidental whitespace or case in the original header.
-      if (!HTTPValues.TransferEncodings.Chunked.equals(rawTransferEncoding)) {
-        request.setHeader(HTTPValues.Headers.TransferEncoding, HTTPValues.TransferEncodings.Chunked);
       }
     } else {
       var requestedContentLengthHeaders = request.getHeaders(HTTPValues.Headers.ContentLength);

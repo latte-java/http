@@ -72,8 +72,8 @@ public final class HTTP2Tools {
   }
 
   /**
-   * Validates the decoded header list per RFC 9113 §8.1.2.*. Returns {@code true} if valid. On any violation returns
-   * {@code false}; the caller is responsible for emitting RST_STREAM(PROTOCOL_ERROR).
+   * Validates the decoded header list per RFC 9113 §8.1.2.* and §8.2.1. Returns {@code true} if valid. On any
+   * violation returns {@code false}; the caller is responsible for emitting RST_STREAM(PROTOCOL_ERROR).
    */
   public static boolean validateHeaders(List<HPACKDynamicTable.HeaderField> fields, boolean isTrailer) {
     boolean seenRegularHeader = false;
@@ -82,10 +82,35 @@ public final class HTTP2Tools {
     for (var f : fields) {
       String name = f.name();
 
+      // §8.2.1: a field name must be a non-empty token (HPACK happily encodes a zero-length name string).
+      if (name.isEmpty()) {
+        return false;
+      }
+
       // §8.1.2/1: header names MUST be lowercase.
       for (int i = 0; i < name.length(); i++) {
         char c = name.charAt(i);
         if (c >= 'A' && c <= 'Z') {
+          return false;
+        }
+      }
+
+      // §8.2.1: field values MUST NOT contain NUL, CR, or LF at any position, and MUST NOT start or end with SP or
+      // HTAB. HPACK strings are length-prefixed — there is no OWS grammar in the binary encoding, so edge whitespace
+      // cannot be produced by a compliant sender and is treated as malformed rather than trimmed. Embedded CR/LF/NUL
+      // is the header-injection primitive for anything that logs fields or re-serializes them to HTTP/1.1.
+      String value = f.value();
+      int valueLength = value.length();
+      if (valueLength > 0) {
+        char first = value.charAt(0);
+        char last = value.charAt(valueLength - 1);
+        if (first == ' ' || first == '\t' || last == ' ' || last == '\t') {
+          return false;
+        }
+      }
+      for (int i = 0; i < valueLength; i++) {
+        char c = value.charAt(i);
+        if (c == 0 || c == '\r' || c == '\n') {
           return false;
         }
       }
@@ -110,6 +135,14 @@ public final class HTTP2Tools {
         }
       } else {
         seenRegularHeader = true;
+        // §8.2.1: field names must be valid tokens (RFC 9110 §5.1) — HPACK can encode arbitrary bytes in the name
+        // string. Pseudo-headers are exempt (":" is not a token character); they are validated by whitelist above.
+        for (int i = 0; i < name.length(); i++) {
+          char c = name.charAt(i);
+          if (c > '~' || !HTTPTools.isTokenCharacter((byte) c)) {
+            return false;
+          }
+        }
         // §8.1.2.2/1: connection-specific headers are forbidden.
         if (HTTPValues.Headers.ConnectionSpecificHeaders.contains(name)) {
           return false;

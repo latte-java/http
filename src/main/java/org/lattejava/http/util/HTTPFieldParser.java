@@ -8,14 +8,15 @@ import module java.base;
 
 /**
  * Resumable finite-state-machine parser for an HTTP/1.1 field block — a sequence of
- * {@code field-name ":" OWS field-value CRLF} lines terminated by a bare CRLF. Shared by the request-header,
+ * {@code field-name ":" OWS field-value OWS CRLF} lines terminated by a bare CRLF. Shared by the request-header,
  * chunked-trailer, and multipart part-header parse paths.
  *
  * <p>Implements the HTTP/1.1 field-line grammar (RFC 9110 §5): field names are tokens
  * ({@link HTTPTools#isTokenCharacter}) and field values are sequences of field-vchars
- * ({@link HTTPTools#isValueCharacter}). A field is emitted to the {@link FieldConsumer} once per non-empty value, at
- * the value-to-CR transition; a field with an empty value never enters the {@code Value} state and is therefore
- * dropped, mirroring the request-preamble parser.
+ * ({@link HTTPTools#isValueCharacter}). The OWS (any mix of SP and HTAB) surrounding the value is not part of the
+ * value and is stripped before emission. A field is emitted to the {@link FieldConsumer} once per non-empty value, at
+ * the value-to-CR transition; a field whose value is empty (or nothing but OWS) never enters the {@code Value} state
+ * and is therefore dropped, mirroring the request-preamble parser.
  *
  * <p>The parser is fed buffer slices via {@link #feed}; its state and partial name/value accumulators persist across
  * calls, so a field — or the whole block — may span any number of feeds. The caller owns the buffer and the read loop.
@@ -58,9 +59,16 @@ public final class HTTPFieldParser {
       if (next != current) {
         // The only transition out of Value is Value -> FieldCR, so this fires exactly once per non-empty field.
         if (current == FieldState.Value) {
+          // Strip trailing OWS — it is not part of the value. The value cannot become empty here: leading OWS never
+          // enters the buffer (the Colon state skips it), so the first byte is always a non-OWS value character.
+          int trimmedLength = valueLength;
+          while (valueBuffer[trimmedLength - 1] == ' ' || valueBuffer[trimmedLength - 1] == '\t') {
+            trimmedLength--;
+          }
+
           consumer.field(
               new String(nameBuffer, 0, nameLength, StandardCharsets.UTF_8),
-              new String(valueBuffer, 0, valueLength, StandardCharsets.UTF_8)
+              new String(valueBuffer, 0, trimmedLength, StandardCharsets.UTF_8)
           );
         }
 
@@ -134,8 +142,8 @@ public final class HTTPFieldParser {
     Colon {
       @Override
       FieldState next(byte ch) {
-        // Only SP is optional whitespace here; a leading HTAB is a value character and begins the value.
-        if (ch == ' ') {
+        // OWS = *( SP / HTAB ) — both are value characters, so this check must come first for the skip to win.
+        if (ch == ' ' || ch == '\t') {
           return Colon;
         } else if (ch == '\r') {
           return FieldCR;
