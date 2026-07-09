@@ -379,6 +379,40 @@ public class CookieTest extends BaseTest {
     }
   }
 
+  @Test
+  public void roundTripMultipleHTTP2() throws Exception {
+    HTTPHandler handler = (req, res) -> {
+      assertEquals(req.getCookie("request").value, "request-value");
+
+      res.addCookie(new Cookie("response", "response-value").with(c -> c.setSameSite(Cookie.SameSite.Lax)));
+      res.addCookie(new Cookie("response-2", "response-value-2").with(c -> c.setMaxAge(42L)));
+      res.setStatus(200);
+    };
+
+    var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
+    var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
+    try (HTTPServer server = makeServer("https", handler, listener).start()) {
+      URI uri = URI.create("https://local.lattejava.org:" + server.getActualPort() + "/");
+      CookieManager cookieHandler = new CookieManager();
+      var sslContext = SecurityTools.clientContext(rootCertificate);
+      try (var client = HttpClient.newBuilder().sslContext(sslContext).cookieHandler(cookieHandler).version(HttpClient.Version.HTTP_2).build()) {
+        var response = client.send(
+            HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.Cookie, "request=request-value").GET().build(),
+            HttpResponse.BodyHandlers.discarding());
+
+        assertEquals(response.statusCode(), 200);
+        assertEquals(response.version(), HttpClient.Version.HTTP_2);
+        assertTrue(response.headers().allValues("set-cookie").contains("response=response-value; SameSite=Lax"));
+        assertTrue(response.headers().allValues("set-cookie").contains("response-2=response-value-2; Max-Age=42"));
+
+        List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
+        assertEquals(cookies.size(), 2);
+        assertEquals(cookies.stream().filter(c -> c.getName().equals("response")).findFirst().orElseThrow().getValue(), "response-value");
+        assertEquals(cookies.stream().filter(c -> c.getName().equals("response-2")).findFirst().orElseThrow().getValue(), "response-value-2");
+      }
+    }
+  }
+
   @Test(dataProvider = "schemes")
   public void roundTripSingle(String scheme) throws Exception {
     HTTPHandler handler = (req, res) -> {
@@ -405,6 +439,46 @@ public class CookieTest extends BaseTest {
         assertEquals(cookies.getFirst().getName(), "response");
         assertEquals(cookies.getFirst().getValue(), "response-value");
         assertEquals(response.headers().firstValue("Set-Cookie").orElse(null), "response=response-value; SameSite=Lax");
+      }
+    }
+  }
+
+  @Test
+  public void roundTripSingleHTTP2() throws Exception {
+    HTTPHandler handler = (req, res) -> {
+      assertEquals(req.getCookie("request").value, "request-value");
+
+      res.addCookie(new Cookie("response", "response-value").with(c -> {
+        c.setHttpOnly(true);
+        c.setMaxAge(3600L);
+        c.setPath("/");
+        c.setSameSite(Cookie.SameSite.Lax);
+        c.setSecure(true);
+      }));
+      res.setStatus(200);
+    };
+
+    var certChain = new java.security.cert.Certificate[]{certificate, intermediateCertificate};
+    var listener = new HTTPListenerConfiguration(0, certChain, keyPair.getPrivate());
+    try (HTTPServer server = makeServer("https", handler, listener).start()) {
+      URI uri = URI.create("https://local.lattejava.org:" + server.getActualPort() + "/");
+      CookieManager cookieHandler = new CookieManager();
+      var sslContext = SecurityTools.clientContext(rootCertificate);
+      try (var client = HttpClient.newBuilder().sslContext(sslContext).cookieHandler(cookieHandler).version(HttpClient.Version.HTTP_2).build()) {
+        var response = client.send(
+            HttpRequest.newBuilder().uri(uri).header(HTTPValues.Headers.Cookie, "request=request-value").GET().build(),
+            HttpResponse.BodyHandlers.discarding());
+
+        assertEquals(response.statusCode(), 200);
+        assertEquals(response.version(), HttpClient.Version.HTTP_2);
+        // Attribute rendering order is fixed by Cookie.toResponseHeader(): Domain, Expires, HttpOnly, Max-Age, Path, SameSite, Secure.
+        assertEquals(response.headers().firstValue("set-cookie").orElse(null),
+            "response=response-value; HttpOnly; Max-Age=3600; Path=/; SameSite=Lax; Secure");
+
+        List<HttpCookie> cookies = cookieHandler.getCookieStore().get(uri);
+        assertEquals(cookies.size(), 1);
+        assertEquals(cookies.getFirst().getName(), "response");
+        assertEquals(cookies.getFirst().getValue(), "response-value");
       }
     }
   }

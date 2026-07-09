@@ -51,6 +51,13 @@ public class HTTP2OutputProtocol implements HTTPOutputProtocol {
 
   @Override
   public OutputStream commitHeaders(boolean closing, boolean suppressBody) {
+    // Shared response-splitting choke point with h1.1 (see HTTPTools.validateResponse) — reject CR/LF/NUL before
+    // anything is HPACK-encoded. RFC 9113 §8.2.1 forbids these octets in field values, and an unvalidated value
+    // could be smuggled through an h2→h1 translating intermediary. The IAE propagates before any frame is enqueued,
+    // so HTTP2HandlerDelegate's catch-all resets the stream with RST_STREAM(INTERNAL_ERROR) and nothing splittable
+    // reaches the wire.
+    HTTPTools.validateResponse(response);
+
     // Build response HEADERS from the response state at first write/flush.
     List<HPACKDynamicTable.HeaderField> respFields = new ArrayList<>();
     respFields.add(new HPACKDynamicTable.HeaderField(":status", String.valueOf(response.getStatus())));
@@ -63,6 +70,12 @@ public class HTTP2OutputProtocol implements HTTPOutputProtocol {
       for (String v : entry.getValue()) {
         respFields.add(new HPACKDynamicTable.HeaderField(lowerKey, v));
       }
+    }
+
+    // Cookies are appended after regular headers, mirroring the h1.1 preamble order. HPACKEncoder classifies
+    // set-cookie as sensitive and emits it as a literal without indexing (RFC 7541 §6.2.2).
+    for (var cookie : response.getCookies()) {
+      respFields.add(new HPACKDynamicTable.HeaderField("set-cookie", cookie.toResponseHeader()));
     }
 
     // HPACKEncoder mutates a shared dynamic table and is not thread-safe across handler threads.

@@ -13,15 +13,30 @@ import org.lattejava.http.Cookie;
 import static org.testng.Assert.*;
 
 /**
- * Verifies that {@link HTTPTools#writeResponsePreamble} rejects CR, LF, and NUL in every attacker-influenceable
- * response surface, which would otherwise allow HTTP response splitting (see docs/design/2026-04-20-audit.md Vuln 4).
- * Validation is concentrated at the preamble-write choke point rather than the setters so that direct mutation of the
- * internal header map (via {@code getHeadersMap()}) or a Cookie's public fields cannot bypass it.
+ * Verifies that {@link HTTPTools#validateResponse} rejects CR, LF, and NUL in every attacker-influenceable response
+ * surface, which would otherwise allow HTTP response splitting (see docs/design/2026-04-20-audit.md Vuln 4). The
+ * choke point is shared by both protocols: {@link HTTPTools#writeResponsePreamble} calls it before writing the
+ * HTTP/1.1 preamble, and {@code HTTP2OutputProtocol.commitHeaders} calls it before HPACK-encoding the response
+ * HEADERS frame (RFC 9113 §8.2.1 forbids these octets in field values). Validation is concentrated at the
+ * emission choke point rather than the setters so that direct mutation of the internal header map (via
+ * {@code getHeadersMap()}) or a Cookie's public fields cannot bypass it.
  *
  * @author Brian Pontarelli
  */
-@Test
-public class ResponseSplittingTest {
+public class ResponseSplittingTest extends BaseHTTP2RawTest {
+  /**
+   * Minimal HPACK block for a valid GET / request: {@code 0x82} (:method: GET), {@code 0x84} (:path: /), {@code 0x86}
+   * (:scheme: http), then a literal {@code :authority: localhost} (RFC 7541 §6.1/§6.2).
+   */
+  private static final byte[] MINIMAL_HPACK_GET = {
+      (byte) 0x82,                          // :method: GET
+      (byte) 0x84,                          // :path: /
+      (byte) 0x86,                          // :scheme: http
+      // :authority: localhost (literal with indexing, name from static table index 1)
+      (byte) 0x41, 0x09,
+      'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
+  };
+
   @DataProvider(name = "badHeaderNames")
   public static Object[][] badHeaderNames() {
     return new Object[][]{
@@ -45,6 +60,26 @@ public class ResponseSplittingTest {
         {"\n"},
         {"\0"},
     };
+  }
+
+  @Test
+  public void h2RejectsBadCookieValue() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.addCookie(new Cookie("session", "abc\r\nset-cookie: admin=true"));
+      res.setStatus(200);
+    };
+
+    assertH2StreamResetBeforeHeaders(handler);
+  }
+
+  @Test
+  public void h2RejectsBadHeaderValue() throws Exception {
+    HTTPHandler handler = (_, res) -> {
+      res.setHeader("X-Bad", "value\r\nInjected: yes");
+      res.setStatus(200);
+    };
+
+    assertH2StreamResetBeforeHeaders(handler);
   }
 
   @Test
@@ -229,6 +264,30 @@ public class ResponseSplittingTest {
   }
 
   @Test
+  public void validateResponseAcceptsBenignResponse() {
+    var response = new HTTPResponse();
+    response.setStatus(200);
+    response.setStatusMessage("OK");
+    response.setHeader("Content-Type", "text/plain");
+    response.addCookie(new Cookie("session", "abc123"));
+
+    // Must not throw.
+    HTTPTools.validateResponse(response);
+  }
+
+  @Test
+  public void validateResponseRejectsBadCookieValue() {
+    var response = new HTTPResponse();
+    response.addCookie(new Cookie("session", "abc\r\nset-cookie: admin=true"));
+    try {
+      HTTPTools.validateResponse(response);
+      fail("Expected IllegalArgumentException for CRLF in cookie value.");
+    } catch (IllegalArgumentException expected) {
+      assertTrue(expected.getMessage().contains("value of cookie [session]"));
+    }
+  }
+
+  @Test
   public void validatorBenignInputsDoNotThrow() {
     HTTPTools.validateResponseFieldValue("Normal value with spaces and tabs\tand visible chars!~", "response header value");
     HTTPTools.validateResponseFieldValue(null, "response header value");
@@ -250,6 +309,43 @@ public class ResponseSplittingTest {
       fail("Expected IllegalArgumentException for semicolon in cookie attribute.");
     } catch (IllegalArgumentException expected) {
       assertTrue(expected.getMessage().contains("cookie value"));
+    }
+  }
+
+  /**
+   * Runs one h2c request against the handler and asserts that the server resets the stream with
+   * RST_STREAM(INTERNAL_ERROR) before emitting any response HEADERS frame — i.e. validation fired before anything was
+   * HPACK-encoded and nothing splittable reached the wire.
+   */
+  private void assertH2StreamResetBeforeHeaders(HTTPHandler handler) throws Exception {
+    var listener = new HTTPListenerConfiguration(0).withSniffProtocolVersion(true);
+    try (HTTPServer server = makeServer("http", handler, listener).start();
+         Socket sock = openH2CConnection(server.getActualPort())) {
+      var out = sock.getOutputStream();
+      writeFrameHeader(out, MINIMAL_HPACK_GET.length, 0x1, 0x4 | 0x1, 1); // HEADERS, END_HEADERS | END_STREAM
+      out.write(MINIMAL_HPACK_GET);
+      out.flush();
+
+      sock.setSoTimeout(5000);
+      var in = sock.getInputStream();
+      // Drain frames until the first HEADERS (0x1) or RST_STREAM (0x3): whichever arrives first decides the test.
+      while (true) {
+        int b0 = in.read();
+        assertNotEquals(b0, -1, "Connection closed before HEADERS or RST_STREAM arrived");
+        byte[] rest = new byte[8];
+        assertEquals(in.readNBytes(rest, 0, 8), 8, "EOF while reading a frame header");
+        int length = ((b0 & 0xFF) << 16) | ((rest[0] & 0xFF) << 8) | (rest[1] & 0xFF);
+        int type = rest[2] & 0xFF;
+        byte[] payload = in.readNBytes(length);
+        if (type == 0x1) {
+          fail("Server emitted a response HEADERS frame — the invalid value was not rejected before emission.");
+        }
+        if (type == 0x3) {
+          int code = ((payload[0] & 0xFF) << 24) | ((payload[1] & 0xFF) << 16) | ((payload[2] & 0xFF) << 8) | (payload[3] & 0xFF);
+          assertEquals(code, 0x2, "Expected RST_STREAM error code INTERNAL_ERROR (0x2); got: [" + code + "]");
+          return;
+        }
+      }
     }
   }
 }

@@ -525,6 +525,38 @@ public final class HTTPTools {
   }
 
   /**
+   * Validates every attacker-influenceable surface of a response head — status message, header names and values, and
+   * cookie names, values, domains, and paths. This is the single choke point for the HTTP response-splitting defense
+   * (see docs/design/2026-04-20-audit.md Vuln 4), shared by the HTTP/1.1 preamble writer
+   * ({@link #writeResponsePreamble}) and the HTTP/2 HEADERS emission
+   * ({@code HTTP2OutputProtocol.commitHeaders}). Validation is concentrated here rather than in the setters so that
+   * direct mutation of the internal header map (via {@code getHeadersMap()}) or a Cookie's public fields cannot bypass
+   * it. On HTTP/2 the status message is validated even though h2 never emits a reason phrase — one shared method,
+   * fail-fast, identical handler-visible behavior across protocols.
+   *
+   * @param response The response to validate.
+   * @throws IllegalArgumentException If any field contains a character that would enable header injection (CR, LF,
+   *                                  NUL, and additionally {@code ;} in cookie attributes).
+   */
+  public static void validateResponse(HTTPResponse response) {
+    validateResponseFieldValue(response.getStatusMessage(), "status message");
+    for (var entry : response.getHeadersMap().entrySet()) {
+      String name = entry.getKey();
+      validateResponseHeaderName(name);
+      for (String value : entry.getValue()) {
+        validateResponseFieldValue(value, "value of response header [" + name + "]");
+      }
+    }
+
+    for (var cookie : response.getCookies()) {
+      validateResponseHeaderName(cookie.name);
+      validateResponseCookieAttribute(cookie.value, "value of cookie [" + cookie.name + "]");
+      validateResponseCookieAttribute(cookie.domain, "domain of cookie [" + cookie.name + "]");
+      validateResponseCookieAttribute(cookie.path, "path of cookie [" + cookie.name + "]");
+    }
+  }
+
+  /**
    * Validates that a cookie value, domain, or path contains no CR, LF, NUL, or {@code ;}. The first three split the
    * HTTP response; a semicolon would inject an additional cookie attribute (e.g., {@code Secure},
    * {@code Domain=attacker.example}).
@@ -610,26 +642,10 @@ public final class HTTPTools {
    * @throws IOException If the stream threw an exception.
    */
   public static void writeResponsePreamble(HTTPResponse response, OutputStream outputStream) throws IOException {
-    // Single choke point for HTTP response-splitting defense (see docs/design/2026-04-20-audit.md Vuln 4). Every surface that can put
-    // attacker-influenced bytes into the response preamble — status message, header names/values, cookie components — is validated here
-    // before any byte is written. If a bad value is found, the IAE propagates to the worker's catch-all, which resets the response and
-    // returns a clean 500, rather than flushing a partially-written (and splittable) preamble.
-    validateResponseFieldValue(response.getStatusMessage(), "status message");
-    for (var entry : response.getHeadersMap().entrySet()) {
-      String name = entry.getKey();
-      validateResponseHeaderName(name);
-      for (String value : entry.getValue()) {
-        validateResponseFieldValue(value, "value of response header [" + name + "]");
-      }
-    }
-
-    var cookies = response.getCookies();
-    for (var cookie : cookies) {
-      validateResponseHeaderName(cookie.name);
-      validateResponseCookieAttribute(cookie.value, "value of cookie [" + cookie.name + "]");
-      validateResponseCookieAttribute(cookie.domain, "domain of cookie [" + cookie.name + "]");
-      validateResponseCookieAttribute(cookie.path, "path of cookie [" + cookie.name + "]");
-    }
+    // Response-splitting choke point — validate before any byte is written. If a bad value is found, the IAE
+    // propagates to the worker's catch-all, which resets the response and returns a clean 500, rather than flushing a
+    // partially-written (and splittable) preamble.
+    validateResponse(response);
 
     writeStatusLine(response, outputStream);
 
@@ -646,7 +662,7 @@ public final class HTTPTools {
       }
     }
 
-    for (var cookie : cookies) {
+    for (var cookie : response.getCookies()) {
       outputStream.write(HTTPValues.HeaderBytes.SetCookie);
       outputStream.write(HTTPValues.ControlBytes.ColonSpace);
       outputStream.write(cookie.toResponseHeader().getBytes(StandardCharsets.UTF_8));

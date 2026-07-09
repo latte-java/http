@@ -27,7 +27,7 @@ public class HTTP2RawFrameTest extends BaseHTTP2RawTest {
    * <ul>
    *   <li>{@code 0x82} — index 2: {@code :method: GET}</li>
    *   <li>{@code 0x84} — index 4: {@code :path: /}</li>
-   *   <li>{@code 0x86} — index 6: {@code :scheme: https}</li>
+   *   <li>{@code 0x86} — index 6: {@code :scheme: http}</li>
    *   <li>{@code 0x41, 0x0f, ...} — literal {@code :authority: localhost}</li>
    * </ul>
    * Passing this as the HEADERS payload gives the server a decodable header block, which is required for tests
@@ -36,7 +36,7 @@ public class HTTP2RawFrameTest extends BaseHTTP2RawTest {
   private static final byte[] MINIMAL_HPACK_GET = {
       (byte) 0x82,                          // :method: GET
       (byte) 0x84,                          // :path: /
-      (byte) 0x86,                          // :scheme: https → server accepts either scheme; using literal below instead
+      (byte) 0x86,                          // :scheme: http
       // :authority: localhost (literal with indexing, name from static table index 1)
       (byte) 0x41, 0x09,
       'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'
