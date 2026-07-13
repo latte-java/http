@@ -288,7 +288,7 @@ public class MultipartTest extends BaseTest {
 
       HTTPServer server = makeServer(scheme, handler, (Instrumenter) null)
           .withInitialReadTimeout(Duration.ofSeconds(30))
-          .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(30)))
+          .withKeepAliveTimeoutDuration(Duration.ofSeconds(30))
           .withMinimumWriteThroughput(1024)
           .withMinimumReadThroughput(1024)
           // Suppress auto-Date so the byte-exact response assertions in this test stay deterministic — these tests verify

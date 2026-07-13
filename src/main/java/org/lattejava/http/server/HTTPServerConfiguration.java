@@ -49,11 +49,17 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
 
   private Instrumenter instrumenter;
 
+  private Duration keepAliveTimeoutDuration = Duration.ofSeconds(20);
+
   private int maxBytesToDrain = 256 * 1024; // 256 Kilobytes
+
+  private Duration maxConnectionAgeDuration; // null means unlimited
 
   private int maxPendingSocketConnections = 4096;
 
   private int maxRequestHeaderSize = 128 * 1024; // 128 Kilobytes
+
+  private int maxRequestsPerConnection = 100_000; // 100,000
 
   private long minimumReadThroughput = 16 * 1024; // 16 Kilobytes/second
 
@@ -136,6 +142,14 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
   }
 
   /**
+   * @return The idle timeout between requests on a persistent connection, shared by HTTP/1.1 keep-alive and the
+   *     HTTP/2 zero-stream idle deadline. Defaults to 20 seconds.
+   */
+  public Duration getKeepAliveTimeoutDuration() {
+    return keepAliveTimeoutDuration;
+  }
+
+  /**
    * @return All configured listeners (if any) or an empty list.
    */
   public List<HTTPListenerConfiguration> getListeners() {
@@ -159,6 +173,13 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public int getMaxBytesToDrain() {
     return maxBytesToDrain;
+  }
+
+  /**
+   * @return The maximum age of a connection before it is gracefully closed, or null for unlimited. Defaults to null.
+   */
+  public Duration getMaxConnectionAgeDuration() {
+    return maxConnectionAgeDuration;
   }
 
   /**
@@ -196,6 +217,13 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    */
   public int getMaxRequestHeaderSize() {
     return maxRequestHeaderSize;
+  }
+
+  /**
+   * @return The maximum number of requests handled on one connection. Defaults to 100,000.
+   */
+  public int getMaxRequestsPerConnection() {
+    return maxRequestsPerConnection;
   }
 
   /**
@@ -382,6 +410,20 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
    * {@inheritDoc}
    */
   @Override
+  public HTTPServerConfiguration withKeepAliveTimeoutDuration(Duration duration) {
+    Objects.requireNonNull(duration, "You cannot set the keep-alive timeout duration to null");
+    if (duration.isZero() || duration.isNegative()) {
+      throw new IllegalArgumentException("The keep-alive timeout duration must be grater than 0");
+    }
+
+    this.keepAliveTimeoutDuration = duration;
+    return this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
   public HTTPServerConfiguration withListener(HTTPListenerConfiguration listener) {
     Objects.requireNonNull(listener, "You cannot add a null HTTPListenerConfiguration");
     this.listeners.add(listener);
@@ -398,6 +440,19 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
       Objects.requireNonNull(listener, "You cannot add a null HTTPListenerConfiguration");
       this.listeners.add(listener);
     }
+    return this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public HTTPServerConfiguration withMaxConnectionAgeDuration(Duration duration) {
+    if (duration != null && (duration.isZero() || duration.isNegative())) {
+      throw new IllegalArgumentException("The max connection age duration must be greater than 0");
+    }
+
+    this.maxConnectionAgeDuration = duration;
     return this;
   }
 
@@ -447,6 +502,19 @@ public class HTTPServerConfiguration implements Configurable<HTTPServerConfigura
     }
 
     this.maxRequestHeaderSize = maxRequestHeaderSize;
+    return this;
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public HTTPServerConfiguration withMaxRequestsPerConnection(int maxRequestsPerConnection) {
+    if (maxRequestsPerConnection < 10) {
+      throw new IllegalArgumentException("The maximum number of requests per connection must be greater than or equal to 10");
+    }
+
+    this.maxRequestsPerConnection = maxRequestsPerConnection;
     return this;
   }
 

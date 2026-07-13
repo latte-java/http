@@ -22,6 +22,8 @@ public class HTTP2FrameReader {
 
   private final int maxHeaderListSize;
 
+  private volatile long frameStartInstant;
+
   public HTTP2FrameReader(InputStream in, byte[] buffer, int maxHeaderListSize) {
     this.in = in;
     this.buffer = buffer;
@@ -38,6 +40,14 @@ public class HTTP2FrameReader {
     byte[] dst = new byte[to - from];
     System.arraycopy(src, from, dst, 0, to - from);
     return dst;
+  }
+
+  /**
+   * @return The instant the frame currently being read started arriving, or 0 between frames. Read by the reaper
+   *     thread for the mid-frame half of the slow-reader gate.
+   */
+  public long frameStartInstant() {
+    return frameStartInstant;
   }
 
   /**
@@ -92,7 +102,17 @@ public class HTTP2FrameReader {
   }
 
   private HTTP2Frame readRawFrame() throws IOException {
-    if (in.readNBytes(buffer, 0, 9) != 9) {
+    // Stamp the mid-frame marker on the FIRST byte so the reaper and the reader loop can tell a between-frames idle
+    // (marker 0) from a mid-frame stall (marker set). A one-byte read isolates the blocking boundary; the marker is
+    // cleared once the whole raw frame is decoded. Exception paths intentionally leave it set — the connection is
+    // dying anyway.
+    int first = in.read();
+    if (first == -1) {
+      throw new EOFException("Connection closed before frame header");
+    }
+    frameStartInstant = System.currentTimeMillis();
+    buffer[0] = (byte) first;
+    if (in.readNBytes(buffer, 1, 8) != 8) {
       throw new EOFException("Connection closed before frame header");
     }
 
@@ -109,7 +129,7 @@ public class HTTP2FrameReader {
       throw new EOFException("Connection closed mid-frame; expected [" + length + "] bytes");
     }
 
-    return switch (type) {
+    HTTP2Frame frame = switch (type) {
       case FRAME_TYPE_DATA -> {
         // RFC 9113 §6.1: DATA frames may be padded.
         if ((flags & FLAG_PADDED) != 0) {
@@ -201,6 +221,10 @@ public class HTTP2FrameReader {
       }
       default -> new UnknownFrame(streamId, flags, type, copyOf(buffer, length));
     };
+
+    // The raw frame completed cleanly — clear the marker so the next blocking read is classified as between-frames.
+    frameStartInstant = 0;
+    return frame;
   }
 
   /**

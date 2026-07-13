@@ -16,9 +16,9 @@ import java.lang.System.Logger.Level;
  * {@link org.lattejava.http.server.internal.h2.HTTP2Connection}.
  * <p>
  * It implements {@link HTTPConnection} so {@link HTTPServerAcceptorThread} can register it with the reaper the instant
- * the connection is accepted — before the blocking negotiation runs. Until the delegate exists, the dispatcher reports
- * {@link HTTPConnection.State#Negotiating} so the reaper's throughput check does not evict an in-progress handshake;
- * the handshake is bounded by the socket {@code SO_TIMEOUT}.
+ * the connection is accepted — before the blocking negotiation runs. Until the delegate exists, {@link #check(long)}
+ * returns null (healthy) so the reaper's throughput check does not evict an in-progress handshake; the handshake is
+ * bounded instead by the socket {@code SO_TIMEOUT}.
  *
  * @author Brian Pontarelli
  */
@@ -50,6 +50,20 @@ public class ConnectionDispatcher implements HTTPConnection {
     this.listener = listener;
     this.throughput = throughput;
     this.startInstant = System.currentTimeMillis();
+  }
+
+  @Override
+  public EvictionReason check(long now) {
+    // Until protocol selection resolves, negotiation is bounded by the socket's initial-read SO_TIMEOUT - never
+    // reaper-evicted (the old Negotiating exemption).
+    return delegate != null ? delegate.check(now) : null;
+  }
+
+  @Override
+  public void evict(EvictionReason reason) {
+    if (delegate != null) {
+      delegate.evict(reason);
+    }
   }
 
   @Override
@@ -94,10 +108,5 @@ public class ConnectionDispatcher implements HTTPConnection {
     if (delegate != null) {
       delegate.shutdown();
     }
-  }
-
-  @Override
-  public State state() {
-    return delegate != null ? delegate.state() : State.Negotiating;
   }
 }

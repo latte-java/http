@@ -32,7 +32,9 @@ public final class HTTP2Tools {
                                               HTTP2Settings localSettings, HTTP2Settings peerSettings,
                                               int connectionWindowSize)
       throws IOException {
+    // Send the settings over to the client, but don't flush
     frameWriter.writeFrame(new HTTP2Frame.SettingsFrame(0, localSettings.toPayload()));
+
     // RFC 9113 §6.9.2 — the connection window is only adjustable via WINDOW_UPDATE, and the grant is causally
     // independent of the peer's SETTINGS, so it rides the first flight coalesced with the server preface. Go, nginx,
     // and browsers all advertise the same way.

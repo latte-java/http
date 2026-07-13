@@ -30,12 +30,10 @@ import org.lattejava.http.server.io.EmptyHTTPInputStream;
  *
  * @author Brian Pontarelli
  */
-public class HTTP1Connection implements HTTPConnection {
+public class HTTP1Connection extends BaseHTTPConnection {
   private static final System.Logger logger = System.getLogger(HTTP1Connection.class.getName());
 
   private final HTTPBuffers buffers;
-
-  private final HTTPServerConfiguration configuration;
 
   private final HTTPContext context;
 
@@ -45,15 +43,9 @@ public class HTTP1Connection implements HTTPConnection {
 
   private final HTTPListenerConfiguration listener;
 
-  private final Socket socket;
-
-  private final long startInstant;
-
-  private final Throughput throughput;
-
   private long handledRequests;
 
-  private volatile HTTPConnection.State state;
+  private volatile State state;
 
   public HTTP1Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput) throws IOException {
@@ -67,29 +59,29 @@ public class HTTP1Connection implements HTTPConnection {
    */
   public HTTP1Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput, PushbackInputStream inputStream) throws IOException {
-    this.socket = socket;
-    this.configuration = configuration;
+    super(configuration, socket, throughput);
     this.context = context;
     this.instrumenter = instrumenter;
     this.listener = listener;
-    this.throughput = throughput;
     this.buffers = new HTTPBuffers(configuration);
     this.inputStream = inputStream;
-    this.state = HTTPConnection.State.Read;
-    this.startInstant = System.currentTimeMillis();
+    this.state = State.Read;
     logger.log(Level.TRACE, "[{0}] Starting HTTP worker.", Thread.currentThread().threadId());
   }
 
+  @Override
+  public void evict(EvictionReason reason) {
+    // The reaper's historical behavior: a plain close. The parked worker thread surfaces a SocketException, which the
+    // run() loop already classifies as an expected close.
+    try {
+      socket.close();
+    } catch (IOException ignore) {
+    }
+  }
+
+  @Override
   public long getHandledRequests() {
     return handledRequests;
-  }
-
-  public Socket getSocket() {
-    return socket;
-  }
-
-  public long getStartInstant() {
-    return startInstant;
   }
 
   @Override
@@ -114,14 +106,14 @@ public class HTTP1Connection implements HTTPConnection {
         var throughputOutputStream = new ThroughputOutputStream(socket.getOutputStream(), throughput);
         response = new HTTPResponse();
 
-        var protocol = new HTTP1OutputProtocol(request, response, throughputOutputStream, buffers, instrumenter, () -> state = HTTPConnection.State.Write);
+        var protocol = new HTTP1OutputProtocol(request, response, throughputOutputStream, buffers, instrumenter, this::enterWritePhase);
         HTTPOutputStream outputStream = new HTTPOutputStream(configuration, request, response, protocol);
         response.setOutputStream(outputStream);
 
         // Note: this line of code will block
         // - When a client is using Keep-Alive - we will loop and block here while we wait for the client to send us bytes.
         byte[] requestBuffer = buffers.requestBuffer();
-        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, () -> state = HTTPConnection.State.Read);
+        HTTPTools.parseRequestPreamble(inputStream, configuration.getMaxRequestHeaderSize(), request, requestBuffer, this::enterReadPhase);
         if (logger.isLoggable(Level.TRACE)) {
           int availableBufferedBytes = inputStream.getAvailableBufferedBytesRemaining();
           if (availableBufferedBytes != 0) {
@@ -170,7 +162,7 @@ public class HTTP1Connection implements HTTPConnection {
         String expect = request.getHeader(HTTPValues.Headers.Expect);
         if (expect != null) {
           if (expect.equalsIgnoreCase(HTTPValues.Status.ContinueRequest)) {
-            state = HTTPConnection.State.Write;
+            enterWritePhase();
 
             boolean doContinue = handleExpectContinue(request);
             if (!doContinue) {
@@ -180,7 +172,7 @@ public class HTTP1Connection implements HTTPConnection {
             }
 
             // Otherwise, transition the state to Read
-            state = HTTPConnection.State.Read;
+            enterReadPhase();
           } else {
             closeSocketOnError(response, HTTPValues.Status.ExpectationFailed);
             return;
@@ -194,7 +186,7 @@ public class HTTP1Connection implements HTTPConnection {
         }
 
         // Transition to processing
-        state = HTTPConnection.State.Process;
+        state = State.Process;
         logger.log(Level.TRACE, "[{0}] Set state [{1}]. Call the request handler.", Thread.currentThread().threadId(), state);
         try {
           configuration.getHandler().handle(request, response);
@@ -218,7 +210,7 @@ public class HTTP1Connection implements HTTPConnection {
         }
 
         // Do this before we write the response preamble. The normal Keep-Alive check below will handle closing the socket.
-        if (handledRequests >= configuration.getHTTP1Configuration().getMaxRequestsPerConnection()) {
+        if (handledRequests >= configuration.getMaxRequestsPerConnection()) {
           logger.log(Level.TRACE, "[{0}] Maximum requests per connection has been reached. Turn off Keep-Alive.", Thread.currentThread().threadId());
           response.setHeader(HTTPValues.Headers.Connection, HTTPValues.Connections.Close);
         }
@@ -234,8 +226,8 @@ public class HTTP1Connection implements HTTPConnection {
         }
 
         // Transition to Keep-Alive state and reset the SO timeout
-        state = HTTPConnection.State.KeepAlive;
-        int soTimeout = (int) configuration.getHTTP1Configuration().getKeepAliveTimeoutDuration().toMillis();
+        state = State.KeepAlive;
+        int soTimeout = (int) configuration.getKeepAliveTimeoutDuration().toMillis();
         logger.log(Level.TRACE, "[{0}] Enter Keep-Alive state [{1}] Reset socket timeout [{2}].", Thread.currentThread().threadId(), state, soTimeout);
         socket.setSoTimeout(soTimeout);
 
@@ -267,8 +259,8 @@ public class HTTP1Connection implements HTTPConnection {
       closeSocketOnly(CloseSocketReason.Expected);
     } catch (SocketTimeoutException e) {
       // This might be a read timeout or a Keep-Alive timeout. The reason is based on the worker state.
-      CloseSocketReason reason = state == HTTPConnection.State.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
-      String message = state == HTTPConnection.State.Read ? "Initial read timeout" : "Keep-Alive expired";
+      CloseSocketReason reason = state == State.KeepAlive ? CloseSocketReason.Expected : CloseSocketReason.Unexpected;
+      String message = state == State.Read ? "Initial read timeout" : "Keep-Alive expired";
       Level level = reason == CloseSocketReason.Expected ? Level.TRACE : Level.DEBUG;
       logger.log(level, "[{0}] Closing socket [{1}]. {2}.", Thread.currentThread().threadId(), state, message);
       closeSocketOnly(reason);
@@ -321,8 +313,23 @@ public class HTTP1Connection implements HTTPConnection {
   }
 
   @Override
-  public HTTPConnection.State state() {
-    return state;
+  protected long lastProgressInstant() {
+    return throughput.lastUsed();
+  }
+
+  @Override
+  protected boolean processing() {
+    return state == State.Process;
+  }
+
+  @Override
+  protected boolean readingRequest() {
+    return state == State.Read;
+  }
+
+  @Override
+  protected boolean writingResponse() {
+    return state == State.Write;
   }
 
   private void closeSocketOnError(HTTPResponse response, int status) {
@@ -393,6 +400,32 @@ public class HTTP1Connection implements HTTPConnection {
     }
   }
 
+  /**
+   * Transitions the worker into its read phase and, on the transition (not on a repeat), starts a fresh read-throughput
+   * epoch so the slow-reader floor measures only the current request. Invoked from the worker thread by the preamble
+   * parser's read observer and the Expect/continue path, so the guarded reset happens exactly once per read phase even
+   * though the observer may fire on more than one read.
+   */
+  private void enterReadPhase() {
+    if (state != State.Read) {
+      throughput.resetRead();
+      state = State.Read;
+    }
+  }
+
+  /**
+   * Transitions the worker into its write phase and, on the transition, starts a fresh write-throughput epoch. Invoked
+   * from the worker thread by the output protocol's write observer, which fires on every write, so the guard resets the
+   * epoch once - at the point the first response byte is produced, before the socket buffer fills - and never discards
+   * a response already in flight.
+   */
+  private void enterWritePhase() {
+    if (state != State.Write) {
+      throughput.resetWrite();
+      state = State.Write;
+    }
+  }
+
   private boolean handleExpectContinue(HTTPRequest request) throws IOException {
     var expectResponse = new HTTPResponse();
     configuration.getHTTP1Configuration().getExpectValidator().validate(request, expectResponse);
@@ -433,5 +466,17 @@ public class HTTP1Connection implements HTTPConnection {
   private enum CloseSocketReason {
     Expected,
     Unexpected
+  }
+
+  /**
+   * The worker's lifecycle phase, mapped onto the {@link BaseHTTPConnection} liveness gates. {@code KeepAlive} opens no
+   * gate — an idle keep-alive socket is never reaper-evicted; its expiry is governed by the socket-level
+   * {@code SO_TIMEOUT} the worker sets when it enters this phase.
+   */
+  private enum State {
+    KeepAlive,
+    Process,
+    Read,
+    Write
   }
 }

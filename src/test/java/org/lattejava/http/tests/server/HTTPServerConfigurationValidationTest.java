@@ -7,16 +7,71 @@ package org.lattejava.http.tests.server;
 import module java.base;
 import module org.lattejava.http;
 
+import java.time.Duration;
+
 import org.lattejava.http.io.MultipartConfiguration;
 import org.lattejava.http.io.MultipartFileUploadPolicy;
 import org.lattejava.http.server.HTTPListenerConfiguration;
 import org.lattejava.http.server.HTTPServer;
+import org.lattejava.http.server.HTTPServerConfiguration;
 import org.testng.annotations.Test;
 
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.expectThrows;
 
 public class HTTPServerConfigurationValidationTest {
+  @Test
+  public void keepAliveTimeout_defaults_to_20_seconds() {
+    assertEquals(new HTTPServerConfiguration().getKeepAliveTimeoutDuration(), Duration.ofSeconds(20));
+  }
+
+  @Test
+  public void keepAliveTimeout_rejects_null() {
+    expectThrows(NullPointerException.class, () -> new HTTPServerConfiguration().withKeepAliveTimeoutDuration(null));
+  }
+
+  @Test
+  public void keepAliveTimeout_rejects_zero() {
+    expectThrows(IllegalArgumentException.class, () -> new HTTPServerConfiguration().withKeepAliveTimeoutDuration(Duration.ZERO));
+  }
+
+  @Test
+  public void keepAliveTimeout_round_trips() {
+    assertEquals(new HTTPServerConfiguration().withKeepAliveTimeoutDuration(Duration.ofSeconds(30)).getKeepAliveTimeoutDuration(), Duration.ofSeconds(30));
+  }
+
+  @Test
+  public void maxConnectionAge_defaults_to_null() {
+    assertNull(new HTTPServerConfiguration().getMaxConnectionAgeDuration());
+  }
+
+  @Test
+  public void maxConnectionAge_rejects_zero() {
+    expectThrows(IllegalArgumentException.class, () -> new HTTPServerConfiguration().withMaxConnectionAgeDuration(Duration.ZERO));
+  }
+
+  @Test
+  public void maxConnectionAge_round_trips() {
+    assertEquals(new HTTPServerConfiguration().withMaxConnectionAgeDuration(Duration.ofMinutes(5)).getMaxConnectionAgeDuration(), Duration.ofMinutes(5));
+  }
+
+  @Test
+  public void maxRequestsPerConnection_defaults_to_100_000() {
+    assertEquals(new HTTPServerConfiguration().getMaxRequestsPerConnection(), 100_000);
+  }
+
+  @Test
+  public void maxRequestsPerConnection_rejects_small_value() {
+    expectThrows(IllegalArgumentException.class, () -> new HTTPServerConfiguration().withMaxRequestsPerConnection(9));
+  }
+
+  @Test
+  public void maxRequestsPerConnection_round_trips() {
+    assertEquals(new HTTPServerConfiguration().withMaxRequestsPerConnection(50_000).getMaxRequestsPerConnection(), 50_000);
+  }
+
   @Test
   public void start_skips_validation_when_file_uploads_rejected() throws Exception {
     HTTPServer server = new HTTPServer()

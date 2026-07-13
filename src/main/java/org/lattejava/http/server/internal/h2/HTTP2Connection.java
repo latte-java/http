@@ -31,12 +31,10 @@ import org.lattejava.http.server.internal.*;
  *
  * @author Daniel DeGroff
  */
-public class HTTP2Connection implements HTTPConnection, Runnable {
+public class HTTP2Connection extends BaseHTTPConnection implements Runnable {
   private static final System.Logger logger = System.getLogger(HTTP2Connection.class.getName());
 
   private final HTTPBuffers buffers;
-
-  private final HTTPServerConfiguration configuration;
 
   // Connection-level send window (RFC 9113 §6.9). Shared by every per-stream writer; replenished by the reader thread
   // on a stream-0 WINDOW_UPDATE. Starts at the HTTP/2 default of 65535 octets.
@@ -65,13 +63,22 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
 
   private final HTTP2RateLimitsTracker rateLimits;
 
-  private final Socket socket;
+  // Set once the connection enters graceful drain: either a client GOAWAY arrived with streams still in flight, or the
+  // maxRequestsPerConnection bound was reached. While true, HTTP2HeaderFrameHandler refuses new streams with
+  // REFUSED_STREAM; the dispatch loop exits when the roster empties.
+  private volatile boolean draining;
 
-  private final long startInstant;
-
-  private final Throughput throughput;
+  private volatile boolean evicting;
 
   private volatile boolean goawaySent;
+
+  // Instant of the last stream-addressed inbound frame (streamId != 0). Stream-0 traffic (PING, SETTINGS,
+  // WINDOW_UPDATE) intentionally does NOT advance this: it proves the transport works but never extends a lifetime
+  // clock, so drip-fed pings cannot hold a wedged connection as a zombie.
+  private volatile long lastStreamFrameInstant;
+
+  // The frame reader, promoted from a run()-local to a field so check() can observe the mid-frame marker.
+  private volatile HTTP2FrameReader reader;
 
   // Reader thread handle, captured at the top of run() so the writer thread can interrupt it when it dies.
   private volatile Thread readerThread;
@@ -79,40 +86,56 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   // The stream roster. Null until after the SETTINGS exchange; shutdown() and goAway() use a null-guard snapshot.
   private volatile HTTP2StreamRegistry registry;
 
-  private volatile HTTPConnection.State state = HTTPConnection.State.Read;
-
   // The outbound writer: owns the frame queue and the virtual thread that serializes frames to the socket. Built after
   // the SETTINGS exchange in run(); volatile because shutdown() reads it from the acceptor thread.
   private volatile HTTP2WriterThread writer;
 
   public HTTP2Connection(Socket socket, HTTPServerConfiguration configuration, HTTPContext context, Instrumenter instrumenter,
                          HTTPListenerConfiguration listener, Throughput throughput, InputStream inputStream) throws IOException {
-    this.socket = socket;
-    this.configuration = configuration;
+    super(configuration, socket, throughput);
     this.context = context;
     this.instrumenter = instrumenter;
     this.listener = listener;
-    this.throughput = throughput;
     this.inputStream = inputStream;
     this.buffers = new HTTPBuffers(configuration);
     this.localSettings = HTTP2Settings.fromConfiguration(configuration.getHTTP2Configuration(), configuration.getMaxRequestHeaderSize());
     this.rateLimits = new HTTP2RateLimitsTracker(configuration.getHTTP2Configuration().getRateLimits());
-    this.startInstant = System.currentTimeMillis();
+  }
+
+  @Override
+  public void evict(EvictionReason reason) {
+    if (evicting) {
+      return;
+    }
+    evicting = true;
+
+    // Never block the reaper: a 0ms enqueue attempt, then a short-lived virtual thread flushes the GOAWAY and closes.
+    // The parked reader wakes with a SocketException, which run() classifies as a DEBUG lifecycle event. MaxAge is a
+    // graceful GOAWAY(NO_ERROR); every slow/timeout reason is GOAWAY(ENHANCE_YOUR_CALM).
+    HTTP2WriterThread w = writer;
+    HTTP2ErrorCode code = reason == EvictionReason.MaxAge ? HTTP2ErrorCode.NO_ERROR : HTTP2ErrorCode.ENHANCE_YOUR_CALM;
+    Thread.ofVirtual().name("h2-evict").start(() -> {
+      if (w != null) {
+        HTTP2StreamRegistry r = registry;
+        int lastStreamId = r != null ? r.highestSeenStreamId() : 0;
+        try {
+          w.tryEnqueue(new HTTP2Frame.GoawayFrame(lastStreamId, code.value, new byte[0]), 0, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ignore) {
+          Thread.currentThread().interrupt();
+        }
+        w.requestStop();
+        w.join(Duration.ofSeconds(1));
+      }
+      try {
+        socket.close();
+      } catch (IOException ignore) {
+      }
+    });
   }
 
   @Override
   public long getHandledRequests() {
     return handledRequests.get();
-  }
-
-  @Override
-  public Socket getSocket() {
-    return socket;
-  }
-
-  @Override
-  public long getStartInstant() {
-    return startInstant;
   }
 
   @Override
@@ -134,7 +157,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       buffers.ensureFrameWriteCapacity(localSettings.maxFrameSize());
 
       var frameWriter = new HTTP2FrameWriter(out, buffers.frameWriteBuffer());
-      var reader = new HTTP2FrameReader(inputStream, buffers.frameReadBuffer(), localSettings.maxHeaderListSize());
+      reader = new HTTP2FrameReader(inputStream, buffers.frameReadBuffer(), localSettings.maxHeaderListSize());
 
       // Perform the SETTINGS exchange. The client connection preface was already read and validated by ProtocolSelector.
       // The connection-window advertisement rides the same first flight as our SETTINGS (RFC 9113 §6.9.2).
@@ -171,7 +194,7 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       HPACKEncoder encoder = new HPACKEncoder(new HPACKDynamicTable(peerSettings.headerTableSize()));
 
       var headerHandler = new HTTP2HeaderFrameHandler(configuration, connectionSendWindow, context, decoder, encoder,
-          handledRequests, handlerThreads, instrumenter, listener, peerSettings, socket, writer);
+          handledRequests, handlerThreads, instrumenter, listener, peerSettings, socket, writer, () -> draining);
       var handlers = new HTTP2StreamFrameHandlers(
           connectionFlowControl,
           new HTTP2DataFrameHandler(configuration.getHTTP2Configuration(), localSettings, writer),
@@ -183,15 +206,51 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
       try {
         frames:
         while (true) {
-          state = HTTPConnection.State.Read;
           if (writer.isClosed()) {
             logger.log(Level.DEBUG, "Writer thread closed; reader exiting");
             break;
           }
 
+          // Keep-alive management (design section 4.2). With live streams the timeout is flat; with zero streams it
+          // is the REMAINING idle budget, recomputed every iteration, so no cadence of stream-0 frames (which reset
+          // the kernel timer byte-by-byte) can postpone the deadline.
+          long keepAliveMillis = configuration.getKeepAliveTimeoutDuration().toMillis();
+          long emptySince = registry.emptySince();
+          if (emptySince == 0) {
+            socket.setSoTimeout((int) Math.min(keepAliveMillis, Integer.MAX_VALUE));
+          } else {
+            long remaining = keepAliveMillis - (System.currentTimeMillis() - emptySince);
+            if (remaining <= 0) {
+              idleExpire();
+              return;
+            }
+            socket.setSoTimeout((int) Math.min(remaining, Integer.MAX_VALUE));
+          }
+
+          // Read-epoch reset (design section 6, rising-edge rule): because check() is gate-only, the reader resets the
+          // read epoch in real time. When the read gate is closed (no request side open — between frames the mid-frame
+          // marker is necessarily clear) the next blocking read begins a fresh read phase, so its first byte lands in a
+          // fresh epoch. Repeated resets across idle iterations are harmless (the counters are already empty); resetting
+          // while the gate is OPEN would wipe an in-flight phase, so we do not.
+          if (!registry.anyRequestSideOpen()) {
+            throughput.resetRead();
+          }
+
           HTTP2Frame frame;
           try {
             frame = reader.readFrame(); // HEADERS arrives as one complete, assembled header block
+          } catch (SocketTimeoutException e) {
+            if (reader.frameStartInstant() != 0) {
+              // Mid-frame silence for the whole budget: partial bytes are consumed, the stream cannot be resumed.
+              logger.log(Level.DEBUG, "Closing HTTP/2 connection: mid-frame stall");
+              goAway(HTTP2ErrorCode.ENHANCE_YOUR_CALM);
+              return;
+            }
+            if (registry.emptySince() != 0) {
+              idleExpire();
+              return;
+            }
+            continue; // Live streams, clean frame boundary: a quiet client awaiting responses (long-poll). Keep reading.
           } catch (HTTP2FrameReader.FrameSizeException e) {
             goAway(HTTP2ErrorCode.FRAME_SIZE_ERROR); // §4.2
             break;
@@ -203,8 +262,23 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
             break;
           }
 
+          if (frame.streamId() != 0) {
+            lastStreamFrameInstant = System.currentTimeMillis();
+          }
+
+          // Write-epoch reset (design section 6, rising-edge rule): snapshot the write gate before dispatch; if a
+          // response phase just began (the gate went from closed to open — a completed request just entered
+          // HALF_CLOSED_REMOTE) start a fresh write epoch. Overlapping responses share the epoch (leniency is
+          // acceptable); resetting while the gate was already open would wipe an in-flight phase, so we only reset on
+          // the rising edge.
+          boolean writeGateWasOpen = registry.anyResponsePending();
+
           HTTP2FrameHandler handler = frame.streamId() == 0 ? connectionFrameHandler : registry.lookup(frame.streamId());
           HTTP2Result result = handler.handleFrame(frame);
+
+          if (!writeGateWasOpen && registry.anyResponsePending()) {
+            throughput.resetWrite();
+          }
 
           switch (result) {
             case HTTP2Result.Ok ignored -> {
@@ -215,10 +289,37 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
               break frames;
             }
             case HTTP2Result.Shutdown ignored -> {
-              return; // Peer GOAWAY — drain and exit.
+              if (registry.liveStreams().isEmpty()) {
+                return; // Peer GOAWAY with nothing in flight — exit now.
+              }
+              draining = true; // Serve what is open; refuse new streams; exit when the roster empties.
             }
           }
+
+          // Drain completion (client GOAWAY) and the request-count bound (design section 4.8). The Nth request is
+          // served; the GOAWAY announces no more will be accepted; draining mode refuses stragglers.
+          if (draining && registry.liveStreams().isEmpty()) {
+            return;
+          }
+          if (!draining && handledRequests.get() >= configuration.getMaxRequestsPerConnection()) {
+            logger.log(Level.DEBUG, "Reached maxRequestsPerConnection [{0}]; draining with GOAWAY(NO_ERROR)",
+                configuration.getMaxRequestsPerConnection());
+            goAway(HTTP2ErrorCode.NO_ERROR);
+            draining = true;
+          }
         }
+      } catch (EOFException e) {
+        // The client closed (or half-closed) without a GOAWAY. Common and clean — no GOAWAY back; the peer is gone.
+        logger.log(Level.DEBUG, "HTTP/2 client closed the connection without GOAWAY: [{0}]", e.getMessage());
+      } catch (SocketTimeoutException e) {
+        // Safety net only: the reader loop consumes SO_TIMEOUT itself (idle expiry, mid-frame stall). Reaching here
+        // means a timeout escaped the loop's own handling — treat it as a quiet teardown.
+        logger.log(Level.DEBUG, "HTTP/2 connection timed out waiting for frames");
+      } catch (SocketException | SSLException e) {
+        // Local close (eviction, server shutdown) or TLS teardown — a lifecycle event, not a server bug.
+        logger.log(Level.DEBUG, "HTTP/2 connection closed: [{0}]", e.getMessage());
+      } catch (IOException e) {
+        logger.log(Level.DEBUG, "HTTP/2 connection ended", e);
       } catch (Throwable t) {
         logger.log(Level.ERROR, "Unhandled exception in HTTP/2 reader; emitting GOAWAY(INTERNAL_ERROR)", t);
         goAway(HTTP2ErrorCode.INTERNAL_ERROR);
@@ -287,8 +388,29 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
   }
 
   @Override
-  public HTTPConnection.State state() {
-    return state;
+  protected long lastProgressInstant() {
+    // Both scalars are 0 only before any stream exists; processing() is false then, so the guard never divides by an
+    // empty history. Once a stream opens, its HEADERS set lastStreamFrameInstant.
+    return Math.max(lastStreamFrameInstant, throughput.lastWroteInstant());
+  }
+
+  @Override
+  protected boolean processing() {
+    HTTP2StreamRegistry r = registry;
+    return r != null && r.emptySince() == 0;
+  }
+
+  @Override
+  protected boolean readingRequest() {
+    HTTP2FrameReader fr = reader;
+    HTTP2StreamRegistry r = registry;
+    return (fr != null && fr.frameStartInstant() != 0) || (r != null && r.anyRequestSideOpen());
+  }
+
+  @Override
+  protected boolean writingResponse() {
+    HTTP2StreamRegistry r = registry;
+    return r != null && r.anyResponsePending();
   }
 
   private void goAway(HTTP2ErrorCode code) {
@@ -301,6 +423,11 @@ public class HTTP2Connection implements HTTPConnection, Runnable {
     HTTP2StreamRegistry r = registry;
     int lastStreamId = r != null ? r.highestSeenStreamId() : 0;
     writer.enqueueOrCloseWriter(new HTTP2Frame.GoawayFrame(lastStreamId, code.value, new byte[0]));
+  }
+
+  private void idleExpire() {
+    logger.log(Level.DEBUG, "Idle keep-alive expired; closing with GOAWAY(NO_ERROR)");
+    goAway(HTTP2ErrorCode.NO_ERROR);
   }
 
   /**

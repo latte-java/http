@@ -323,7 +323,7 @@ public class CoreTest extends BaseTest {
       res.setStatus(200);
     };
 
-    try (var ignore = makeServer("http", handler).withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(1))).start()) {
+    try (var ignore = makeServer("http", handler).withKeepAliveTimeoutDuration(Duration.ofSeconds(1)).start()) {
       URI uri = makeURI("http", "");
       var response = new RESTClient<>(Void.TYPE, Void.TYPE)
           .url(uri.toString())
@@ -355,9 +355,10 @@ public class CoreTest extends BaseTest {
   }
 
   /**
-   * Regression: when HTTP1Connection.state() collapses its private {@code KeepAlive} state into {@code State.Read}, the
-   * ConnectionReaperThread applies its slow-reader throughput check to idle keep-alive sockets and evicts them after
-   * one cleaner cycle. A long-lived keep-alive socket whose first request finishes quickly accumulates a tiny number of
+   * Regression: if HTTP1Connection collapsed its private {@code KeepAlive} state into {@code State.Read}, its
+   * {@code readingRequest()} gate would stay open on an idle keep-alive socket and the ConnectionReaperThread would
+   * apply its slow-reader throughput check and evict it after one cleaner cycle. A long-lived keep-alive socket whose
+   * first request finishes quickly accumulates a tiny number of
    * bytes over a now-long elapsed time, which computes below any reasonable minimum-throughput threshold. This test
    * sends one request, idles past two cleaner cycles, then sends a second request on the same raw socket — proving the
    * server did NOT evict the connection.
@@ -369,7 +370,7 @@ public class CoreTest extends BaseTest {
       res.setContentLength(0L);
     };
     try (var ignore = makeServer("http", handler)
-        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(60)))
+        .withKeepAliveTimeoutDuration(Duration.ofSeconds(60))
         .start()) {
       try (var sock = new java.net.Socket("127.0.0.1", 4242)) {
         sock.setSoTimeout(15_000);
@@ -409,8 +410,8 @@ public class CoreTest extends BaseTest {
 
     HTTPHandler handler = (_, res) -> res.setStatus(200);
     try (var ignore = makeServer("http", handler)
-        .withHTTP1(h1 -> h1.withMaxRequestsPerConnection(maxRequests)
-                           .withKeepAliveTimeoutDuration(Duration.ofSeconds(60)))
+        .withMaxRequestsPerConnection(maxRequests)
+        .withKeepAliveTimeoutDuration(Duration.ofSeconds(60))
         .start();
          var client = makeClient("http", null)) {
 
@@ -814,7 +815,7 @@ public class CoreTest extends BaseTest {
         // - Increase other timeouts to be certain we are testing the correct one.
         .withProcessingTimeoutDuration(Duration.ofSeconds(1))
         .withInitialReadTimeout(Duration.ofSeconds(30))
-        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(Duration.ofSeconds(30)))
+        .withKeepAliveTimeoutDuration(Duration.ofSeconds(30))
         .start();
 
          // Open a socket to the server and begin writing.

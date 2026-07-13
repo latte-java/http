@@ -65,8 +65,9 @@ public class HTTP2HandlerDelegate implements Runnable {
 
       configuration.getHandler().handle(request, response);
 
-      // Ensure the output is closed even if the handler did not call out.close() explicitly.
-      response.getOutputStream().close();
+      // Ensure the output is closed even if the handler did not call out.close() explicitly. This call handles the cases
+      // where a Writer is used versus the OutputStream directly.
+      response.close();
 
       try {
         stream.applyEvent(HTTP2Stream.Event.SEND_DATA_END_STREAM);
@@ -93,7 +94,7 @@ public class HTTP2HandlerDelegate implements Runnable {
         response.setStatus(e.getStatus());
         var errorProtocol = new HTTP2OutputProtocol(response, stream, encoder, writer, connectionSendWindow, peerSettings);
         response.setOutputStream(new HTTPOutputStream(configuration, request, response, errorProtocol));
-        response.getOutputStream().close();
+        response.close();
       } catch (Exception writeEx) {
         logger.log(Level.DEBUG, MessageFormat.format("Failed to write error response for stream [{0}]", stream.streamId()), writeEx);
       }

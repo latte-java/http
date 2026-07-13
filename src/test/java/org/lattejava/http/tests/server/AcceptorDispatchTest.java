@@ -54,8 +54,9 @@ public class AcceptorDispatchTest extends BaseTest {
   @Test(groups = "timeouts")
   public void negotiatingConnectionSurvivesReaperCycles() throws Exception {
     // Large SO_TIMEOUT (20s) so the handshake itself will not time out during the test window. The reaper cycles every
-    // ~2s with a 200 KB/s minimum read throughput. If a negotiating connection were reported as Read, the reaper would
-    // measure ~0 bytes/s and close it on the first cycle (~2-3s). With State.Negotiating it must stay open.
+    // ~2s with a 200 KB/s minimum read throughput. If a negotiating connection were reaper-checked as a reader, it
+    // would measure ~0 bytes/s and be evicted on the first cycle (~2-3s). While the delegate is null the dispatcher's
+    // check() returns null (healthy), so it must stay open.
     HTTPServer server = startTLSServer(Duration.ofSeconds(20));
     Socket staller = null;
     try {
@@ -85,7 +86,7 @@ public class AcceptorDispatchTest extends BaseTest {
     HTTPServer server = new HTTPServer()
         .withHandler((req, res) -> res.setStatus(200))
         .withInitialReadTimeout(initialReadTimeout)
-        .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout))
+        .withKeepAliveTimeoutDuration(ServerTimeout)
         .withProcessingTimeoutDuration(ServerTimeout)
         .withMinimumReadThroughput(200 * 1024)
         .withMinimumWriteThroughput(200 * 1024)

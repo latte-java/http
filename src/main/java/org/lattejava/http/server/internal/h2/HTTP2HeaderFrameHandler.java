@@ -31,6 +31,8 @@ public class HTTP2HeaderFrameHandler {
 
   private final HPACKDecoder decoder;
 
+  private final BooleanSupplier draining;
+
   private final HPACKEncoder encoder;
 
   private final AtomicLong handledRequests;
@@ -51,11 +53,12 @@ public class HTTP2HeaderFrameHandler {
                                  HTTPContext context, HPACKDecoder decoder, HPACKEncoder encoder,
                                  AtomicLong handledRequests, Set<Thread> handlerThreads, Instrumenter instrumenter,
                                  HTTPListenerConfiguration listener, HTTP2Settings peerSettings,
-                                 Socket socket, HTTP2WriterThread writer) {
+                                 Socket socket, HTTP2WriterThread writer, BooleanSupplier draining) {
     this.configuration = configuration;
     this.connectionSendWindow = connectionSendWindow;
     this.context = context;
     this.decoder = decoder;
+    this.draining = draining;
     this.encoder = encoder;
     this.handledRequests = handledRequests;
     this.handlerThreads = handlerThreads;
@@ -67,6 +70,18 @@ public class HTTP2HeaderFrameHandler {
   }
 
   public HTTP2Result handleNewStream(HTTP2Stream stream, HTTP2Frame.HeadersFrame f) {
+    if (draining.getAsBoolean()) {
+      // RFC 9113 §4.3 requires decoding every header block to keep the HPACK dynamic table synchronized, even for a
+      // refused stream. The stream must not be registered at all while draining, so this refusal precedes stream.open().
+      try {
+        decoder.decode(f.data());
+      } catch (IOException e) {
+        return new HTTP2Result.ConnectionError(HTTP2ErrorCode.COMPRESSION_ERROR);
+      }
+      logger.log(Level.DEBUG, "Refusing stream [{0}] — connection is draining", stream.streamId());
+      return new HTTP2Result.StreamError(stream.streamId(), HTTP2ErrorCode.REFUSED_STREAM);
+    }
+
     boolean opened = stream.open();
 
     List<HPACKDynamicTable.HeaderField> fields;

@@ -30,10 +30,42 @@ public class HTTP2StreamRegistry {
 
   private final Deque<Integer> recentlyClosed = new ArrayDeque<>(MAX_RECENTLY_CLOSED + 1);
 
+  // The instant the roster last became empty (or the registry's construction), or 0 while streams are live. Volatile,
+  // updated on open/close/remove and read by the idle-budget loop and the reaper. A benign race with a concurrent
+  // close is acceptable — both readers are advisory.
+  private volatile long emptySince;
+
   public HTTP2StreamRegistry(HTTP2Settings localSettings, HTTP2Settings peerSettings, HTTP2StreamFrameHandlers handlers) {
     this.localSettings = localSettings;
     this.peerSettings = peerSettings;
     this.handlers = handlers;
+    this.emptySince = System.currentTimeMillis();
+  }
+
+  /**
+   * @return True when any live stream's request side is still open (the client has not sent END_STREAM or been
+   *     reset) - the client owes us bytes.
+   */
+  public boolean anyRequestSideOpen() {
+    for (HTTP2Stream stream : openStreams.values()) {
+      HTTP2Stream.State s = stream.state();
+      if (s == HTTP2Stream.State.OPEN || s == HTTP2Stream.State.HALF_CLOSED_LOCAL) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * @return True when any live stream has a completed request awaiting or receiving its response.
+   */
+  public boolean anyResponsePending() {
+    for (HTTP2Stream stream : openStreams.values()) {
+      if (stream.state() == HTTP2Stream.State.HALF_CLOSED_REMOTE) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -42,6 +74,9 @@ public class HTTP2StreamRegistry {
    */
   public void close(int streamId) {
     openStreams.remove(streamId);
+    if (openStreams.isEmpty()) {
+      emptySince = System.currentTimeMillis();
+    }
     synchronized (recentlyClosed) {
       // Idempotent: the send path releases the slot when END_STREAM is enqueued and the handler-thread cleanup runs
       // afterward as the fallback for the still-open-client-half path, so a stream can be closed twice.
@@ -53,6 +88,14 @@ public class HTTP2StreamRegistry {
         recentlyClosed.removeFirst();
       }
     }
+  }
+
+  /**
+   * @return The instant the roster last became empty (or the registry's construction), or 0 while streams are live.
+   *     Approximate under concurrent close - the readers are advisory (idle budget, reaper).
+   */
+  public long emptySince() {
+    return emptySince;
   }
 
   public int highestSeenStreamId() {
@@ -101,6 +144,7 @@ public class HTTP2StreamRegistry {
       return false;
     }
     openStreams.put(streamId, stream);
+    emptySince = 0;
 
     return true;
   }
@@ -110,6 +154,9 @@ public class HTTP2StreamRegistry {
    */
   public void remove(int streamId) {
     openStreams.remove(streamId);
+    if (openStreams.isEmpty()) {
+      emptySince = System.currentTimeMillis();
+    }
   }
 
   private HTTP2Stream materialize(int streamId, HTTP2Stream.State state, boolean remembered) {

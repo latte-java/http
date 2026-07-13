@@ -41,10 +41,6 @@ public class HTTPServerAcceptorThread extends Thread {
 
   private final HTTPListenerConfiguration listener;
 
-  private final long minimumReadThroughput;
-
-  private final long minimumWriteThroughput;
-
   private final ServerSocket socket;
 
   private volatile boolean running;
@@ -57,8 +53,6 @@ public class HTTPServerAcceptorThread extends Thread {
     this.context = context;
     this.listener = listener;
     this.instrumenter = configuration.getInstrumenter();
-    this.minimumReadThroughput = configuration.getMinimumReadThroughput();
-    this.minimumWriteThroughput = configuration.getMinimumWriteThroughput();
     this.reaperThread = new ConnectionReaperThread();
 
     if (listener.isTLS()) {
@@ -197,95 +191,21 @@ public class HTTPServerAcceptorThread extends Thread {
           }
 
           long now = System.currentTimeMillis();
-          Throughput throughput = client.throughput();
           HTTPConnection worker = client.connection();
-          HTTPConnection.State state = worker.state();
-          long workerLastUsed = throughput.lastUsed();
-          boolean readingSlow = false;
-          boolean writingSlow = false;
-          boolean timedOut = false;
-          boolean badClient = false;
-
-          // -1 means we have not yet calculated these values
-          long readThroughput = -1;
-          long writeThroughput = -1;
-
-          String badClientReason = "[" + threadId + "] Check worker in state [" + state + "]";
-          if (state == HTTPConnection.State.Read) {
-            // Here the SO_TIMEOUT set above or the Keep-Alive timeout in HTTP1Connection will dictate if the socket has timed out. This prevents slow readers
-            // or network issues where the client reads 1 byte per timeout value (i.e. 1 byte per 2 seconds or something like that)
-            readThroughput = throughput.readThroughput(now);
-            badClient = readThroughput < minimumReadThroughput;
-            readingSlow = badClient;
-            badClientReason += " readingSlow=[" + readingSlow + "] readThroughput=[" + readThroughput + "] minimumReadThroughput=[" + minimumReadThroughput + "]";
-          } else if (state == HTTPConnection.State.Write) {
-            // Check for slow clients when writing (or network issues)
-            writeThroughput = throughput.writeThroughput(now);
-            badClient = writeThroughput < minimumWriteThroughput;
-            writingSlow = badClient;
-            badClientReason += " writingSlow=[" + writingSlow + "] writeThroughput=[" + writeThroughput + "] minimumWriteThroughput=[" + minimumWriteThroughput + "]";
-          } else if (state == HTTPConnection.State.Process) {
-            // Here lastUsed was the instant the last byte was read, so we calculate distance between that and now to see if it is beyond the timeout
-            long waited = (now - workerLastUsed);
-            badClient = waited > configuration.getProcessingTimeoutDuration().toMillis();
-            timedOut = badClient;
-            badClientReason += " timedOut=[" + timedOut + "] waited=[" + waited + "] processingTimeoutDuration=[" + configuration.getProcessingTimeoutDuration().toMillis() + "]";
-          }
-
-          if (!badClient) {
-            logger.log(Level.TRACE, "[{0}] Check worker in state [{1}]", threadId, state);
+          EvictionReason reason = worker.check(now);
+          if (reason == null) {
+            logger.log(Level.TRACE, "[{0}] Worker is healthy", threadId);
             continue;
           }
 
-          // If the client was bad, debug log it.
-          logger.log(Level.DEBUG, badClientReason);
-
-          // Bad client, first things first, remove the client from the list
+          logger.log(Level.DEBUG, "[{0}] Evicting connection [{1}]. Reason [{2}]. Requests handled [{3}].",
+              threadId, worker.getSocket().getRemoteSocketAddress(), reason, worker.getHandledRequests());
           iterator.remove();
           removedClientCount++;
+          worker.evict(reason);
 
-          String message = "";
-          if (logger.isLoggable(Level.DEBUG)) {
-
-            if (readingSlow) {
-              message += String.format(" Min read throughput [%s], actual throughput [%s].", minimumReadThroughput, readThroughput);
-            }
-
-            if (writingSlow) {
-              message += String.format(" Min write throughput [%s], actual throughput [%s].", minimumWriteThroughput, writeThroughput);
-            }
-
-            if (timedOut) {
-              message += String.format(" Connection timed out while processing. Last used [%s]ms ago. Configured client timeout [%s]ms.", (now - workerLastUsed), configuration.getProcessingTimeoutDuration().toMillis());
-            }
-
-            logger.log(Level.DEBUG, "[{0}] Closing connection readingSlow=[{1}] writingSlow=[{2}] timedOut=[{3}] {4}", threadId, readingSlow, writingSlow, timedOut, message);
-            logger.log(Level.DEBUG, "[{0}] Closing client connection [{1}] due to inactivity", threadId, worker.getSocket().getRemoteSocketAddress());
-          }
-
-          if (logger.isLoggable(Level.TRACE)) {
-            StringBuilder threadDump = new StringBuilder();
-            for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
-              threadDump.append(entry.getKey()).append(" ").append(entry.getKey().getState()).append("\n");
-              for (StackTraceElement ste : entry.getValue()) {
-                threadDump.append("\tat ").append(ste).append("\n");
-              }
-              threadDump.append("\n");
-            }
-
-            logger.log(Level.TRACE, "Thread dump from server side.\n{0}", threadDump);
-          }
-
-          try {
-            var socket = worker.getSocket();
-            socket.close();
-
-            if (instrumenter != null) {
-              instrumenter.connectionClosed();
-            }
-          } catch (IOException e) {
-            // Log but ignore
-            logger.log(Level.DEBUG, MessageFormat.format("[{0}] Unable to close connection to client.", threadId), e);
+          if (instrumenter != null) {
+            instrumenter.connectionClosed();
           }
         }
 

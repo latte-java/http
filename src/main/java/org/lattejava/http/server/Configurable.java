@@ -137,6 +137,18 @@ public interface Configurable<T extends Configurable<T>> {
   }
 
   /**
+   * Sets the idle timeout between requests on a persistent connection. This value is shared by HTTP/1.1 keep-alive and
+   * the HTTP/2 zero-stream idle deadline. Defaults to 20 seconds.
+   *
+   * @param duration The duration.
+   * @return This.
+   */
+  default T withKeepAliveTimeoutDuration(Duration duration) {
+    configuration().withKeepAliveTimeoutDuration(duration);
+    return (T) this;
+  }
+
+  /**
    * Adds a listener configuration for the server. This will listen on the address and port of the listener, but
    * will share the thread pool of the server.
    *
@@ -157,6 +169,17 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withListeners(HTTPListenerConfiguration... listeners) {
     configuration().withListeners(listeners);
+    return (T) this;
+  }
+
+  /**
+   * Sets the maximum age of a connection before it is gracefully closed. Null means unlimited, which is the default.
+   *
+   * @param duration The duration, or null to disable.
+   * @return This.
+   */
+  default T withMaxConnectionAgeDuration(Duration duration) {
+    configuration().withMaxConnectionAgeDuration(duration);
     return (T) this;
   }
 
@@ -226,6 +249,18 @@ public interface Configurable<T extends Configurable<T>> {
    */
   default T withMaxRequestHeaderSize(int maxRequestHeaderSize) {
     configuration().withMaxRequestHeaderSize(maxRequestHeaderSize);
+    return (T) this;
+  }
+
+  /**
+   * Sets the maximum number of requests handled on one connection. Once this limit is reached the connection is closed.
+   * Defaults to 100,000.
+   *
+   * @param maxRequestsPerConnection The maximum request count.
+   * @return This.
+   */
+  default T withMaxRequestsPerConnection(int maxRequestsPerConnection) {
+    configuration().withMaxRequestsPerConnection(maxRequestsPerConnection);
     return (T) this;
   }
 

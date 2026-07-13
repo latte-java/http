@@ -246,8 +246,8 @@ public abstract class BaseTest {
   @SuppressWarnings("resource")
   public HTTPServer makeServer(String scheme, HTTPHandler handler, HTTPListenerConfiguration listener) {
     return new HTTPServer().withHandler(handler)
-                           .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout)
-                                              .withExpectValidator(new AlwaysContinueExpectValidator()))
+                           .withHTTP1(h1 -> h1.withExpectValidator(new AlwaysContinueExpectValidator()))
+                           .withKeepAliveTimeoutDuration(ServerTimeout)
                            .withInitialReadTimeout(ServerTimeout)
                            .withProcessingTimeoutDuration(ServerTimeout)
                            .withMinimumReadThroughput(200 * 1024)
@@ -269,8 +269,8 @@ public abstract class BaseTest {
     }
 
     return new HTTPServer().withHandler(handler)
-                           .withHTTP1(h1 -> h1.withKeepAliveTimeoutDuration(ServerTimeout)
-                                              .withExpectValidator(expectValidator != null ? expectValidator : new AlwaysContinueExpectValidator()))
+                           .withHTTP1(h1 -> h1.withExpectValidator(expectValidator != null ? expectValidator : new AlwaysContinueExpectValidator()))
+                           .withKeepAliveTimeoutDuration(ServerTimeout)
                            .withInitialReadTimeout(ServerTimeout)
                            .withProcessingTimeoutDuration(ServerTimeout)
                            .withInstrumenter(instrumenter)

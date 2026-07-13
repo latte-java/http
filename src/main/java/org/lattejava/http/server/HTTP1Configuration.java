@@ -8,7 +8,7 @@ import module java.base;
 import module org.lattejava.http;
 
 /**
- * HTTP/1.x-specific server configuration: chunked transfer-encoding buffers and limits, keep-alive behavior, and the
+ * HTTP/1.x-specific server configuration: chunked transfer-encoding buffers and limits, and the
  * {@code Expect: 100-continue} validator. Instantiated with defaults by {@link HTTPServerConfiguration} and mutated
  * through {@link HTTPServerConfiguration#withHTTP1(java.util.function.Consumer)}.
  */
@@ -18,11 +18,7 @@ public class HTTP1Configuration {
 
   private ExpectValidator expectValidator = new AlwaysContinueExpectValidator();
 
-  private Duration keepAliveTimeoutDuration = Duration.ofSeconds(20);
-
   private int maxRequestChunkSize = 1024 * 1024; // 1 Megabyte
-
-  private int maxRequestsPerConnection = 100_000; // 100,000
 
   private int maxResponseChunkSize = 16 * 1024; // 16 Kilobytes
 
@@ -42,24 +38,10 @@ public class HTTP1Configuration {
   }
 
   /**
-   * @return The idle timeout between keep-alive requests. Defaults to 20 seconds.
-   */
-  public Duration getKeepAliveTimeoutDuration() {
-    return keepAliveTimeoutDuration;
-  }
-
-  /**
    * @return The maximum size of a single chunk in a {@code chunked} request body. Defaults to 1 Megabyte.
    */
   public int getMaxRequestChunkSize() {
     return maxRequestChunkSize;
-  }
-
-  /**
-   * @return The maximum number of requests handled on one keep-alive connection. Defaults to 100,000.
-   */
-  public int getMaxRequestsPerConnection() {
-    return maxRequestsPerConnection;
   }
 
   /**
@@ -97,22 +79,6 @@ public class HTTP1Configuration {
   }
 
   /**
-   * Sets the idle timeout between keep-alive requests.
-   *
-   * @param duration The duration.
-   * @return This.
-   */
-  public HTTP1Configuration withKeepAliveTimeoutDuration(Duration duration) {
-    Objects.requireNonNull(duration, "You cannot set the keep-alive timeout duration to null");
-    if (duration.isZero() || duration.isNegative()) {
-      throw new IllegalArgumentException("The keep-alive timeout duration must be grater than 0");
-    }
-
-    this.keepAliveTimeoutDuration = duration;
-    return this;
-  }
-
-  /**
    * Sets the maximum size of a single chunk in a {@code chunked} request body.
    *
    * @param maxRequestChunkSize The maximum per-chunk size in bytes.
@@ -124,21 +90,6 @@ public class HTTP1Configuration {
     }
 
     this.maxRequestChunkSize = maxRequestChunkSize;
-    return this;
-  }
-
-  /**
-   * Sets the maximum number of requests handled on one keep-alive connection.
-   *
-   * @param maxRequestsPerConnection The maximum request count.
-   * @return This.
-   */
-  public HTTP1Configuration withMaxRequestsPerConnection(int maxRequestsPerConnection) {
-    if (maxRequestsPerConnection < 10) {
-      throw new IllegalArgumentException("The maximum number of requests per connection must be greater than or equal to 10");
-    }
-
-    this.maxRequestsPerConnection = maxRequestsPerConnection;
     return this;
   }
 

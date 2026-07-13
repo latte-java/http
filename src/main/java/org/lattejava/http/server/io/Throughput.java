@@ -54,6 +54,13 @@ public class Throughput {
   }
 
   /**
+   * @return The instant of the last write, or 0 if nothing has been written this epoch.
+   */
+  public synchronized long lastWroteInstant() {
+    return lastWroteInstant;
+  }
+
+  /**
    * Signals that some number of bytes were read from a client.
    *
    * @param numberOfBytes The number of bytes.
@@ -89,6 +96,26 @@ public class Throughput {
     // The number of bytes read in seconds
     double result = ((double) numberOfBytesRead / (double) (lastReadInstant - firstReadInstant)) * 1_000;
     return Math.round(result);
+  }
+
+  /**
+   * Starts a fresh read-side measurement epoch. Called when a connection enters a read phase so the throughput sample
+   * measures the current request rather than the connection's lifetime (an idle gap would otherwise poison the
+   * denominator and evict a healthy client).
+   */
+  public synchronized void resetRead() {
+    firstReadInstant = 0;
+    lastReadInstant = 0;
+    numberOfBytesRead = 0;
+  }
+
+  /**
+   * Starts a fresh write-side measurement epoch. Called when a connection begins writing a response.
+   */
+  public synchronized void resetWrite() {
+    firstWroteInstant = 0;
+    lastWroteInstant = 0;
+    numberOfBytesWritten = 0;
   }
 
   public synchronized long writeThroughput(long now) {

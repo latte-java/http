@@ -394,6 +394,7 @@ public class HTTPResponse {
    */
   public void setOutputStream(HTTPOutputStream outputStream) {
     this.outputStream = outputStream;
+    this.writer = null;
   }
 
   /**
